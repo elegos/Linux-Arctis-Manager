@@ -31,7 +31,7 @@ class ArctisNovaProWirelessDevice(DeviceManager):
         These settings are not been sent by the device's status messages.
         '''
 
-        self._local_config = ConfigManager.get_instance().get_config(self.get_device_vendor_id(), self.get_device_product_id()) or {
+        self._local_config = ConfigManager.get_instance().get_device_config(self.get_device_vendor_id(), self.get_device_product_id()) or {
             'wireless_mode': 0x00,  # speed
             'mic_volume': 0x0a,  # 100%
             'mic_side_tone': 0x00,  # off
@@ -43,7 +43,7 @@ class ArctisNovaProWirelessDevice(DeviceManager):
         return self._local_config
 
     def save_local_settings(self) -> None:
-        ConfigManager.get_instance().save_config(self.get_device_vendor_id(), self.get_device_product_id(), self._local_config)
+        ConfigManager.get_instance().save_device_config(self.get_device_vendor_id(), self.get_device_product_id(), self._local_config)
 
     def get_device_name(self):
         return 'Arctis Nova Pro Wireless'

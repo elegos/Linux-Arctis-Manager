@@ -1,17 +1,20 @@
+import re
 from typing import Callable, Optional
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QIcon, QCloseEvent
-from PyQt6.QtWidgets import (QFormLayout, QHBoxLayout, QLabel, QLayout,
-                             QListWidget, QMainWindow, QSlider, QStackedWidget,
+from PyQt6.QtGui import QCloseEvent, QIcon
+from PyQt6.QtWidgets import (QComboBox, QFormLayout, QHBoxLayout, QLabel,
+                             QLayout, QListWidget, QSlider, QStackedWidget,
                              QVBoxLayout, QWidget)
 
+from arctis_manager.config_manager import ConfigManager
 from arctis_manager.custom_widgets.q_toggle import QToggle
 from arctis_manager.device_manager.device_manager import DeviceManager
 from arctis_manager.device_manager.device_settings import (SliderSetting,
                                                            ToggleSetting)
 from arctis_manager.device_manager.device_status import DeviceStatus
 from arctis_manager.i18n_helpers import get_translated_menu_entries
+from arctis_manager.pactl_utils import PactlDevice, pactl_get_available_sinks
 from arctis_manager.qt_utils import get_icon_pixmap
 from arctis_manager.translations import Translations
 
@@ -40,6 +43,7 @@ class SettingsWindow(QWidget):
         # Create a list widget for sections on the left
         section_list = QListWidget()
         section_list.addItem(i18n.get_translation('sections', 'device_status'))
+        section_list.addItem(i18n.get_translation('sections', 'general_settings'))
         section_list.addItems([i18n.get_translation('sections', section) for section in sections.keys()])
         section_list.setFixedWidth(max(section_list.sizeHintForColumn(0), 200))
         section_list.currentRowChanged.connect(self.change_panel)
@@ -64,6 +68,10 @@ class SettingsWindow(QWidget):
 
         self._status_panel.setLayout(layout)
         panel_stack.addWidget(self._status_panel)
+
+        # General settings panel
+        self._general_panel = self._setup_general_settings()
+        panel_stack.addWidget(self._general_panel)
 
         # Settings panels
         for settings in sections.values():
@@ -114,7 +122,6 @@ class SettingsWindow(QWidget):
         device_name_label.setFont(font)
 
         # Main widget
-        main_widget = QWidget()
         main_layout = QVBoxLayout()
 
         # Add widgets to the layout
@@ -184,6 +191,109 @@ class SettingsWindow(QWidget):
 
         return layout
 
+    def _setup_general_settings(self) -> QWidget:
+        panel = QWidget()
+        layout = QFormLayout()
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        i18n = Translations.get_instance()
+
+        # Device switch
+        ds_widget = QWidget()
+        ds_layout = QHBoxLayout()
+        ds_widget.setLayout(ds_layout)
+        ds_widget = self.get_checkbox_configuration_widget(
+            i18n.get_translation('device_status_values', 'on_off', 'off').capitalize(),
+            i18n.get_translation('device_status_values', 'on_off', 'on').capitalize(),
+            ConfigManager.get_instance().get_general_config().get('device_switch', True),
+            self.on_device_switch_changed,
+        )
+
+        self.add_general_setting_row(layout, i18n.get_translation('general_settings', 'device_switch'),
+                                     i18n.get_translation('general_settings', 'device_switch_description'), ds_widget)
+
+        # Smart device switch
+        ds_widget = QWidget()
+        ds_layout = QHBoxLayout()
+        ds_widget.setLayout(ds_layout)
+        ds_widget = self.get_checkbox_configuration_widget(
+            i18n.get_translation('device_status_values', 'on_off', 'off').capitalize(),
+            i18n.get_translation('device_status_values', 'on_off', 'on').capitalize(),
+            ConfigManager.get_instance().get_general_config().get('smart_device_switch', True),
+            self.on_smart_device_switch_changed,
+        )
+
+        self.add_general_setting_row(layout, i18n.get_translation('general_settings', 'smart_device_switch'),
+                                     i18n.get_translation('general_settings', 'smart_device_switch_description'), ds_widget)
+
+        # Fallback device
+        fallback_device_widget = QWidget()
+        fallback_device_layout = QHBoxLayout()
+        fallback_device_widget.setLayout(fallback_device_layout)
+
+        arctis_re = re.compile(r'.*[Aa]rctis.*')
+        devices = [device for device in pactl_get_available_sinks() if not arctis_re.match(device.description)]
+        current_fallback_device_name = ConfigManager.get_instance().get_general_config().get('fallback_device')
+        if current_fallback_device_name is None:
+            self.on_fallback_device_changed(devices[0])
+            current_fallback_device_name = devices[0].description
+
+        select_box = QComboBox()
+        for device in devices:
+            select_box.addItem(device.description, device)
+            if device.description == current_fallback_device_name:
+                select_box.setCurrentText(device.description)
+        select_box.currentTextChanged.connect(lambda text: self.on_fallback_device_changed(next(device for device in devices if device.description == text)))
+        fallback_device_layout.addWidget(select_box)
+
+        self.add_general_setting_row(layout, i18n.get_translation('general_settings', 'fallback_device'),
+                                     i18n.get_translation('general_settings', 'fallback_device_description'), fallback_device_widget)
+
+        panel.setLayout(layout)
+
+        return panel
+
+    @staticmethod
+    def on_device_switch_changed(enabled: bool) -> None:
+        manager = ConfigManager.get_instance()
+        config = manager.get_general_config()
+        config['device_switch'] = enabled
+
+        manager.save_general_config(config)
+
+    @staticmethod
+    def on_smart_device_switch_changed(enabled: bool) -> None:
+        manager = ConfigManager.get_instance()
+        config = manager.get_general_config()
+        config['smart_device_switch'] = enabled
+
+        manager.save_general_config(config)
+
+    @staticmethod
+    def on_fallback_device_changed(device: PactlDevice) -> None:
+        manager = ConfigManager.get_instance()
+        config = manager.get_general_config()
+        config['fallback_device'] = device.description
+
+        manager.save_general_config(config)
+
     def closeEvent(self, event: Optional[QCloseEvent]):
         self.hide()
         event.ignore()
+
+    @staticmethod
+    def add_general_setting_row(layout: QFormLayout, name: str, description: str, action: QWidget) -> None:
+        label = QLabel(name)
+        font = label.font()
+        font.setBold(True)
+        label.setFont(font)
+
+        layout.addRow(label, action)
+
+        description_label = QLabel(description)
+        font = description_label.font()
+        font.setItalic(True)
+        description_label.setFont(font)
+        description_label.setWordWrap(True)
+
+        layout.addRow(description_label)

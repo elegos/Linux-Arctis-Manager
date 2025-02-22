@@ -1,4 +1,3 @@
-from typing import Callable
 from arctis_manager.device_manager.device_status import DeviceStatus
 from arctis_manager.translations import TranslatableText
 

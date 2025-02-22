@@ -9,10 +9,22 @@
         "battery": "Battery",
         "bluetooth": "Bluetooth",
         "device_status": "Device status",
+        "general_settings": "General settings",
         "microphone": "Microphone",
         "power_management": "Power management",
         "wireless": "Wireless",
         "wireless_mode": "Wireless mode"
+    },
+
+    "general_settings": {
+        "device_switch": "Device switch",
+        "device_switch_description": "Automatically switch to the Arctis device when it is connected. When turned off, smart device switch option will be ignored.",
+
+        "smart_device_switch": "Smart device switch",
+        "smart_device_switch_description": "If enabled, the audio device will be switched to the Arctis one only when connected and turned on (option available on switchable devices only).",
+
+        "fallback_device": "Fallback device (smart device switch)",
+        "fallback_device_description": "Select the audio device to switch to when the Arctis device is not connected. If not available for any reason, the first available one will be chosen instead."
     },
 
     "settings": {
