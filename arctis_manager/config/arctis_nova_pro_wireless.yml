@@ -1,0 +1,92 @@
+const_STATUS_REQUEST_MESSAGE: &STATUS_REQUEST_MESSAGE
+  [0x06, 0xb0]
+
+device:
+  name: Arctis Nova Pro Wireless
+  product_id: 0x12e0
+
+  # Configuration which is not preserved across device resets
+  saved_config:
+    - { name: wireless_mode,      default: 0x00 } # speed
+    - { name: mic_volume,         default: 0x0a } # 100%
+    - { name: mic_side_tone,      default: 0x00 } # off
+    - { name: mic_gain,           default: 0x02 } # high
+    - { name: mic_led_brightness, default: 0x0a } # 100%
+    - { name: pm_shutdown,        default: 0x00 } # off
+  
+  listen_endpoints:
+    - { interface: 7, direction: 'in' }
+
+  init:
+    packet_size: 64
+    packet_padder: 0x00
+    packet_padding: right
+    packets: [
+      [0x06, 0x20], [0x06, 0x20], [0x06, 0x10], [0x06, 0x10], [0x06, 0x10],
+      [0x06, 0x3b], [0x06, 0x8d, 0x01], [0x06, 0x20], [0x06, 0x20], [0x06, 0x20],
+      [0x06, 0x80], [0x06, 0x3b], [0x06, 0x8d, 0x01], [0x06, 0x33, 0x14, 0x14, 0x14],
+      [0x06, 0xc3, '@saved_config(wireless_mode)'], [0x06, 0x2e, 0x00],
+      [0x06, 0xc1, '@saved_config(pm_shutdown)'], [0x06, 0x85, 0x0a],
+      [0x06, 0x37, '@saved_config(mic_volume)'],
+      [0x06, 0xb2], [0x06, 0x47, 0x64, 0x00, 0x64], [0x06, 0x83, 0x01],
+      [0x06, 0x89, 0x00],
+      [0x06, 0x27, local_settings['mic_gain']],  # Gain (0x01: low, 0x02: high)
+      [0x06, 0xb3, 0x00],
+      [0x06, 0x39, local_settings['mic_side_tone']],  # Set the sidetone to 0 (off) -> possible values: 0 (off), 1 (low), 2 (medium), 3 (high)
+      [0x06, 0xbf, local_settings['mic_led_brightness']],  # Mute mic led brightness (out of 10)
+      [0x06, 0x43, 0x01], [0x06, 0x69, 0x00], [0x06, 0x3b, 0x00],
+      [0x06, 0x8d, 0x01], [0x06, 0x49, 0x01], [0x06, 0xb7, 0x00],
+
+      # Another series of queries (perhaps for confirmation?)
+      [0x06, 0xb7, 0x00]
+      [0x06, 0xb7, 0x00]
+      *STATUS_REQUEST_MESSAGE  # Get device status
+      [0x06, 0x20, 0x00]
+      [0x06, 0xb7, 0x00]
+    ]
+
+  read:
+    - packet_start: 0x0745
+      fields:
+        - game_mix_volume: [2, 2] # 3rd byte, 0 to 100
+        - chat_mix_volume: [3, 3] # 4th byte, 0 to 100
+    - packet_start: 0x06b0:
+      fields:
+        - bluetooth_powerup_state:
+          offset: [2, 2]
+          lambda: '"on" if value == 1 else "off"'
+        - bluetooth_auto_mute:
+          offset: [3, 3]
+          lambda: '"off" if value == o else "-12db" if value == 1 else "on"'
+        - bluetooth_power_status:
+          offset: [4, 4]
+          lambda: '"off" if value == 0 else "on"'
+        - bluetooth_connection_status:
+          offset: [5, 5]
+          lambda: '"off" if value == 0 else "connected" if value == 1 else "disconnected"'
+        - headset_battery_charge:
+          offset: [6, 6]
+          lambda: 'round(value / 8, 2)'
+        - charge_slot_battery_charge:
+          offset: [7, 7]
+          lambda: 'round(value / 8, 2)'
+        - transparent_noise_cancelling_level:
+          offset: [8, 8]
+          lambda: 'round(value / 10, 0)'
+
+
+
+        - headset_power_status:
+          offset: [8, 8]
+          lambda: '"off" if value == 0 else "on"'
+        - noise_cancelling:
+          offset: [10, 10]
+          lambda: '"off" if value == 0 else "on"'
+        - mic_status:
+          offset: [11, 11]
+          lambda: '"off" if value == 0 else "on"'
+        - mic_led_brightness:
+          offset: [12, 12]
+          lambda: 'round(value / 8, 2)'
+        - auto_off_time_minutes:
+          offset: [13, 13]
