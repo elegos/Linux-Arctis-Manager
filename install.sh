@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 if [ -z "${PREFIX}" ]; then
-    install_prefix=/usr/local
+    install_prefix=/usr
 else
     install_prefix=${PREFIX}
 fi
