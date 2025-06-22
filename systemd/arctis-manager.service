@@ -1,20 +1,15 @@
 [Unit]
 Description=Arctis Manager
-
-Requisite=dev-steelseries-arctis.device
-After=dev-steelseries-arctis.device
-
-StartLimitIntervalSec=1m
+Requires=dev-steelseries-arctis.device graphical-session.target
+After=dev-steelseries-arctis.device graphical-session.target
+StartLimitInterval=1min
 StartLimitBurst=5
 
 [Service]
-Type=exec
+Type=simple
 ExecStart=arctis-manager
 Restart=on-failure
 RestartSec=1
 
 [Install]
-WantedBy=dev-steelseries-arctis.device
 WantedBy=graphical-session.target
-Requisite=graphical-session.target
-After=graphical-session.target
