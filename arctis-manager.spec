@@ -12,8 +12,8 @@ hiddenimports += collect_submodules('arctis_manager.devices')
 
 python_ver_p = subprocess.run('python --version', shell=True, check=True, stdout=subprocess.PIPE)
 python_ver = '.'.join(python_ver_p.stdout.decode('utf-8').replace('Python ', '').split('.')[0:2])
-which_python_p = subprocess.run('which python', shell=True, check=True, stdout=subprocess.PIPE)
-pyqt6_path = Path(which_python_p.stdout.decode('utf-8')).parent.parent.joinpath('lib64', f'python{python_ver}', 'site-packages', 'PyQt6', 'Qt6')
+site_packages_p = subprocess.run('python3 -c "import sysconfig; print(sysconfig.get_path(\'purelib\'))"', shell=True, check=True, stdout=subprocess.PIPE)
+pyqt6_path = Path(site_packages_p.stdout.decode('utf-8')).parent.parent.parent.joinpath('lib64', f'python{python_ver}', 'site-packages', 'PyQt6', 'Qt6')
 
 print(str(pyqt6_path))
 
