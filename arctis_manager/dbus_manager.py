@@ -19,6 +19,12 @@ class ArctisManagerInterface(ServiceInterface):
     def show_settings(self):
         self.systray_app.open_settings_window()
 
+    @method('GetHeadsetBatteryCharge')
+    def get_headset_battery_charge(self) -> "x":
+        if self.systray_app.last_device_status is None or self.systray_app.last_device_status.headset_battery_charge is None:
+            return 0
+        return int(self.systray_app.last_device_status.headset_battery_charge * 100)
+
 
 class DBusManager:
     log: logging.Logger

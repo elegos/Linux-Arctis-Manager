@@ -2,7 +2,7 @@ import locale
 import logging
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from PyQt6 import QtSvg
 from PyQt6.QtCore import Qt
@@ -23,6 +23,7 @@ class SystrayApp:
     app: QApplication
     tray_icon: QSystemTrayIcon
     menu: QMenu
+    last_device_status: Optional[DeviceStatus] = None
 
     def get_systray_icon_pixmap(self, path: Path) -> QPixmap:
         brush_color = QApplication.palette().color(QPalette.ColorRole.Text)
@@ -119,9 +120,9 @@ class SystrayApp:
             self.menu.addSeparator()
 
         self._device_manager = device_manager
-        self._device_status = status
+        self.last_device_status = status
 
-        if len(device_manager.get_configurable_settings(self._device_status).keys()) > 0:
+        if len(device_manager.get_configurable_settings(self.last_device_status).keys()) > 0:
             if not '_settings' in self._menu_actions:
                 self._menu_actions['_settings'] = QAction(Translations.get_instance().get_translation('app.settings_label'))
                 self._menu_actions['_settings'].triggered.connect(self.open_settings_window)
@@ -136,14 +137,14 @@ class SystrayApp:
 
         # Update values in (opened) settings window
         if hasattr(self, '_settings_window'):
-            self._settings_window.update_status(self._device_status)
+            self._settings_window.update_status(self.last_device_status)
 
     def open_settings_window(self):
         if hasattr(self, '_settings_window') and self._settings_window.isVisible():
             self._settings_window.raise_()
             return
 
-        self._settings_window = SettingsWindow(self._device_manager, self._device_status)
+        self._settings_window = SettingsWindow(self._device_manager, self.last_device_status)
         self._settings_window.setWindowFlags(Qt.WindowType.Window)
 
         self._settings_window.show()
