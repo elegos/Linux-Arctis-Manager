@@ -35,15 +35,15 @@ mkdir -p %{buildroot}
 
 # execute the install script (with chroot feature)
 export CHROOT=%{buildroot}
-export PREFIX="/usr/local"
+export PREFIX="/usr"
 bash install.sh
 
 %files
 /usr/lib/udev/rules.d/91-steelseries-arctis.rules
 /usr/lib/systemd/user/arctis-manager.service
-/usr/local/bin/arctis-manager
-/usr/local/bin/arctis-manager-launcher
-/usr/local/share/applications/ArctisManager.desktop
+/usr/bin/arctis-manager
+/usr/bin/arctis-manager-launcher
+/usr/share/applications/ArctisManager.desktop
 /usr/share/icons/hicolor/scalable/apps/arctis_manager.svg
 
 %changelog
