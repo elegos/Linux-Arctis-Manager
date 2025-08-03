@@ -24,4 +24,9 @@ KERNEL=="event*", SUBSYSTEM=="input", SUBSYSTEMS=="usb", ATTRS{idProduct}=="12e0
 SUBSYSTEM=="usb", ATTRS{idVendor}=="1038", ATTRS{idProduct}=="12e5", MODE="0666"
 KERNEL=="event*", SUBSYSTEM=="input", SUBSYSTEMS=="usb", ATTRS{idProduct}=="12e5", ATTRS{idVendor}=="1038", TAG+="symlink", SYMLINK+="steelseries/arctis", TAG+="systemd"
 
+# Arctis Nova 4P Wireless
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1038", ATTRS{idProduct}=="12f2", MODE="0666"
+KERNEL=="event*", SUBSYSTEM=="input", SUBSYSTEMS=="usb", ATTRS{idProduct}=="12f2", ATTRS{idVendor}=="1038", TAG+="symlink", SYMLINK+="steelseries/arctis", TAG+="systemd"
+
+
 LABEL="local_end"
