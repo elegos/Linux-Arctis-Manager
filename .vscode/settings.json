@@ -1,0 +1,6 @@
+{
+    "files.insertFinalNewline": true,
+    "python.analysis.extraPaths": [
+        "src"
+    ]
+}
