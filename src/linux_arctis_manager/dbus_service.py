@@ -36,18 +36,19 @@ class DbusManager:
     async def start(self):
         self.log.info("Initializing D-Bus service...")
 
-        device_manager = PulseAudioManager.get_instance()
-        device_manager.sinks_setup()
+        self.device_manager = PulseAudioManager.get_instance()
+        self.device_manager.sinks_setup()
         
         bus = await MessageBus().connect()
-        interface = ArctisManagerDbusService(device_manager)
+        interface = ArctisManagerDbusService(self.device_manager)
         bus.export(DBUS_INTERFACE_PATH, interface)
         await bus.request_name(DBUS_MESSAGE_BUS_NAME)
 
+    async def wait_for_stop(self) -> None:
         while not getattr(self, '_stopping', False):
             await asyncio.sleep(1)
         
-        device_manager.sinks_teardown()
+        self.device_manager.sinks_teardown()
 
     def stop(self):
         self.log.info("Stopping D-Bus service...")

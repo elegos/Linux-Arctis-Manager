@@ -2,5 +2,7 @@
     "files.insertFinalNewline": true,
     "python.analysis.extraPaths": [
         "src"
-    ]
+    ],
+    "python.testing.pytestEnabled": true,
+    "python.testing.unittestEnabled": false
 }
