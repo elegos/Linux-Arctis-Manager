@@ -6,7 +6,7 @@ from linux_arctis_manager.config import ConfigSetting, DeviceConfiguration, Padd
 
 
 def test_config_parse():
-    config_path = Path(__file__).parent.parent / 'src' / 'config' / 'nova_pro_wireless.yaml'
+    config_path = Path(__file__).parent.parent / 'src' / 'devices' / 'nova_pro_wireless.yaml'
     yaml = YAML(typ='safe')
     config_yaml = yaml.load(config_path)
     config = DeviceConfiguration(config_yaml)
