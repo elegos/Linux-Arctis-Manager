@@ -1,4 +1,5 @@
 device:
+  name: SteelSeries Arctis Pro Wireless
   vendor_id: 0x1038
   product_ids:
     - 0x12e0 # SteelSeries Arctis Pro Wireless

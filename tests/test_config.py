@@ -11,6 +11,7 @@ def test_config_parse():
     config_yaml = yaml.load(config_path)
     config = DeviceConfiguration(config_yaml)
 
+    assert config.name == "SteelSeries Arctis Pro Wireless"
     assert config.vendor_id == 0x1038
     assert config.product_ids == [0x12e0, 0x12e5]
 
