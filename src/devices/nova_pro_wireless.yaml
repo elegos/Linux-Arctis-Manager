@@ -7,6 +7,10 @@ device:
     length: 64
     position: end
     filler: 0x00
+
+  command_interface_index: 7
+  listen_interface_indexes: [7]
+
   device_init:
     - [0x06, 0x20]
     - [0x06, 0x20]
