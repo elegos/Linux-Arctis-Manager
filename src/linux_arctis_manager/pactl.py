@@ -23,8 +23,8 @@ class PulseAudioManager:
         self.logger = logging.getLogger('PulseAudioManager')
     
     def get_arctis_sinks(self, mode: int = ALL_SINKS) -> list[pulsectl.PulseSinkInfo]:
-        sinks: list[pulsectl.PulseSinkInfo]|pulsectl.PulseSinkInfo = self.pulse.sink_list()
-        sinks = sinks if type(sinks) is list else [sinks]
+        sinks: list[pulsectl.PulseSinkInfo] = self.pulse.sink_list()
+        sinks = sinks if type(sinks) is list else [sinks] # pyright: ignore[reportAssignmentType]
 
         physical = [s for s in sinks if s.proplist.get('device.vendor.id', '') == STEELSERIES_VENDOR_ID]
         virtual = [s for s in sinks if s.proplist.get('node.name', '') in (PULSE_MEDIA_NODE_NAME, PULSE_CHAT_NODE_NAME)]
@@ -65,9 +65,7 @@ class PulseAudioManager:
         self.logger.info(f'Removing virtual sink "{name}"...')
         modules = self.pulse.module_list()
         for module in modules:
-            if module.argument and f'sink_name={name}' in module.argument:
-                self.pulse.module_unload(module.index)
-            if module.argument and f'sink={name}' in module.argument:
+            if module.argument and name in module.argument:
                 self.pulse.module_unload(module.index)
 
     def sinks_setup(self):
