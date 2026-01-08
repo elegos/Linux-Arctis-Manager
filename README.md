@@ -70,11 +70,11 @@ device:
       mic_volume:              # Setting's name
         type: slider           # Setting's type
         default: 0x0a          # Setting's default value
-        min: 0x01
-        max: 0x0a
-        step: 1
-        min_label: mic_muted
-        max_label: perc_100
+        min: 0x01              # Type-specific parameter
+        max: 0x0a              # Type-specific parameter
+        step: 1                # Type-specific parameter
+        min_label: mic_muted   # Type-specific parameter
+        max_label: perc_100    # Type-specific parameter
     another_section:
       another_setting:
         type: ...
