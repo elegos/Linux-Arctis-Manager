@@ -28,7 +28,7 @@ Simply add a new device configuration file in `~/.config/arctis_manager/devices/
 
 ```yaml
 device:
-  name: Friendly name # for example: SteelSeries Arctis Pro Wireless
+  name: Friendly name # for example: SteelSeries Arctis Nova Pro Wireless
   vendor_id: 0x1038 # Should always be 0x1038, but double check via lsusb
   product_ids: [0x1234] # At least one identifier. Multiple identifiers might apply for different SKUs
   command_padding: # This defines the command's message length and the filler. Typically 64 bytes zero-padded.

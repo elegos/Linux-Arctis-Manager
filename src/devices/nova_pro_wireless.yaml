@@ -1,9 +1,9 @@
 device:
-  name: SteelSeries Arctis Pro Wireless
+  name: SteelSeries Arctis Nova Pro Wireless
   vendor_id: 0x1038
   product_ids:
-    - 0x12e0 # SteelSeries Arctis Pro Wireless
-    - 0x12e5 # SteelSeries Arctis Pro Wireless X
+    - 0x12e0 # SteelSeries Arctis Nova Pro Wireless
+    - 0x12e5 # SteelSeries Arctis Nova Pro Wireless X
   command_padding:
     length: 64
     position: end
