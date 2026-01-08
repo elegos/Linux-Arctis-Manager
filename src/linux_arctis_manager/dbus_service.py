@@ -5,16 +5,18 @@ from dbus_next.aio.message_bus import MessageBus
 from dbus_next.service import ServiceInterface, method
 
 from linux_arctis_manager.constants import DBUS_INTERFACE_PATH, DBUS_MESSAGE_BUS_NAME
-from linux_arctis_manager.pactl import PulseAudioManager
+from linux_arctis_manager.core import CoreEngine
 
 class ArctisManagerDbusService(ServiceInterface):
-    def __init__(self, device_manager: PulseAudioManager):
+    def __init__(self, core: CoreEngine):
         super().__init__(DBUS_MESSAGE_BUS_NAME)
-        self.device_manager = device_manager
+        self.core_engine = core
 
-    @method('Ping')
-    def ping(self) -> 's': # type: ignore
-        return 'Pong'
+    @method('ReloadConfigs')
+    def reload_configs(self) -> 'b': # type: ignore
+        self.core_engine.reload_device_configurations()
+
+        return True
 
 
 class DbusManager:
@@ -33,22 +35,23 @@ class DbusManager:
     def setup_sinks(self):
         pass
     
-    async def start(self):
-        self.log.info("Initializing D-Bus service...")
+    async def start(self, core_engine: CoreEngine):
+        self.log.info("Initializing service...")
 
-        self.device_manager = PulseAudioManager.get_instance()
-        self.device_manager.sinks_setup()
-        
+        self.core_engine = core_engine
+
         bus = await MessageBus().connect()
-        interface = ArctisManagerDbusService(self.device_manager)
+        interface = ArctisManagerDbusService(self.core_engine)
         bus.export(DBUS_INTERFACE_PATH, interface)
+
         await bus.request_name(DBUS_MESSAGE_BUS_NAME)
 
     async def wait_for_stop(self) -> None:
         while not getattr(self, '_stopping', False):
             await asyncio.sleep(1)
         
-        self.device_manager.sinks_teardown()
+        self.core_engine.stop()
+        self.core_engine.teardown()
 
     def stop(self):
         self.log.info("Stopping D-Bus service...")

@@ -14,4 +14,6 @@ STEELSERIES_VENDOR_ID = '0x1038'
 DEVICES_CONFIG_FOLDER = [
     Path.home() / '.config' / 'arctis_manager' / 'devices',
     Path(PREFIX) / 'arctis_manager' / 'devices',
+
+    Path(__file__).parent.parent / 'devices',
 ]

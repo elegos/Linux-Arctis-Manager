@@ -89,6 +89,7 @@ device:
         step: 1
         min_label: mic_muted
         max_label: perc_100
+        default: 0x0a # 100%
       mic_side_tone:
         type: slider
         min: 0x00
@@ -96,6 +97,7 @@ device:
         step: 1
         min_label: off
         max_label: high
+        default: 0x00 # off
       mic_led_brightness:
         type: slider
         min: 0x01
@@ -103,6 +105,7 @@ device:
         step: 1
         min_label: perc_10
         max_label: perc_100
+        default: 0x0a # 100%
       mic_gain:
         type: toggle
         values:
@@ -110,6 +113,7 @@ device:
           on: 0x01
           off_label: high
           on_label: low
+        default: 0x02 # high
     power_management:
       pm_shutdown:
         type: slider
@@ -118,6 +122,7 @@ device:
         step: 1
         min_label: never
         max_label: 60_minutes
+        default: 0x05 # 30 minutes
     wireless:
       wireless_mode:
         type: toggle
@@ -126,6 +131,7 @@ device:
           on: 0x01
           off_label: range
           on_label: speed
+        default: 0x01 # speed
 
   status_parse:
     station_volume:

@@ -3,14 +3,17 @@ import logging
 import signal
 from types import FrameType
 
+from linux_arctis_manager.core import CoreEngine
 from linux_arctis_manager.dbus_service import DbusManager
 
 
 async def main():
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.INFO, format='[%(levelname)7s] %(name)20s: %(message)s')
 
     dbus_manager = DbusManager.getInstance()
-    await dbus_manager.start()
+    core_engine = CoreEngine()
+    await dbus_manager.start(core_engine)
+    core_engine.start()
 
     await dbus_manager.wait_for_stop()
 

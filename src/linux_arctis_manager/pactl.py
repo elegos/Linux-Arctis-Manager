@@ -1,4 +1,5 @@
 import logging
+import time
 import pulsectl
 
 from linux_arctis_manager.constants import PULSE_CHAT_NODE_NAME, PULSE_MEDIA_NODE_NAME, STEELSERIES_VENDOR_ID
@@ -67,16 +68,31 @@ class PulseAudioManager:
         for module in modules:
             if module.argument and name in module.argument:
                 self.pulse.module_unload(module.index)
+    
+    def wait_for_physical_device(self, vendor_id: int, product_id: int, attempts: int = 10) -> bool:
+        vendor_id_hex = f'0x{vendor_id:04x}'
+        product_id_hex = f'0x{product_id:04x}'
 
-    def sinks_setup(self):
+        while attempts > 0:
+            for sink in self.get_arctis_sinks(ONLY_PHYSICAL):
+                if sink.proplist.get('device.vendor.id', '') == vendor_id_hex and sink.proplist.get('device.product.id', '') == product_id_hex:
+                    return True
+            attempts -= 1
+            time.sleep(1)
+        
+        self.logger.error(f'Failed to find SteelSeries Arctis device {vendor_id:04x}:{product_id:04x} after {attempts} attempts')
+
+        return False
+
+    def sinks_setup(self, device_name: str):
         real_sink = self.get_arctis_sinks(ONLY_PHYSICAL)
 
         if not real_sink:
             self.logger.warning('No SteelSeries Arctis sink found.')
             return
         
-        self.create_virtual_sink(PULSE_MEDIA_NODE_NAME, 'Arctis Media', real_sink[0].name)
-        self.create_virtual_sink(PULSE_CHAT_NODE_NAME, 'Arctis Chat', real_sink[0].name)
+        self.create_virtual_sink(PULSE_MEDIA_NODE_NAME, f'{device_name} Media', real_sink[0].name)
+        self.create_virtual_sink(PULSE_CHAT_NODE_NAME, f'{device_name} Chat', real_sink[0].name)
 
     def sinks_teardown(self):
         self.logger.info('Removing virtual sinks...')
