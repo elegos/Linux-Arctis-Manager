@@ -5,7 +5,7 @@ from usb.core import Device
 
 from linux_arctis_manager.config import DeviceConfiguration, load_device_configurations
 from linux_arctis_manager.device_settings import DeviceSettings
-from linux_arctis_manager.pactl import ONLY_PHYSICAL, PulseAudioManager
+from linux_arctis_manager.pactl import PulseAudioManager
 from linux_arctis_manager.usb_devices_monitor import USBDevicesMonitor
 
 
