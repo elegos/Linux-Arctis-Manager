@@ -52,15 +52,17 @@ class ConfigStatusResponseMapping:
 class ConfigSetting:
     name: str
     type: SettingType
+    default_value: int|str|None
 
-    def __init__(self, name: str, type: SettingType, **kwargs: dict[str, Any]):
+    def __init__(self, name: str, type: SettingType, default_value: int|str|None, **kwargs: dict[str, Any]):
         self.name = name
         self.type = type
+        self.default_value = default_value
         for key, value in kwargs.items():
             setattr(self, key, value)
     
     def get_kwargs(self) -> dict[str, Any]:
-        return { k: v for k, v in self.__dict__.items() if k not in ['name', 'type'] }
+        return { k: v for k, v in self.__dict__.items() if k not in ['name', 'type', 'default_value'] }
 
 @dataclass
 class ConfigPadding:
@@ -153,10 +155,13 @@ class DeviceConfiguration:
             self.settings[setting_section] = []
             for setting_name, setting_values in settings.items():
                 setting_type = SettingType(setting_values.get('type', ''))
+                setting_default_value = setting_values.get('default', None)
+
                 self.settings[setting_section].append(ConfigSetting(
                     name=setting_name,
                     type=setting_type,
-                    **{k: v for k, v in setting_values.items() if k != 'type'},
+                    default_value=setting_default_value,
+                    **{k: v for k, v in setting_values.items() if k not in ['default', 'type']},
                 ))
 
 def load_device_configurations() -> list[DeviceConfiguration]:
@@ -165,6 +170,9 @@ def load_device_configurations() -> list[DeviceConfiguration]:
 
     logger = logging.getLogger('Configuration')
     logger.info('Loading device configurations...')
+    logger.info('Searching configuration files in:')
+    for config_path in DEVICES_CONFIG_FOLDER:
+        logger.info(f'\t- {config_path}')
 
     for config_path in DEVICES_CONFIG_FOLDER:
         if not config_path.exists() or not config_path.is_dir():

@@ -69,6 +69,7 @@ def test_config_parse():
     assert mic_gain is not None
     assert mic_gain.name == 'mic_gain'
     assert mic_gain.type == SettingType.TOGGLE
+    assert mic_gain.default_value == 0x02
     mic_gain_kwargs = mic_gain.get_kwargs()
     assert len(mic_gain_kwargs) == 1
     assert mic_gain_kwargs['values'] == {'off': 0x00, 'on': 0x01, 'off_label': 'high', 'on_label': 'low'}
