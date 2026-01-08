@@ -24,7 +24,9 @@ A replacement for SteelSeries GG software, to manage your Arctis device on Linux
 
 ### Add a new configuration (no code)
 
-Simply add a new device configuration file in `~/.config/arctis_manager/devices/`. Device configuration files are in the YAML file format, as follows:
+Simply add a new device configuration file in `~/.config/arctis_manager/devices/`. Once the configuration is completed locally, a new ticket can be raised to add it to the application's defaults.
+
+Device configuration files are in the YAML file format, as follows:
 
 ```yaml
 device:
