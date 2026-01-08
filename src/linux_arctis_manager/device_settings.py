@@ -10,7 +10,7 @@ class DeviceSettings:
     vendor_id: int
     product_id: int
 
-    settings: dict[str, int|str|None]
+    settings: dict[str, int]
 
     def __init__(self, vendor_id: int, product_id: int):
         self.vendor_id = vendor_id
@@ -37,7 +37,10 @@ class DeviceSettings:
 
             return
 
-        self.settings[name] = value
+        self.settings[name] = int(value)
+    
+    def get(self, name: str, default: int = 0) -> int:
+        return self.settings.get(name, default)
 
     def write_to_file(self):
         settings_file = self._settings_file()

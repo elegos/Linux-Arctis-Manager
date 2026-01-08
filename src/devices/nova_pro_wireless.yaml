@@ -9,8 +9,8 @@ device:
     position: end
     filler: 0x00
 
-  command_interface_index: 7
-  listen_interface_indexes: [7]
+  command_interface_index: [4, 0] # bInterfaceNumber, bAlternateSetting
+  listen_interface_indexes: [4] # bInterfaceNumber
 
   device_init:
     - [0x06, 0x20]

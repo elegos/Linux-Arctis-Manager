@@ -15,8 +15,8 @@ def test_config_parse():
     assert config.vendor_id == 0x1038
     assert config.product_ids == [0x12e0, 0x12e5]
 
-    assert config.command_interface_index == 7
-    assert config.listen_interface_indexes == [7]
+    assert config.command_interface_index == [4, 0]
+    assert config.listen_interface_indexes == [4]
     
     assert config.command_padding.length == 64
     assert config.command_padding.position == PaddingPosition.END

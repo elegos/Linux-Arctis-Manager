@@ -90,7 +90,7 @@ class DeviceConfiguration:
     name: str
     vendor_id: int
     product_ids: list[int]
-    command_interface_index: int
+    command_interface_index: tuple[int, int]
     listen_interface_indexes: list[int]
     command_padding: ConfigPadding
     device_init: list[list[int|str]] | None
@@ -106,7 +106,7 @@ class DeviceConfiguration:
         self.name = raw_config.get('name', '')
         self.vendor_id = raw_config.get('vendor_id', 0)
         self.product_ids = raw_config.get('product_ids', [])
-        self.command_interface_index = raw_config.get('command_interface_index', -1)
+        self.command_interface_index = raw_config.get('command_interface_index', (-1, -1))
         self.listen_interface_indexes = raw_config.get('listen_interface_indexes', [])
 
         if not self.name:
@@ -115,8 +115,8 @@ class DeviceConfiguration:
             raise ValueError("Invalid configuration: 'device.vendor_id' must be specified and non-zero")
         if not self.product_ids:
             raise ValueError("Invalid configuration: 'device.product_ids' must be a non-empty list")
-        if not self.command_interface_index >= 0:
-            raise ValueError("Invalid configuration: 'device.command_interface_index' must be a non-negative integer")
+        if not self.command_interface_index[0] >= 0 or not self.command_interface_index[1] >= 0:
+            raise ValueError("Invalid configuration: 'device.command_interface_index' must represent [bInterfaceNumber and bAlternateSetting]")
         if not self.listen_interface_indexes:
             raise ValueError("Invalid configuration: 'device.listen_interface_indexes' must be a non-empty list")
         if any(i < 0 for i in self.listen_interface_indexes):
