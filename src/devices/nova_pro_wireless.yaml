@@ -113,7 +113,7 @@ device:
           on: 0x01
           off_label: high
           on_label: low
-        default: 0x02 # high
+        default: 0x01 # high
     power_management:
       pm_shutdown:
         type: slider
@@ -129,9 +129,9 @@ device:
         values:
           off: 0x00
           on: 0x01
-          off_label: range
-          on_label: speed
-        default: 0x01 # speed
+          off_label: speed
+          on_label: range
+        default: 0x00 # speed
 
   status_parse:
     station_volume:
