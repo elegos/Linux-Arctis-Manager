@@ -19,9 +19,9 @@ def on_off(value: int, on: int, off: int) -> bool:
     return value == on
 
 @status_type("int_str_mapping")
-def int_str_mapping(mapping: dict[int, str], value: int) -> str|None:
-    return mapping.get(value, None)
+def int_str_mapping(values: dict[int, str], value: int) -> str|None:
+    return values.get(value, None)
 
 @status_type("int_int_mapping")
-def int_int_mapping(mapping: dict[int, int], value: int) -> int|None:
-    return mapping.get(value, None)
+def int_int_mapping(values: dict[int, int], value: int) -> int|None:
+    return values.get(value, None)

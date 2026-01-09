@@ -1,9 +1,11 @@
 import asyncio
+import json
 import logging
 
 from dbus_next.aio.message_bus import MessageBus
 from dbus_next.service import ServiceInterface, method
 
+from linux_arctis_manager.config import parsed_status
 from linux_arctis_manager.constants import DBUS_INTERFACE_PATH, DBUS_MESSAGE_BUS_NAME
 from linux_arctis_manager.core import CoreEngine
 
@@ -17,6 +19,10 @@ class ArctisManagerDbusService(ServiceInterface):
         self.core_engine.reload_device_configurations()
 
         return True
+
+    @method('GetStatus')
+    def get_status(self) -> 's': # type: ignore
+        return json.dumps(parsed_status(self.core_engine.device_status, self.core_engine.device_config)) if self.core_engine.device_status else ''
 
 
 class DbusManager:

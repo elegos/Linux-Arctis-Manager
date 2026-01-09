@@ -9,12 +9,28 @@ from ruamel.yaml import YAML
 from linux_arctis_manager import status_parser_fn
 from linux_arctis_manager.constants import DEVICES_CONFIG_FOLDER
 
-# TODO move elsewhere?
 status_parsers: list[Callable[..., Any]] = []
 for name, obj in inspect.getmembers(status_parser_fn, inspect.isfunction):
     if hasattr(obj, '_status_type'):
         status_parsers.append(obj)
-# TODO end TODO
+
+def parsed_status(raw_status: dict[str, int]|None, device_config: DeviceConfiguration|None) -> dict[str, Any]:
+    if raw_status is None or device_config is None:
+        return {}
+
+    result = {}
+    for key, raw_value in raw_status.items():
+        status_parse_config = next((csp for sp, csp in device_config.status_parse.items() if sp == key), None)
+        if status_parse_config is None:
+            result[key] = raw_value
+            continue
+        parser = next((p for p in status_parsers if getattr(p, '_status_type') == status_parse_config.type.value), None)
+        if parser is None:
+            result[key] = raw_value
+            continue
+        result[key] = parser(value=raw_value, **status_parse_config.init_kwargs)
+    
+    return result
 
 class PaddingPosition(Enum):
     START = 'start'
