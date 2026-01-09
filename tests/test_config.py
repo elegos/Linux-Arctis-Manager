@@ -2,7 +2,7 @@ from pathlib import Path
 
 from ruamel.yaml import YAML
 
-from linux_arctis_manager.config import ConfigSetting, DeviceConfiguration, PaddingPosition, SettingType, StatusParseType
+from linux_arctis_manager.config import ConfigSetting, ConfigStatusResponseMapping, DeviceConfiguration, PaddingPosition, SettingType, StatusParseType
 
 
 def test_config_parse():
@@ -73,3 +73,12 @@ def test_config_parse():
     mic_gain_kwargs = mic_gain.get_kwargs()
     assert len(mic_gain_kwargs) == 1
     assert mic_gain_kwargs['values'] == {'off': 0x00, 'on': 0x01, 'off_label': 'high', 'on_label': 'low'}
+
+def test_ConfigStatusResponseMapping_get_status_values():
+    mapping = ConfigStatusResponseMapping(starts_with=0x123b, status1=0x02, status2=0x03)
+    message = [0x12, 0x3b, 0x10, 0x11]
+
+    status = mapping.get_status_values(message)
+
+    assert status.get('status1', None) == 0x10
+    assert status.get('status2', None) == 0x11

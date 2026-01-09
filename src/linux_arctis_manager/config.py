@@ -44,8 +44,8 @@ class ConfigStatusResponseMapping:
         for key, value in kwargs.items():
             setattr(self, key, value)
 
-    def get_settings_values(self, raw_response: list[bytes]) -> dict[str, int]:
-        response = { k: v for k, v in self.__dict__.items() if k != 'starts_with' and v in range(len(raw_response)) }
+    def get_status_values(self, raw_response: list[int]) -> dict[str, int]:
+        response = { k: raw_response[v] for k, v in self.__dict__.items() if k != 'starts_with' and v in range(len(raw_response)) }
 
         return response
 
@@ -182,7 +182,7 @@ def load_device_configurations() -> list[DeviceConfiguration]:
             config_yaml = yaml.load(file)
             config = DeviceConfiguration(config_yaml)
 
-            logger.info(f'\t- {config.name} (0x{config.vendor_id:04x}, {[f"0x{pid:04x}" for pid in config.product_ids]}) from {file}')
+            logger.info(f'Found: {config.name} (0x{config.vendor_id:04x}, {[f"0x{pid:04x}" for pid in config.product_ids]}) from {file}')
 
             result.append(config)
 
