@@ -13,9 +13,11 @@ async def main():
     dbus_manager = DbusManager.getInstance()
     core_engine = CoreEngine()
     await dbus_manager.start(core_engine)
-    core_engine.start()
+
+    core_loop = asyncio.create_task(core_engine.start())
 
     await dbus_manager.wait_for_stop()
+    await core_loop
 
 def sigterm_handler(
         sig: int,

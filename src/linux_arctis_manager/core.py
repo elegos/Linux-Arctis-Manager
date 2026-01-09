@@ -1,5 +1,6 @@
+import asyncio
 import logging
-from typing import Any, Literal
+from typing import Any, Coroutine, Literal
 import usb
 from usb.core import Device
 
@@ -18,6 +19,8 @@ class CoreEngine:
     device_config: DeviceConfiguration | None = None
     usb_device: Device | None = None
     settings: DeviceSettings
+
+    device_status: dict[str, int]|None = None
     
     def __init__(self) -> None:
         self.logger = logging.getLogger('CoreEngine')
@@ -28,12 +31,66 @@ class CoreEngine:
         self.usb_devices_monitor.register_on_connect(self.on_device_connected)
         self.usb_devices_monitor.register_on_disconnect(self.on_device_disconnected)
     
-    def start(self):
+    def start(self) -> Coroutine:
+        self._stopping = False
         self.usb_devices_monitor.start()
+
+        return self.loop()
     
     def stop(self):
         self.logger.info("Stopping CoreEngine...")
+        self._stopping = True
         self.usb_devices_monitor.stop()
+    
+    async def listen_endpoint_loop(self, interface_id: int):
+        endpoint = self.guess_interface_endpoint('in', interface_id)
+
+        if not endpoint:
+            self.logger.warning(f'Failed to find listen interface endpoint for device: {self.usb_device.idProduct:04x}:{self.usb_device.idVendor:04x}')
+            return
+        
+        try:
+            read_input = await asyncio.to_thread(self.usb_device.read, endpoint, 64, 1)
+            if self.device_config is None:
+                return
+
+            for mapping in self.device_config.status.response_mapping:
+                starts_with = f'{mapping.starts_with:02x}'
+                if len(starts_with) % 2 != 0:
+                    starts_with = f'0{starts_with}'
+                read_hex_str = ''.join(f'{byte:02x}' for byte in read_input)
+
+                if read_hex_str.startswith(starts_with):
+                    device_status = mapping.get_status_values(read_input)
+                    self.device_status.update(device_status)
+
+                    # TODO propagate device status update?
+        except usb.core.USBError as e:
+            if e.errno == 110:
+                pass
+            pass
+        
+    
+    async def loop(self):
+        listen_coroutines: list[asyncio.Task] = []
+        tick = 0
+        while not self._stopping:
+            if not self.usb_device:
+                await asyncio.sleep(0.1)
+                continue
+
+            if self.device_config is not None:
+                listen_coroutines = [asyncio.create_task(self.listen_endpoint_loop(interface_id)) for interface_id in self.device_config.listen_interface_indexes]
+
+            if tick % 100 == 0:
+                self.request_device_status()
+            
+            tick += 1
+            tick %= 100
+
+            await asyncio.sleep(0.1)
+        
+        asyncio.gather(*listen_coroutines)
 
     def on_device_connected(self, vendor_id: int, product_id: int) -> None:
         for device_config in self.device_configurations:
@@ -86,9 +143,8 @@ class CoreEngine:
         
         self.usb_device = usb_device
         self.device_config = device_config
+        self.device_status = {}
         self.settings = DeviceSettings(self.usb_device.idVendor, self.usb_device.idProduct)
-
-        usb.util.claim_interface(self.usb_device, self.device_config.command_interface_index[0])
 
         # Load defaults
         for _, section in self.device_config.settings.items():
@@ -132,13 +188,13 @@ class CoreEngine:
         return result
     
     def get_command_endpoint_address(self):
-        endpoint = self.guess_interface_endpoint('out')
+        endpoint = self.guess_interface_endpoint('out', self.device_config.command_interface_index[0], self.device_config.command_interface_index[1])
         if endpoint is None:
             raise Exception(f"Failed to find command interface endpoint for device: {self.usb_device.idProduct:04x}:{self.usb_device.idVendor:04x}")
         
         return endpoint
 
-    def send_command(self, command: list[int], endpoint) -> None:
+    def send_command(self, command: list[int], endpoint: int) -> None:
         command_str = ''.join(f'{byte:02x}' for byte in command)
         if len(command_str) % 2 != 0:
             command_str = f'0{command_str}'
@@ -172,7 +228,7 @@ class CoreEngine:
                 self.logger.info(f"Kernel driver inactive on interface {interface}, re-attaching...")
                 usb_device.attach_kernel_driver(interface)
     
-    def guess_interface_endpoint(self, direction: Literal['in', 'out']) -> int | None:
+    def guess_interface_endpoint(self, direction: Literal['in', 'out'], interface_index: int, interface_alternate_setting: int = 0) -> int | None:
         if self.usb_device is None:
             return None
 
@@ -181,11 +237,11 @@ class CoreEngine:
         interface: usb.core.Interface|None = next((
             config
             for config in self.usb_device.get_active_configuration()
-            if config.bInterfaceNumber == self.device_config.command_interface_index[0] and config.bAlternateSetting == self.device_config.command_interface_index[1]
+            if config.bInterfaceNumber == interface_index and config.bAlternateSetting == interface_alternate_setting
         ), None)
 
         if interface is None:
-            raise Exception(f"Failed to find interface for device: {self.usb_device.idProduct:04x}:{self.usb_device.idVendor:04x} (interface: {self.device_config.command_interface_index}, alternate setting: {self.device_config.command_interface_index[1]})")
+            raise Exception(f"Failed to find interface for device: {self.usb_device.idProduct:04x}:{self.usb_device.idVendor:04x} (interface: {interface_index}, alternate setting: {interface_alternate_setting})")
 
         for endpoint in interface.endpoints():
             if usb.util.endpoint_direction(endpoint.bEndpointAddress) == directions[direction]:
@@ -193,15 +249,23 @@ class CoreEngine:
 
         return None
 
+    def request_device_status(self):
+        if not self.usb_device or not self.device_config:
+            return
+        
+        endpoint = self.get_command_endpoint_address()
+        self.send_command([self.device_config.status.request], endpoint)
+
     def teardown(self) -> None:
         self.pa_audio_manager.sinks_teardown()
         if self.usb_device:
-            usb.util.release_interface(self.usb_device, self.device_config.command_interface_index[0])
-            if self.device_config and usb.core.find(idVendor=self.device_config.vendor_id):
-                try:
+            try:
+                usb.util.release_interface(self.usb_device, self.device_config.command_interface_index[0])
+                if self.device_config and usb.core.find(idVendor=self.device_config.vendor_id):
                     self.kernel_attach(self.usb_device, self.device_config)
-                except usb.core.USBError as e:
-                    self.logger.warning(f"Error re-attaching kernel driver: {e}")
+            except usb.core.USBError as e:
+                self.logger.warning(f"Error re-attaching kernel driver: {e}")
         
         self.usb_device = None
         self.device_config = None
+        self.device_status = None
