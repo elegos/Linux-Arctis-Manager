@@ -8,6 +8,9 @@ ONLY_PHYSICAL = 1
 ONLY_VIRTUAL = 2
 ALL_SINKS = 3
 
+class TypedPulseSinkInfo(pulsectl.PulseSinkInfo):
+    name: str
+
 
 class PulseAudioManager:
     _instance: 'PulseAudioManager|None' = None
@@ -23,8 +26,8 @@ class PulseAudioManager:
         self.pulse = pulsectl.Pulse('linux-arctis-manager')
         self.logger = logging.getLogger('PulseAudioManager')
     
-    def get_arctis_sinks(self, mode: int = ALL_SINKS) -> list[pulsectl.PulseSinkInfo]:
-        sinks: list[pulsectl.PulseSinkInfo] = self.pulse.sink_list()
+    def get_arctis_sinks(self, mode: int = ALL_SINKS) -> list[TypedPulseSinkInfo]:
+        sinks: list[TypedPulseSinkInfo] = self.pulse.sink_list()
         sinks = sinks if type(sinks) is list else [sinks] # pyright: ignore[reportAssignmentType]
 
         physical = [s for s in sinks if s.proplist.get('device.vendor.id', '') == STEELSERIES_VENDOR_ID]
