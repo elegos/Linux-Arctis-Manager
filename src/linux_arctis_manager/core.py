@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Any, Coroutine, Literal
+from typing import Any, Coroutine, Literal, cast
 import usb
 from usb.core import Device
 
@@ -8,6 +8,10 @@ from linux_arctis_manager.config import DeviceConfiguration, load_device_configu
 from linux_arctis_manager.device_settings import DeviceSettings
 from linux_arctis_manager.pactl import PulseAudioManager
 from linux_arctis_manager.usb_devices_monitor import USBDevicesMonitor
+
+class TypedDevice(Device):
+    idVendor: int
+    idProduct: int
 
 
 class CoreEngine:
@@ -17,7 +21,7 @@ class CoreEngine:
     usb_devices_monitor: USBDevicesMonitor
 
     device_config: DeviceConfiguration | None = None
-    usb_device: Device | None = None
+    usb_device: TypedDevice | None = None
     settings: DeviceSettings
 
     device_status: dict[str, int]|None = None
@@ -43,6 +47,9 @@ class CoreEngine:
         self.usb_devices_monitor.stop()
     
     async def listen_endpoint_loop(self, interface_id: int):
+        if self.usb_device is None:
+            return
+
         endpoint = self.guess_interface_endpoint('in', interface_id)
 
         if not endpoint:
@@ -50,21 +57,22 @@ class CoreEngine:
             return
         
         try:
-            read_input = await asyncio.to_thread(self.usb_device.read, endpoint, 64, 1)
+            read_input: list[int] = list(await asyncio.to_thread(self.usb_device.read, endpoint, 64, 1))
             if self.device_config is None:
                 return
 
-            for mapping in self.device_config.status.response_mapping:
-                starts_with = f'{mapping.starts_with:02x}'
-                if len(starts_with) % 2 != 0:
-                    starts_with = f'0{starts_with}'
-                read_hex_str = ''.join(f'{byte:02x}' for byte in read_input)
+            if self.device_config.status is not None:
+                for mapping in self.device_config.status.response_mapping:
+                    starts_with = f'{mapping.starts_with:02x}'
+                    if len(starts_with) % 2 != 0:
+                        starts_with = f'0{starts_with}'
+                    read_hex_str = ''.join(f'{byte:02x}' for byte in read_input)
 
-                if read_hex_str.startswith(starts_with):
-                    device_status = mapping.get_status_values(read_input)
-                    self.device_status.update(device_status)
-
-                    # TODO propagate device status update?
+                    if read_hex_str.startswith(starts_with):
+                        device_status = mapping.get_status_values(read_input)
+                        if not self.device_status:
+                            self.device_status = {}
+                        self.device_status.update(device_status)
         except usb.core.USBError as e:
             if e.errno == 110:
                 pass
@@ -107,8 +115,13 @@ class CoreEngine:
         current_usb_device: Device|None = None
         for product_id in self.device_config.product_ids:
             current_usb_devices = usb.core.find(idVendor=self.device_config.vendor_id, idProduct=product_id)
-            if current_usb_devices:
-                current_usb_device = current_usb_devices if type(current_usb_devices) != list else current_usb_devices
+            if current_usb_devices is None:
+                continue
+            elif type(current_usb_devices) == Device:
+                current_usb_device = current_usb_devices
+                break
+            else:
+                current_usb_device = next((d for d in current_usb_devices if type(d) == Device), None)
 
             if current_usb_device is not None:
                 break
@@ -141,7 +154,7 @@ class CoreEngine:
             # Reset the previous device first
             self.teardown()
         
-        self.usb_device = usb_device
+        self.usb_device = cast(TypedDevice, usb_device)
         self.device_config = device_config
         self.device_status = {}
         self.settings = DeviceSettings(self.usb_device.idVendor, self.usb_device.idProduct)
@@ -188,13 +201,24 @@ class CoreEngine:
         return result
     
     def get_command_endpoint_address(self):
+        if self.device_config is None:
+            raise Exception('Device configuration is not available')
+        if self.usb_device is None:
+            raise Exception('USB device is not available')
+
         endpoint = self.guess_interface_endpoint('out', self.device_config.command_interface_index[0], self.device_config.command_interface_index[1])
         if endpoint is None:
             raise Exception(f"Failed to find command interface endpoint for device: {self.usb_device.idProduct:04x}:{self.usb_device.idVendor:04x}")
-        
+
         return endpoint
 
     def send_command(self, command: list[int], endpoint: int) -> None:
+        if self.device_config is None:
+            raise Exception('Device configuration is not available')
+    
+        if self.usb_device is None:
+            raise Exception('USB device is not available')
+
         command_str = ''.join(f'{byte:02x}' for byte in command)
         if len(command_str) % 2 != 0:
             command_str = f'0{command_str}'
@@ -210,7 +234,7 @@ class CoreEngine:
 
         self.usb_device.write(endpoint, command_lst)
 
-    def kernel_detach(self, usb_device: Device, config: DeviceConfiguration) -> None:
+    def kernel_detach(self, usb_device: TypedDevice, config: DeviceConfiguration) -> None:
         self.logger.info(f"Detaching kernel driver for device: {usb_device.idProduct:04x}:{usb_device.idVendor:04x} ({config.name})")
 
         interfaces = list(set([config.command_interface_index[0], *config.listen_interface_indexes]))
@@ -219,7 +243,7 @@ class CoreEngine:
                 self.logger.info(f"Kernel driver active on interface {interface}, detaching...")
                 usb_device.detach_kernel_driver(interface)
     
-    def kernel_attach(self, usb_device: Device, config: DeviceConfiguration) -> None:
+    def kernel_attach(self, usb_device: TypedDevice, config: DeviceConfiguration) -> None:
         self.logger.info(f"Re-attaching kernel driver for device: {usb_device.idProduct:04x}:{usb_device.idVendor:04x} ({config.name})")
 
         interfaces = list(set([config.command_interface_index[0], *config.listen_interface_indexes]))
@@ -250,7 +274,7 @@ class CoreEngine:
         return None
 
     def request_device_status(self):
-        if not self.usb_device or not self.device_config:
+        if not self.usb_device or not self.device_config or not self.device_config.status:
             return
         
         endpoint = self.get_command_endpoint_address()
@@ -260,7 +284,8 @@ class CoreEngine:
         self.pa_audio_manager.sinks_teardown()
         if self.usb_device:
             try:
-                usb.util.release_interface(self.usb_device, self.device_config.command_interface_index[0])
+                if self.device_config is not None:
+                    usb.util.release_interface(self.usb_device, self.device_config.command_interface_index[0])
                 if self.device_config and usb.core.find(idVendor=self.device_config.vendor_id):
                     self.kernel_attach(self.usb_device, self.device_config)
             except usb.core.USBError as e:
