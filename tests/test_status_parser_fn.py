@@ -18,10 +18,10 @@ def test_on_off():
     fn = on_off
     assert getattr(fn, '_status_type') == 'on_off'
 
-    assert fn(0x01, 0x01, 0) is True
-    assert fn(0, 1, 0) is False
-    assert fn(1, 1, 3) is True
-    assert fn(3, 2, 3) is False
+    assert fn(0x01, 0x01, 0) == 'on'
+    assert fn(0, 1, 0) == 'off'
+    assert fn(1, 1, 3) == 'on'
+    assert fn(3, 2, 3) == 'off'
 
 def test_int_str_mapping():
     fn = int_str_mapping
