@@ -1,7 +1,8 @@
 from pathlib import Path
 
-
 PREFIX='/usr/local'
+
+VERSION='dev'
 
 DBUS_MESSAGE_BUS_NAME = 'name.giacomofurlan.ArctisManager.Next'
 DBUS_INTERFACE_PATH = '/name/giacomofurlan/ArctisManager/Next'
