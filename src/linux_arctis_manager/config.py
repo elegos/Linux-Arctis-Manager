@@ -55,7 +55,7 @@ class ConfigStatusParser:
 class ConfigStatusResponseMapping:
     starts_with: int
 
-    def __init__(self, starts_with: int, **kwargs: dict[str, int]):
+    def __init__(self, starts_with: int, **kwargs: int):
         self.starts_with = starts_with
         for key, value in kwargs.items():
             setattr(self, key, value)
