@@ -84,6 +84,22 @@ class PulseAudioManager:
 
         return False
 
+    def set_mix(self, media_mix: int, chat_mix: int):
+        if media_mix > 100:
+            media_mix = 100
+        if chat_mix > 100:
+            chat_mix = 100
+
+        sinks = self.get_arctis_sinks(ONLY_VIRTUAL)
+
+        media = next((s for s in sinks if s.proplist.get('node.name', '') == PULSE_MEDIA_NODE_NAME), None)
+        chat = next((s for s in sinks if s.proplist.get('node.name', '') == PULSE_CHAT_NODE_NAME), None)
+
+        if media:
+            self.pulse.volume_set_all_chans(media, media_mix / 100)
+        if chat:
+            self.pulse.volume_set_all_chans(chat, chat_mix / 100)
+
     def sinks_setup(self, device_name: str):
         real_sink = self.get_arctis_sinks(ONLY_PHYSICAL)
 

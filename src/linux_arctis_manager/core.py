@@ -4,7 +4,7 @@ from typing import Any, Coroutine, Literal, cast
 import usb
 from usb.core import Device
 
-from linux_arctis_manager.config import DeviceConfiguration, load_device_configurations
+from linux_arctis_manager.config import DeviceConfiguration, load_device_configurations, parsed_status
 from linux_arctis_manager.device_settings import DeviceSettings
 from linux_arctis_manager.pactl import PulseAudioManager
 from linux_arctis_manager.usb_devices_monitor import USBDevicesMonitor
@@ -25,8 +25,14 @@ class CoreEngine:
     settings: DeviceSettings
 
     device_status: dict[str, int]|None = None
+
+    media_mix: int
+    chat_mix: int
     
     def __init__(self) -> None:
+        self.media_mix = 100
+        self.chat_mix = 100
+
         self.logger = logging.getLogger('CoreEngine')
         self.pa_audio_manager = PulseAudioManager.get_instance()
         self.usb_devices_monitor = USBDevicesMonitor.get_instance()
@@ -45,6 +51,24 @@ class CoreEngine:
         self.logger.info("Stopping CoreEngine...")
         self._stopping = True
         self.usb_devices_monitor.stop()
+
+    def manage_mix_change(self):
+        if not self.device_status or not self.device_config:
+            return
+
+        new_media_mix = self.device_status.get('media_mix', None)
+        new_chat_mix = self.device_status.get('chat_mix', None)
+
+        if new_media_mix is None or new_chat_mix is None:
+            return
+        
+        new_media_mix = parsed_status({'media_mix': new_media_mix}, self.device_config).get('media_mix', self.media_mix)
+        new_chat_mix = parsed_status({'chat_mix': new_chat_mix}, self.device_config).get('chat_mix', self.chat_mix)
+
+        if new_media_mix != self.media_mix or new_chat_mix != self.chat_mix:
+            self.media_mix = new_media_mix
+            self.chat_mix = new_chat_mix
+            self.pa_audio_manager.set_mix(self.media_mix, self.chat_mix)
     
     async def listen_endpoint_loop(self, interface_id: int):
         if self.usb_device is None:
@@ -73,6 +97,8 @@ class CoreEngine:
                         if not self.device_status:
                             self.device_status = {}
                         self.device_status.update(device_status)
+                
+                self.manage_mix_change()
 
             await asyncio.sleep(0.1)
         except usb.core.USBError as e:
