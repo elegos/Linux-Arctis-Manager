@@ -55,8 +55,8 @@ device:
         station_volume: 0x02
 
       - starts_with: 0x0745 # Message: 0x0745XXYY
-        media_mix: 0x02
-        chat_mix: 0x03
+        media_mix: 0x02     # ⚠️ media_mix is a special name for the channels mixer, it is required to use this one and not similar ones!
+        chat_mix: 0x03      # ⚠️ chat_mix is a special name for the channels mixer, it is required to use this one and not similar ones!
 
       - starts_with: 0x06b0 # Message: 0x06b0XXYYZZKK...
         bluetooth_powerup_state: 0x02
@@ -91,6 +91,8 @@ device:
     # ...
 
 ```
+
+As highlighted in the example above, `media_mix` and `chat_mix` status entries are key to the mixer management. Please avoid using different names, like `game_mix` in order to enable proper channels mixing.
 
 ### YAML's device.settings.[section].[setting] types
 
