@@ -158,8 +158,8 @@ device:
         0x02: on
     bluetooth_power_status:
       type: on_off
-      off: 0x00
-      on: 0x01
+      off: 0x01
+      on: 0x00
     bluetooth_connection:
       type: int_str_mapping
       values:
@@ -181,8 +181,8 @@ device:
     mic_status:
       type: int_str_mapping
       values:
-        0x00: muted
-        0x01: unmuted
+        0x01: muted
+        0x00: unmuted
     noise_cancelling:
       type: int_str_mapping
       values:
@@ -211,12 +211,12 @@ device:
     wireless_pairing:
       type: int_str_mapping
       values:
-        0x00: not_paired
-        0x01: paired_offline
-        0x02: connected
+        0x01: not_paired
+        0x04: paired_offline
+        0x08: connected
     headset_power_status:
       type: int_str_mapping
       values:
-        0x00: offline
-        0x01: cable_charging
-        0x02: online
+        0x01: offline
+        0x02: cable_charging
+        0x08: online
