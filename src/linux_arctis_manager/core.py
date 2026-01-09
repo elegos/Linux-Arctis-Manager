@@ -73,10 +73,11 @@ class CoreEngine:
                         if not self.device_status:
                             self.device_status = {}
                         self.device_status.update(device_status)
+
+            await asyncio.sleep(0.1)
         except usb.core.USBError as e:
-            if e.errno == 110:
-                pass
-            pass
+            if e.errno not in [16, 110]: # 16 (busy), 110 (timeout)
+                self.logger.warning('USB error: %s', e)
         
     
     async def loop(self):
@@ -95,10 +96,8 @@ class CoreEngine:
             
             tick += 1
             tick %= 100
-
-            await asyncio.sleep(0.1)
         
-        asyncio.gather(*listen_coroutines)
+            await asyncio.gather(*listen_coroutines)
 
     def on_device_connected(self, vendor_id: int, product_id: int) -> None:
         for device_config in self.device_configurations:
