@@ -24,6 +24,13 @@ class ArctisManagerDbusService(ServiceInterface):
     def get_status(self) -> 's': # type: ignore
         return json.dumps(parsed_status(self.core_engine.device_status, self.core_engine.device_config)) if self.core_engine.device_status else ''
 
+    @method('GetSettings')
+    def get_settings(self) -> 's': # type: ignore
+        settings = {'general': self.core_engine.general_settings.to_dict()}
+        if self.core_engine.device_config:
+            settings.update({'device': self.core_engine.device_settings.to_dict()})
+
+        return json.dumps(settings)
 
 class DbusManager:
     _instance: 'DbusManager|None' = None

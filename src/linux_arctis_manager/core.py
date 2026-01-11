@@ -5,7 +5,7 @@ import usb
 from usb.core import Device
 
 from linux_arctis_manager.config import DeviceConfiguration, load_device_configurations, parsed_status
-from linux_arctis_manager.device_settings import DeviceSettings
+from linux_arctis_manager.settings import DeviceSettings, GeneralSettings
 from linux_arctis_manager.pactl import PulseAudioManager
 from linux_arctis_manager.usb_devices_monitor import USBDevicesMonitor
 
@@ -22,7 +22,8 @@ class CoreEngine:
 
     device_config: DeviceConfiguration | None = None
     usb_device: TypedDevice | None = None
-    settings: DeviceSettings
+    general_settings: GeneralSettings
+    device_settings: DeviceSettings
 
     device_status: dict[str, int]|None = None
 
@@ -32,6 +33,8 @@ class CoreEngine:
     def __init__(self) -> None:
         self.media_mix = 100
         self.chat_mix = 100
+
+        self.general_settings = GeneralSettings.read_from_file()
 
         self.logger = logging.getLogger('CoreEngine')
         self.pa_audio_manager = PulseAudioManager.get_instance()
@@ -182,14 +185,14 @@ class CoreEngine:
         self.usb_device = cast(TypedDevice, usb_device)
         self.device_config = device_config
         self.device_status = {}
-        self.settings = DeviceSettings(self.usb_device.idVendor, self.usb_device.idProduct)
+        self.device_settings = DeviceSettings(self.usb_device.idVendor, self.usb_device.idProduct)
 
         # Load defaults
         for _, section in self.device_config.settings.items():
             for setting in section:
-                setattr(self.settings, setting.name, setting.default_value)
+                setattr(self.device_settings, setting.name, setting.default_value)
         # Load user settings
-        self.settings.read_from_file()
+        self.device_settings.read_from_file()
 
         if self.usb_device is not None:
             self.logger.info(f"Found device {self.usb_device.idProduct:04x}:{self.usb_device.idVendor:04x} ({self.device_config.name})")
@@ -214,7 +217,7 @@ class CoreEngine:
             elif type(byte) == str:
                 uri = byte.split('.')
                 if uri[0] == 'settings':
-                    result.append(self.settings.get(uri[1]))
+                    result.append(self.device_settings.get(uri[1]))
                 elif byte == 'status.request':
                     if self.device_config is None:
                         raise Exception(f'Device configuration is not available, skipping {byte}')
