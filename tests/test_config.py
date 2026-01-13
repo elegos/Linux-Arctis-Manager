@@ -11,7 +11,7 @@ def test_config_parse():
     config_yaml = yaml.load(config_path)
     config = DeviceConfiguration(config_yaml)
 
-    assert config.name == "SteelSeries Arctis Pro Wireless"
+    assert config.name == "SteelSeries Arctis Nova Pro Wireless"
     assert config.vendor_id == 0x1038
     assert config.product_ids == [0x12e0, 0x12e5]
 
@@ -40,7 +40,7 @@ def test_config_parse():
     assert len(config.status_parse) == 17
     assert config.status_parse.get('bluetooth_power_status') is not None
     assert config.status_parse['bluetooth_power_status'].type == StatusParseType.ON_OFF
-    assert config.status_parse['bluetooth_power_status'].init_kwargs == {'off': 0x00, 'on': 0x01}
+    assert config.status_parse['bluetooth_power_status'].init_kwargs == {'off': 0x01, 'on': 0x00}
     assert config.status_parse.get('mic_led_brightness') is not None
     assert config.status_parse['mic_led_brightness'].type == StatusParseType.PERCENTAGE
     assert config.status_parse['mic_led_brightness'].init_kwargs == {'perc_min': 0, 'perc_max': 10}
@@ -51,7 +51,7 @@ def test_config_parse():
     }}
     assert config.status_parse.get('headset_power_status') is not None
     assert config.status_parse['headset_power_status'].type == StatusParseType.INT_STR_MAPPING
-    assert config.status_parse['headset_power_status'].init_kwargs == {'values': {0x00: 'offline', 0x01: 'cable_charging', 0x02: 'online'}}
+    assert config.status_parse['headset_power_status'].init_kwargs == {'values': {0x01: 'offline', 0x02: 'cable_charging', 0x08: 'online'}}
 
     assert config.settings is not None
 
@@ -69,7 +69,7 @@ def test_config_parse():
     assert mic_gain is not None
     assert mic_gain.name == 'mic_gain'
     assert mic_gain.type == SettingType.TOGGLE
-    assert mic_gain.default_value == 0x02
+    assert mic_gain.default_value == 0x01
     mic_gain_kwargs = mic_gain.get_kwargs()
     assert len(mic_gain_kwargs) == 1
     assert mic_gain_kwargs['values'] == {'off': 0x00, 'on': 0x01, 'off_label': 'high', 'on_label': 'low'}
