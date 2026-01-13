@@ -8,6 +8,7 @@ from ruamel.yaml import YAML
 
 from linux_arctis_manager import status_parser_fn
 from linux_arctis_manager.constants import DEVICES_CONFIG_FOLDER
+from linux_arctis_manager.utils import JsonSerializable
 
 status_parsers: list[Callable[..., Any]] = []
 for name, obj in inspect.getmembers(status_parser_fn, inspect.isfunction):
@@ -39,6 +40,7 @@ class PaddingPosition(Enum):
 class SettingType(Enum):
     SLIDER = 'slider'
     TOGGLE = 'toggle'
+    SELECT = 'select'
 
 class StatusParseType(Enum):
     PERCENTAGE = 'percentage'
@@ -65,12 +67,14 @@ class ConfigStatusResponseMapping:
 
         return response
 
-class ConfigSetting:
+class ConfigSetting(JsonSerializable):
     name: str
     type: SettingType
     default_value: int|str|None
 
-    def __init__(self, name: str, type: SettingType, default_value: int|str|None, **kwargs: dict[str, Any]):
+    _js_exclude_fields = ['name']
+
+    def __init__(self, name: str, type: SettingType, default_value: int|str|None, **kwargs: Any):
         self.name = name
         self.type = type
         self.default_value = default_value
@@ -79,6 +83,9 @@ class ConfigSetting:
     
     def get_kwargs(self) -> dict[str, Any]:
         return { k: v for k, v in self.__dict__.items() if k not in ['name', 'type', 'default_value'] }
+
+    def to_dict(self) -> dict[str, Any]:
+        return { **super().to_dict(), **self.get_kwargs() }
 
 @dataclass
 class ConfigPadding:

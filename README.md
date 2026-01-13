@@ -122,6 +122,14 @@ values:
 default: 0x01     # The value set if none was before
 ```
 
+```yaml
+# Drop-downs
+type: select
+default: null
+options_source: pulse_audio_devices                        # pulse_audio_devices only for now
+options_mapping: { value: id, label: description } # Depends on options_source. "pulse_audio_devices": id and description only for now
+```
+
 ### YAML's device.status_parse.[status_name] types
 
 Linux Arctis Manager supports out of the box the following status types. Additional types need to be implemented in the code.
