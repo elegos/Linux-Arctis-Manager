@@ -7,6 +7,7 @@ A replacement for SteelSeries GG software, to manage your Arctis device on Linux
 - Enable the Media and Chat audio streams
 - Configure any device via a simple configuration file
 - Enable per-device features by adding them in the relative configuration file
+- D-Bus based communication, to support different clients (alternative clients, Plasma extensions, etc)
 
 ## 🎧 Currently supported devices
 
@@ -22,9 +23,16 @@ A replacement for SteelSeries GG software, to manage your Arctis device on Linux
 
 \*: to be developed
 
-### Add a new configuration (no code)
+### How to add support to a new device
 
-Simply add a new device configuration file in `~/.config/arctis_manager/devices/`. Once the configuration is completed locally, a new ticket can be raised to add it to the application's defaults.
+- Add a new udev rule following the same pattern of the ones already existing (`/usr/lib/udev/rules.d/91-steelseries-arctis.rules`)
+- Add a new device configuration file in `~/.config/arctis_manager/devices/`, according to the results of the reverse engineering (the temporary configuration file allows for instant device support, waiting for a software's new version to come out)
+
+In case of software limitations for any reason, some coding might be required (for example to support a new status or setting type).
+
+Once the configuration is completed locally, a new ticket can be raised to add both the new udev rules and configuration file. A pull request into the development branch is very welcome, specially if adding new code, too.
+
+### Device configuration specs
 
 Device configuration files are in the YAML file format, as follows:
 
@@ -169,3 +177,91 @@ values:
   0x02: 5
   ...
 ```
+
+### D-BUS messaging
+
+The daemon interacts with the clients (CLI, UI, etc) via D-Bus.
+
+- Bus name: "name.giacomofurlan.ArctisManager.Next"
+- Bus base path: /
+
+#### Method: GetSettings
+- **Parameters**: (none)
+- **Response format**: JSON
+- **Specs**:
+
+The response has three sections:
+- `general`: for general (cross-device) settings.
+- `device`: for device-specific settings. Will be an empty object if no device is connected.
+- `settings_config`: the definition for each setting, defining type, default_value and other arguments depending on the type. See **YAML's device.settings.[section].[setting] types**.
+
+The clients shouldn't hard-core the settings, but read them and parse them depending on the `settings_config` section.
+
+```json
+{
+    "general": {
+        "toggle_setting": 0,
+        "select_setting": null,
+        "slider_setting": 10
+    },
+    "device": {
+        "setting_a": 10,
+        "setting_b": 0,
+        "setting_c": 10
+    },
+    "settings_config": {
+        "toggle_setting": {
+            "type": "toggle",
+            "default_value": false,
+            "values": {
+                "on": true,
+                "off": false,
+                "off_label": "off",
+                "on_label": "on"
+            }
+        },
+        "select_setting": {
+            "type": "select",
+            "default_value": null,
+            "options_source": "pulse_audio_devices",
+            "options_mapping": {
+                "value": "id",
+                "label": "description"
+            }
+        },
+        "slider_setting": {
+            "type": "slider",
+            "default_value": 10,
+            "min": 1,
+            "max": 10,
+            "step": 1,
+            "min_label": "mic_muted",
+            "max_label": "perc_100"
+        },
+        "setting_a": ...,
+        "setting_b": ...,
+        "setting_c": ...
+    }
+}
+```
+#### Method: GetStatus
+
+- **Parameters**: (none)
+- **Response format**: JSON
+- **Specs**:
+
+Returns an object with the series of configured status values, in the mapped values as defined in **YAML's device.status_parse.[status_name] types**.
+
+If no device is connected, an empty string will return.
+
+```json
+{"bluetooth_powerup_state": "off", "bluetooth_auto_mute": "off", "bluetooth_power_status": "off", "bluetooth_connection": "off", "headset_battery_charge": 25, "charge_slot_battery_charge": 100, "transparent_noise_cancelling_level": 100, "mic_status": "unmuted", "noise_cancelling": "off", "mic_led_brightness": 100, "auto_off_time_minutes": 30, "wireless_mode": "speed", "wireless_pairing": "connected", "headset_power_status": "online"}
+```
+
+#### Method: ReloadConfigs
+
+- **Parameters**: (none)
+- **Response format**: JSON
+- **Specs**:
+
+Reload the configuration files, useful to test new devices support during the development phase. Return boolean (success / failure).
