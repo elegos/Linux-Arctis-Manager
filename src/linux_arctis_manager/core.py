@@ -260,7 +260,10 @@ class CoreEngine:
 
         command_lst = [int.from_bytes([int(command_str[i:i+2], 16)], 'big') for i in range(0, len(command_str), 2)]
 
-        self.usb_device.write(endpoint, command_lst)
+        try:
+            self.usb_device.write(endpoint, command_lst)
+        except usb.core.USBError as e:
+            self.logger.warning(f"Error sending command: {e}")
 
     def kernel_detach(self, usb_device: TypedDevice, config: DeviceConfiguration) -> None:
         self.logger.info(f"Detaching kernel driver for device: {usb_device.idProduct:04x}:{usb_device.idVendor:04x} ({config.name})")
