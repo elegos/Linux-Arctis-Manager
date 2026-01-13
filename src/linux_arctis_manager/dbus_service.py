@@ -1,4 +1,5 @@
 import asyncio
+import itertools
 import json
 import logging
 
@@ -26,9 +27,23 @@ class ArctisManagerDbusService(ServiceInterface):
 
     @method('GetSettings')
     def get_settings(self) -> 's': # type: ignore
-        settings = {'general': self.core_engine.general_settings.to_dict()}
+        settings = {
+            'general': self.core_engine.general_settings.to_dict(),
+            'device': {},
+            'settings_config': {
+                config.name: config.to_dict()
+                for config in self.core_engine.general_settings.settings_config
+            },
+        }
+
         if self.core_engine.device_config:
             settings.update({'device': self.core_engine.device_settings.to_dict()})
+            settings['settings_config'].update({
+                config.name: config.to_dict()
+                for config in list(itertools.chain.from_iterable(
+                    self.core_engine.device_config.settings.values()
+                ))
+            })
 
         return json.dumps(settings)
 

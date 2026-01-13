@@ -1,25 +1,11 @@
-from abc import ABC
 from pathlib import Path
 from typing import Any
 
 from ruamel.yaml import YAML
 
+from linux_arctis_manager.config import ConfigSetting, SettingType
 from linux_arctis_manager.constants import SETTINGS_FOLDER
-
-
-class JsonSerializable(ABC):
-    def to_dict(self) -> dict[str, Any]:
-        def serialize(value: Any) -> Any:
-            if isinstance(value, JsonSerializable):
-                return value.to_dict()
-            if isinstance(value, list):
-                return [serialize(item) for item in value]
-            return value
-        
-        cls = type(self)
-        fields = getattr(cls, '__annotations__', {}).keys()
-
-        return { field: serialize(getattr(self, field)) for field in fields }
+from linux_arctis_manager.utils import JsonSerializable
 
 
 class DeviceSettings(JsonSerializable):
@@ -70,12 +56,20 @@ class DeviceSettings(JsonSerializable):
 
 
 class GeneralSettings(JsonSerializable):
+    _js_exclude_fields = ['settings_config']
+
     # Automatically redirect on Media channel
     redirect_audio_on_connect: bool = False
 
     # When disconnecting, redirect to this device
     redirect_audio_on_disconnect: bool = False
     redirect_audio_on_disconnect_device: str|None = None
+
+    settings_config: list[ConfigSetting] = [
+        ConfigSetting('redirect_audio_on_connect', SettingType.TOGGLE, False, values={ 'on': True, 'off': False, 'off_label': 'off', 'on_label': 'on' }),
+        ConfigSetting('redirect_audio_on_disconnect', SettingType.TOGGLE, False, values={ 'on': True, 'off': False, 'off_label': 'off', 'on_label': 'on' }),
+        ConfigSetting('redirect_audio_on_disconnect_device', SettingType.SELECT, None, options_source='pulse_audio_devices', options_mapping={ 'value': 'id', 'label': 'description' }),
+    ]
 
     def __init__(self, **kwargs):
         for key, value in kwargs.items():
