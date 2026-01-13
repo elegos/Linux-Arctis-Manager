@@ -5,7 +5,7 @@ PREFIX='/usr/local'
 VERSION='dev'
 
 DBUS_MESSAGE_BUS_NAME = 'name.giacomofurlan.ArctisManager.Next'
-DBUS_INTERFACE_PATH = '/name/giacomofurlan/ArctisManager/Next'
+DBUS_INTERFACE_PATH = '/'
 
 PULSE_MEDIA_NODE_NAME = 'Arctis_Media'
 PULSE_CHAT_NODE_NAME = 'Arctis_Chat'
