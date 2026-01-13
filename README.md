@@ -183,9 +183,8 @@ values:
 The daemon interacts with the clients (CLI, UI, etc) via D-Bus.
 
 - Bus name: "name.giacomofurlan.ArctisManager.Next"
-- Bus base path: /
 
-#### Method: GetSettings
+#### name.giacomofurlan.ArctisManager.Next.Settings/GetSettings
 - **Parameters**: (none)
 - **Response format**: JSON
 - **Specs**:
@@ -244,7 +243,17 @@ The clients shouldn't hard-core the settings, but read them and parse them depen
     }
 }
 ```
-#### Method: GetStatus
+
+#### name.giacomofurlan.ArctisManager.Next.Settings/SetSettings
+- **Parameters**: setting: string, value: string (JSON format)
+- **Response format**: JSON
+- **Specs**:
+
+Writes the setting. Searches the setting first in the general settings and then, if not found, in the device's.
+
+Returns boolean (true: setting saved, false: setting not found / not saved)
+
+#### name.giacomofurlan.ArctisManager.Next.Status/GetStatus
 
 - **Parameters**: (none)
 - **Response format**: JSON
@@ -258,7 +267,7 @@ If no device is connected, an empty string will return.
 {"bluetooth_powerup_state": "off", "bluetooth_auto_mute": "off", "bluetooth_power_status": "off", "bluetooth_connection": "off", "headset_battery_charge": 25, "charge_slot_battery_charge": 100, "transparent_noise_cancelling_level": 100, "mic_status": "unmuted", "noise_cancelling": "off", "mic_led_brightness": 100, "auto_off_time_minutes": 30, "wireless_mode": "speed", "wireless_pairing": "connected", "headset_power_status": "online"}
 ```
 
-#### Method: ReloadConfigs
+#### Method: name.giacomofurlan.ArctisManager.Next.Config/ReloadConfigs
 
 - **Parameters**: (none)
 - **Response format**: JSON
