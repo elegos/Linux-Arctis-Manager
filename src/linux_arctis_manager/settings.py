@@ -73,7 +73,7 @@ class GeneralSettings(JsonSerializable):
 
     def __init__(self, **kwargs):
         for key, value in kwargs.items():
-            if key in self.__annotations__:
+            if key in self.__class__.__annotations__:
                 setattr(self, key, value)
 
     @staticmethod
