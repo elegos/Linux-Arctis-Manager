@@ -37,7 +37,7 @@ class ArctisManagerDbusService(ServiceInterface):
         }
 
         if self.core_engine.device_config:
-            settings.update({'device': self.core_engine.device_settings.to_dict()})
+            settings.update({'device': self.core_engine.device_settings.settings})
             settings['settings_config'].update({
                 config.name: config.to_dict()
                 for config in list(itertools.chain.from_iterable(
