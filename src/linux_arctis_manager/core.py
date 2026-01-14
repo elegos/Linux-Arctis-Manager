@@ -5,9 +5,11 @@ import usb
 from usb.core import Device
 
 from linux_arctis_manager.config import DeviceConfiguration, load_device_configurations, parsed_status
+from linux_arctis_manager.constants import PULSE_MEDIA_NODE_NAME
 from linux_arctis_manager.settings import DeviceSettings, GeneralSettings
 from linux_arctis_manager.pactl import PulseAudioManager
 from linux_arctis_manager.usb_devices_monitor import USBDevicesMonitor
+from linux_arctis_manager.utils import ObservableDict
 
 class TypedDevice(Device):
     idVendor: int
@@ -25,7 +27,7 @@ class CoreEngine:
     general_settings: GeneralSettings
     device_settings: DeviceSettings
 
-    device_status: dict[str, int]|None = None
+    device_status: ObservableDict[str, int]|None = None
 
     media_mix: int
     chat_mix: int
@@ -43,6 +45,12 @@ class CoreEngine:
         self.reload_device_configurations()
         self.usb_devices_monitor.register_on_connect(self.on_device_connected)
         self.usb_devices_monitor.register_on_disconnect(self.on_device_disconnected)
+    
+    def new_device_status(self) -> ObservableDict:
+        device_status = ObservableDict()
+        device_status.add_observer(self.on_device_status_changed)
+
+        return device_status
     
     def start(self) -> Coroutine:
         self._stopping = False
@@ -97,8 +105,8 @@ class CoreEngine:
 
                     if read_hex_str.startswith(starts_with):
                         device_status = mapping.get_status_values(read_input)
-                        if not self.device_status:
-                            self.device_status = {}
+                        if self.device_status is None:
+                            self.device_status = self.new_device_status()
                         self.device_status.update(device_status)
                 
                 self.manage_mix_change()
@@ -184,7 +192,7 @@ class CoreEngine:
         
         self.usb_device = cast(TypedDevice, usb_device)
         self.device_config = device_config
-        self.device_status = {}
+        self.device_status = self.new_device_status()
         self.device_settings = DeviceSettings(self.usb_device.idVendor, self.usb_device.idProduct)
 
         # Load defaults
@@ -211,6 +219,33 @@ class CoreEngine:
 
         self.pa_audio_manager.wait_for_physical_device(self.usb_device.idVendor, self.usb_device.idProduct)
         self.pa_audio_manager.sinks_setup(self.device_config.name)
+
+        self.redirect_to_media_sink()
+    
+    def is_device_online(self) -> bool:
+        if self.device_status is None or self.device_config is None:
+            return False
+        
+        if (online_status_config := self.device_config.online_status) is None:
+            return True
+        
+        parsed = parsed_status(self.device_status, self.device_config)
+
+        return online_status_config is None or parsed.get(online_status_config.status_variable) == online_status_config.online_value
+    
+    def on_device_status_changed(self, key: str, value: int):
+        if self.device_config is None \
+            or (online_status_config := self.device_config.online_status) is None \
+            or key != online_status_config.status_variable:
+            return
+        
+        self.redirect_to_media_sink()
+    
+    def redirect_to_media_sink(self):
+        if not self.general_settings.redirect_audio_on_connect or not self.is_device_online():
+            return
+
+        self.pa_audio_manager.redirect_audio(PULSE_MEDIA_NODE_NAME)
     
     def translate_init_bytes(self, data: list[int|str]) -> list[int]:
         result: list[int] = []

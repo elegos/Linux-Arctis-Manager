@@ -79,6 +79,10 @@ device:
         wireless_mode: 0x0d
         wireless_pairing: 0x0e
         headset_power_status: 0x0f
+  
+  online_status:
+    status_variable: headset_power_status
+    online_value: online
 
   settings:
     microphone:

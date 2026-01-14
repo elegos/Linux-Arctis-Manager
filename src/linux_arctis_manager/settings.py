@@ -1,30 +1,11 @@
 from pathlib import Path
-from typing import Any, Callable, Generic, TypeVar
+from typing import Any
 
 from ruamel.yaml import YAML
 
 from linux_arctis_manager.config import ConfigSetting, SettingType
 from linux_arctis_manager.constants import SETTINGS_FOLDER
-from linux_arctis_manager.utils import JsonSerializable
-
-K = TypeVar('K')
-V = TypeVar('V')
-
-class ObservableDict(dict[K, V], Generic[K, V], JsonSerializable):
-    _js_exclude_fields = ['_observers']
-    _observers: list[Callable[[K, V], None]]
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._observers = []
-
-    def add_observer(self, observer: Callable[[K, V], None]):
-        self._observers.append(observer)
-
-    def __setitem__(self, key, value):
-        super().__setitem__(key, value)
-        for observer in self._observers:
-            observer(key, value)
+from linux_arctis_manager.utils import JsonSerializable, ObservableDict
 
 
 class DeviceSettings(JsonSerializable):

@@ -87,6 +87,15 @@ class PulseAudioManager:
 
         return False
 
+    def redirect_audio(self, output_sink_node_name: str) -> None:
+        self.logger.info(f'Redirecting audio to {output_sink_node_name}...')
+
+        sink = next((s for s in self.pulse.sink_list() if s.proplist.get('node.name', '') == output_sink_node_name), None)
+        if sink is None:
+            self.logger.error(f'Failed to find sink {output_sink_node_name} to set it as default')
+            return
+        self.pulse.default_set(sink)
+
     def set_mix(self, media_mix: int, chat_mix: int):
         if media_mix > 100:
             media_mix = 100

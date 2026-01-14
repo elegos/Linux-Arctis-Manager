@@ -124,6 +124,11 @@ class ConfigStatus:
             **{k: v for k, v in mapping.items() if k != 'starts_with'},
         ) for mapping in raw_mappings]
 
+@dataclass
+class OnlineStatusConfig:
+    status_variable: str
+    online_value: Any
+
 class DeviceConfiguration:
     name: str
     vendor_id: int
@@ -134,6 +139,7 @@ class DeviceConfiguration:
     device_init: list[list[int|str]] | None
     status: ConfigStatus | None
     status_parse: dict[str, ConfigStatusParser]
+    online_status: OnlineStatusConfig | None
     settings: dict[str, list[ConfigSetting]]
 
     def __init__(self, raw_configuration: dict[str, Any]):
@@ -146,6 +152,9 @@ class DeviceConfiguration:
         self.product_ids = raw_config.get('product_ids', [])
         self.command_interface_index = raw_config.get('command_interface_index', (-1, -1))
         self.listen_interface_indexes = raw_config.get('listen_interface_indexes', [])
+        
+        online_status = raw_config.get('online_status', None)
+        self.online_status = OnlineStatusConfig(**online_status) if online_status else None
 
         if not self.name:
             raise ValueError("Invalid configuration: 'device.name' must be specified and non-empty")

@@ -72,6 +72,10 @@ device:
         bluetooth_power_status: 0x04
         bluetooth_connection: 0x05
         # ...
+  
+  online_status: # OPTIONAL. Used to detect whether the device is connected AND online (useful for wireless devices). If not defined, it will be considered always online if connected via USB
+    status_variable: status_variable_to_check_against     # The settings variable's name
+    online_value: status_variable's_mapped_value_to_check # The (mapped) variable's value
 
   settings: # OPTIONAL section
     microphone:                                # Settings section
