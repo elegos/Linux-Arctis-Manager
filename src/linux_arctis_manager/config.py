@@ -71,21 +71,36 @@ class ConfigSetting(JsonSerializable):
     name: str
     type: SettingType
     default_value: int|str|None
+    update_sequence: list[int|str]
 
-    _js_exclude_fields = ['name']
+    _js_exclude_fields = ['name', 'update_sequence']
 
-    def __init__(self, name: str, type: SettingType, default_value: int|str|None, **kwargs: Any):
+    def __init__(self, name: str, type: SettingType, default_value: int|str|None, update_sequence: list[int|str] = [], **kwargs: Any):
         self.name = name
         self.type = type
         self.default_value = default_value
+        self.update_sequence = update_sequence
+
         for key, value in kwargs.items():
             setattr(self, key, value)
     
     def get_kwargs(self) -> dict[str, Any]:
-        return { k: v for k, v in self.__dict__.items() if k not in ['name', 'type', 'default_value'] }
+        return { k: v for k, v in self.__dict__.items() if k not in ['name', 'type', 'default_value', 'update_sequence'] }
 
     def to_dict(self) -> dict[str, Any]:
         return { **super().to_dict(), **self.get_kwargs() }
+    
+    def get_update_sequence(self, value: int) -> list[int]:
+        result = []
+        for b in self.update_sequence:
+            if isinstance(b, int):
+                result.append(b)
+            elif b == 'value':
+                result.append(value)
+            else:
+                raise Exception(f"Invalid update sequence value: {b}")
+
+        return result
 
 @dataclass
 class ConfigPadding:

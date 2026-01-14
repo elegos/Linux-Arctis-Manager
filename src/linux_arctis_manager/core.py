@@ -194,6 +194,10 @@ class CoreEngine:
         # Load user settings
         self.device_settings.read_from_file()
 
+        # Setup settings observer
+        self.device_settings.settings.add_observer(self.on_setting_changed)
+
+
         if self.usb_device is not None:
             self.logger.info(f"Found device {self.usb_device.idProduct:04x}:{self.usb_device.idVendor:04x} ({self.device_config.name})")
             self.kernel_detach(self.usb_device, self.device_config)
@@ -239,6 +243,24 @@ class CoreEngine:
             raise Exception(f"Failed to find command interface endpoint for device: {self.usb_device.idProduct:04x}:{self.usb_device.idVendor:04x}")
 
         return endpoint
+    
+    def on_setting_changed(self, setting: str, value: int) -> None:
+        if self.device_config is None:
+            self.logger.warning('Attempted to change setting without a device configuration')
+            return
+
+        config = next((
+            config
+            for section in self.device_config.settings.keys()
+            for config in self.device_config.settings[section] if config.name == setting
+        ), None)
+
+        if not config:
+            self.logger.warning(f'Unknown setting: {setting}')
+            return
+
+        endpoint = self.get_command_endpoint_address()
+        self.send_command(config.get_update_sequence(value), endpoint)
 
     def send_command(self, command: list[int], endpoint: int) -> None:
         if self.device_config is None:

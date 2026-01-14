@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Generic, TypeVar
 
 from ruamel.yaml import YAML
 
@@ -7,17 +7,36 @@ from linux_arctis_manager.config import ConfigSetting, SettingType
 from linux_arctis_manager.constants import SETTINGS_FOLDER
 from linux_arctis_manager.utils import JsonSerializable
 
+K = TypeVar('K')
+V = TypeVar('V')
+
+class ObservableDict(dict[K, V], Generic[K, V], JsonSerializable):
+    _js_exclude_fields = ['_observers']
+    _observers: list[Callable[[K, V], None]]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._observers = []
+
+    def add_observer(self, observer: Callable[[K, V], None]):
+        self._observers.append(observer)
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        for observer in self._observers:
+            observer(key, value)
+
 
 class DeviceSettings(JsonSerializable):
     vendor_id: int
     product_id: int
 
-    settings: dict[str, int]
+    settings: ObservableDict[str, int]
 
     def __init__(self, vendor_id: int, product_id: int):
         self.vendor_id = vendor_id
         self.product_id = product_id
-        self.settings = {}
+        self.settings = ObservableDict()
 
     def _settings_file(self) -> Path:
         settings_file = SETTINGS_FOLDER / f'{self.vendor_id:04x}_{self.product_id:04x}.yaml'
@@ -31,7 +50,10 @@ class DeviceSettings(JsonSerializable):
             return
 
         yaml = YAML(typ='safe')
-        self.settings = yaml.load(settings_file)
+        raw = yaml.load(settings_file)
+
+        if raw:
+            self.settings = ObservableDict(raw)
 
     def __setattr__(self, name: str, value: Any) -> None:
         if name in ('vendor_id', 'product_id', 'settings'):
@@ -49,7 +71,7 @@ class DeviceSettings(JsonSerializable):
         settings_file.parent.mkdir(parents=True, exist_ok=True)
         
         yaml = YAML(typ='safe')
-        yaml.dump(self.settings, settings_file)
+        yaml.dump(self.settings.to_dict(), settings_file)
 
     def to_dict(self) -> dict:
         return self.__dict__

@@ -18,7 +18,10 @@ class JsonSerializable(ABC):
 
             return value
         
+        if isinstance(self, dict):
+            return { k: serialize(v) for k, v in self.items() }
+        
         cls = type(self)
         fields = getattr(cls, '__annotations__', {}).keys()
 
-        return { field: serialize(getattr(self, field)) for field in fields if field not in [*self._js_exclude_fields, '_js_exclude_fields'] }
+        return { field: serialize(getattr(self, field)) for field in fields if type(getattr(self, field)) != callable and field not in [*self._js_exclude_fields, '_js_exclude_fields']}

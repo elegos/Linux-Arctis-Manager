@@ -71,13 +71,13 @@ class ArctisManagerDbusSettingsService(ServiceInterface):
 
         general_settings_keys = self.core_engine.general_settings.to_dict().keys()
         if setting in general_settings_keys:
-            setting_config = next((config for config in self.core_engine.general_settings.settings_config if config.name == setting), None)
-            if not setting_config:
+            config = next((config for config in self.core_engine.general_settings.settings_config if config.name == setting), None)
+            if not config:
                 self.logger.error(f'Unknown general setting configuration: {setting}')
                 return False
             
-            if type(setting_config.default_value) != type(value):
-                self.logger.error(f'Value type mismatch: {type(setting_config.default_value)} != {type(value)}')
+            if type(config.default_value) != type(value):
+                self.logger.error(f'Value type mismatch: {type(config.default_value)} != {type(value)}')
                 return False
 
             setattr(self.core_engine.general_settings, setting, value)
@@ -88,16 +88,16 @@ class ArctisManagerDbusSettingsService(ServiceInterface):
         if self.core_engine.device_config and self.core_engine.device_settings:
             device_settings_keys = self.core_engine.device_settings.settings.keys()
             if setting in device_settings_keys:
-                setting_config = next((config for config in itertools.chain.from_iterable(self.core_engine.device_config.settings.values()) if config.name == setting), None)
-                if not setting_config:
+                config = next((config for section in self.core_engine.device_config.settings.keys() for config in self.core_engine.device_config.settings[section]), None)
+                if not config:
                     self.logger.error(f'Unknown device setting configuration: {setting}')
                     return False
                 
-                if type(setting_config.default_value) != type(value):
-                    self.logger.error(f'Value type mismatch: {type(setting_config.default_value)} != {type(value)}')
+                if type(config.default_value) != type(value):
+                    self.logger.error(f'Value type mismatch: {type(config.default_value)} != {type(value)}')
                     return False
 
-                setattr(self.core_engine.device_settings, setting, value)
+                self.core_engine.device_settings.settings[setting] = value
                 self.core_engine.device_settings.write_to_file()
 
                 return True

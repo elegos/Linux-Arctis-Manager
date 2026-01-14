@@ -74,15 +74,16 @@ device:
         # ...
 
   settings: # OPTIONAL section
-    microphone:                # Settings section
-      mic_volume:              # Setting's name
-        type: slider           # Setting's type
-        default: 0x0a          # Setting's default value
-        min: 0x01              # Type-specific parameter
-        max: 0x0a              # Type-specific parameter
-        step: 1                # Type-specific parameter
-        min_label: mic_muted   # Type-specific parameter
-        max_label: perc_100    # Type-specific parameter
+    microphone:                                # Settings section
+      mic_volume:                              # Setting's name
+        type: slider                           # Setting's type
+        default: 0x0a                          # Setting's default value
+        update_sequence: [0x06, 0x37, 'value'] # 'value' is a special token replaced with the setting's value at runtime
+        min: 0x01                              # Type-specific parameter
+        max: 0x0a                              # Type-specific parameter
+        step: 1                                # Type-specific parameter
+        min_label: mic_muted                   # Type-specific parameter
+        max_label: perc_100                    # Type-specific parameter
     another_section:
       another_setting:
         type: ...
@@ -111,31 +112,34 @@ Linux Arctis Manager supports out of the box the following settings. Additional 
 ```yaml
 # Linear multi-value setting (for example 1..n)
 type: slider
-min: int                      # the minimum valid value
-max: int                      # the maximum valid valud
-step: 1                       # the number each step sums to the next one (ex. min 1, max 5, step 2; values: 1, 3, 5)
-min_label: slider_setting_min # As found in the language ini file
-max_label: slider_setting_max # As found in the language ini file
-default: 0x0a                 # The value set if none was before
+min: int                               # the minimum valid value
+max: int                               # the maximum valid valud
+step: 1                                # the number each step sums to the next one (ex. min 1, max 5, step 2; values: 1, 3, 5)
+min_label: slider_setting_min          # As found in the language ini file
+max_label: slider_setting_max          # As found in the language ini file
+default: 0x0a                          # The value set if none was before
+update_sequence: [0x06, 0x37, 'value'] # The setting's command update sequence
 ```
 
 ```yaml
 # Boolean values (with custom on/off values and labels)
 type: toggle
 values:
-  off: 0x00       # Value in the "off" position
-  on: 0x01        # Value in the "on" position
-  off_label: high # As found in the language ini file
-  on_label: low   # As found in the language ini file
-default: 0x01     # The value set if none was before
+  off: 0x00                            # Value in the "off" position
+  on: 0x01                             # Value in the "on" position
+  off_label: high                      # As found in the language ini file
+  on_label: low                        # As found in the language ini file
+default: 0x01                          # The value set if none was before
+update_sequence: [0x06, 0x37, 'value'] # The setting's command update sequence
 ```
 
 ```yaml
 # Drop-downs
 type: select
 default: null
-options_source: pulse_audio_devices                        # pulse_audio_devices only for now
+options_source: pulse_audio_devices                # pulse_audio_devices only for now
 options_mapping: { value: id, label: description } # Depends on options_source. "pulse_audio_devices": id and description only for now
+update_sequence: [0x06, 0x37, 'value']             # The setting's command update sequence
 ```
 
 ### YAML's device.status_parse.[status_name] types
