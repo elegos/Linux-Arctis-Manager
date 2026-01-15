@@ -21,6 +21,32 @@ A replacement for SteelSeries GG software, to manage your Arctis device on Linux
 
 \*: to be developed
 
+## 🖥️ Install
+
+### From sources
+
+Installation of uv (one-timer, then restart the terminal and ensure that `uv` is in `$PATH`)
+- `pip install --upgrade uv`
+
+Wheel file creation
+- `rm -rf dist`
+- `uv build`
+
+Wheel installation
+- `pip install dist/linux_arctis_manager-*.whl`
+
+System setup / settings update
+- `sudo lam-cli udev write-rules --force --reload` (add / update the udev rules file and reload them)
+
+### From wheel (released version)
+
+Wheel installation
+- `pip install linux_arctis_manager-....whl`
+
+System setup / settings update
+- `sudo lam-cli udev write-rules --force --reload` (add / update the udev rules file and reload them)
+
+
 ## ⌨️ Development
 
 ### Basic commands
@@ -35,9 +61,7 @@ A replacement for SteelSeries GG software, to manage your Arctis device on Linux
 
 - Add a new device configuration file in `~/.config/arctis_manager/devices/`, according to the results of the reverse engineering (the temporary configuration file allows for instant device support, waiting for a software's new version to come out)
 - Update the udev rules by executing (as root / sudo):
-  - `lam-cli udev write-rules --force` to recreate the udev rules set file. This will save the rules in the system's `rules.d/91-steelseries-arctis.rules`, overwriting the existing file. Use `--force` to overwrite the file.
-  - `udevadm control --reload-rules` to reload the rules
-  - `udevadm trigger --subsystem-match=usb` to force the trigger of the updated rules (or just replug the USB device)
+  - `[sudo] lam-cli udev write-rules --force --reload` to recreate the udev rules set file. This will save the rules in the system's `rules.d/91-steelseries-arctis.rules`, overwriting the existing file. Use `--force` to overwrite the file and `--reload` to force udev reload its rules.
 
 In case of software limitations for any reason, some coding might be required (for example to support a new status or setting type).
 

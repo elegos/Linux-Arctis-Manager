@@ -1,6 +1,7 @@
 from argparse import ArgumentParser
 import os
 from pathlib import Path
+import subprocess
 import sys
 from typing import NamedTuple
 
@@ -18,6 +19,8 @@ ConfigRuleset = NamedTuple(
     ])
 
 def write_udev_rules(rules_path: Path, create_directories: bool, force_write: bool) -> int:
+    print('Writing udev rules...')
+
     if rules_path.is_dir():
         print(f'Cannot write to directory {rules_path}')
         print('Please specify a file.')
@@ -72,22 +75,54 @@ def write_udev_rules(rules_path: Path, create_directories: bool, force_write: bo
     
     return 0
 
+def reload_udev_rules() -> int:
+    if os.geteuid() != 0:
+        print('Please run the command with sudo / as root.')
+
+        return 1
+    
+    print('Reloading udev rules...')
+
+    result = subprocess.run(["udevadm", "control", "--reload-rules"], check=True)
+    if result.returncode != 0:
+        return result.returncode
+
+    result = subprocess.run(["udevadm", "trigger", "--subsystem-match=usb"], check=True)
+
+    if result.returncode == 0:
+        print('Udev rules reloaded.')
+    else:
+        print('Failed to reload udev rules.')
+
+    return result.returncode
 
 def main():
-    args_parser = ArgumentParser()
-    udev_subparsers = args_parser.add_subparsers()
+    parser = ArgumentParser()
+    subparsers = parser.add_subparsers(dest='command', required=True)
 
-    udev_parser = udev_subparsers.add_parser('udev', help='UDEV rules')
-    udev_parser.add_argument('action', choices=['write-rules'])
-    udev_parser.add_argument('--rules-path', default=UDEV_RULES_PATH, type=Path)
-    udev_parser.add_argument('--create-directories', action='store_true')
-    udev_parser.add_argument('--force', action='store_true')
+    udev_parser = subparsers.add_parser('udev', help='UDEV rules')
+    udev_subparsers = udev_parser.add_subparsers(dest='action', required=True)
 
-    args = args_parser.parse_args()
+    write_parser = udev_subparsers.add_parser('write-rules', help='Write the udev rules')
+    write_parser.add_argument('--rules-path', default=UDEV_RULES_PATH, type=Path)
+    write_parser.add_argument('--create-directories', action='store_true')
+    write_parser.add_argument('--force', action='store_true')
+    write_parser.add_argument('--reload', action='store_true')
+
+    reload_parser = udev_subparsers.add_parser('reload-rules', help='Reload the udev rules')
+
+    args = parser.parse_args()
 
     if not hasattr(args, 'action'):
-        args_parser.print_help()
+        parser.print_help()
         return
 
-    if args.action == 'write-rules':
-        sys.exit(write_udev_rules(args.rules_path, args.create_directories, args.force))
+    if args.command == 'udev':
+        if args.action == 'write-rules':
+            result = write_udev_rules(args.rules_path, args.create_directories, args.force)
+            if result != 0:
+                sys.exit(result)
+            if args.reload:
+                sys.exit(reload_udev_rules())
+        elif args.action == 'reload-rules':
+            sys.exit(reload_udev_rules())
