@@ -95,6 +95,17 @@ class PulseAudioManager:
             self.logger.error(f'Failed to find sink {output_sink_node_name} to set it as default')
             return
         self.pulse.default_set(sink)
+    
+    def get_default_device(self) -> TypedPulseSinkInfo|None:
+        server_info = self.pulse.server_info()
+        default_sink_name: str|None = getattr(server_info, 'default_sink_name', None)
+
+        if default_sink_name is None:
+            return None
+        
+        sink = next((s for s in self.pulse.sink_list() if s.proplist.get('node.name', '') == default_sink_name), None)
+
+        return sink
 
     def set_mix(self, media_mix: int, chat_mix: int):
         if media_mix > 100:

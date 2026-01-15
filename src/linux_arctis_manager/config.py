@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from enum import Enum
 import inspect
 import logging
-from typing import Callable, Any
+from typing import Callable, Any, Literal
 
 from ruamel.yaml import YAML
 
@@ -71,11 +71,11 @@ class ConfigSetting(JsonSerializable):
     name: str
     type: SettingType
     default_value: int|str|None
-    update_sequence: list[int|str]
+    update_sequence: list[int|Literal['value']]
 
     _js_exclude_fields = ['name', 'update_sequence']
 
-    def __init__(self, name: str, type: SettingType, default_value: int|str|None, update_sequence: list[int|str] = [], **kwargs: Any):
+    def __init__(self, name: str, type: SettingType, default_value: int|str|None, update_sequence: list[int|Literal['value']] = [], **kwargs: Any):
         self.name = name
         self.type = type
         self.default_value = default_value

@@ -5,7 +5,7 @@ import usb
 from usb.core import Device
 
 from linux_arctis_manager.config import DeviceConfiguration, load_device_configurations, parsed_status
-from linux_arctis_manager.constants import PULSE_MEDIA_NODE_NAME
+from linux_arctis_manager.constants import PULSE_CHAT_NODE_NAME, PULSE_MEDIA_NODE_NAME
 from linux_arctis_manager.settings import DeviceSettings, GeneralSettings
 from linux_arctis_manager.pactl import PulseAudioManager
 from linux_arctis_manager.usb_devices_monitor import USBDevicesMonitor
@@ -237,18 +237,24 @@ class CoreEngine:
         return online_status_config is None or parsed.get(online_status_config.status_variable) == online_status_config.online_value
     
     def on_device_status_changed(self, key: str, value: int):
-        if self.device_config is None \
-            or (online_status_config := self.device_config.online_status) is None \
-            or key != online_status_config.status_variable:
-            return
-        
-        self.redirect_to_media_sink()
+        if self.device_config and self.device_config.online_status and key == self.device_config.online_status.status_variable:
+            if self.is_device_online():
+                self.redirect_to_media_sink()
+            else:
+                self.redirect_audio_on_disconnect()
     
     def redirect_to_media_sink(self):
         if not self.general_settings.redirect_audio_on_connect or not self.is_device_online():
             return
 
         self.pa_audio_manager.redirect_audio(PULSE_MEDIA_NODE_NAME)
+
+    def redirect_audio_on_disconnect(self):
+        redirect_device = self.general_settings.redirect_audio_on_disconnect_device if self.general_settings.redirect_audio_on_disconnect else None
+        current_default_device = self.pa_audio_manager.get_default_device()
+
+        if current_default_device and redirect_device and current_default_device.name in [PULSE_MEDIA_NODE_NAME, PULSE_CHAT_NODE_NAME]:
+            self.pa_audio_manager.redirect_audio(redirect_device)
     
     def translate_init_bytes(self, data: list[int|str]) -> list[int]:
         result: list[int] = []
@@ -381,6 +387,8 @@ class CoreEngine:
                     self.kernel_attach(self.usb_device, self.device_config)
             except usb.core.USBError as e:
                 self.logger.warning(f"Error re-attaching kernel driver: {e}")
+        
+        self.redirect_audio_on_disconnect()
         
         self.usb_device = None
         self.device_config = None

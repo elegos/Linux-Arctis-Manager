@@ -11,6 +11,7 @@ from linux_arctis_manager.constants import \
     DBUS_BUS_NAME, DBUS_CONFIG_INTERFACE_NAME, DBUS_CONFIG_OBJECT_PATH, DBUS_SETTINGS_OBJECT_PATH, \
     DBUS_SETTINGS_INTERFACE_NAME, DBUS_STATUS_INTERFACE_NAME, DBUS_STATUS_OBJECT_PATH
 from linux_arctis_manager.core import CoreEngine
+from linux_arctis_manager.pactl import TypedPulseSinkInfo
 
 class ArctisManagerDbusConfigService(ServiceInterface):
     def __init__(self, core: CoreEngine):
@@ -76,7 +77,8 @@ class ArctisManagerDbusSettingsService(ServiceInterface):
                 self.logger.error(f'Unknown general setting configuration: {setting}')
                 return False
             
-            if type(config.default_value) != type(value):
+            # TODO add type checking in case of default_value is None
+            if type(config.default_value) != type(value) and config.default_value is not None:
                 self.logger.error(f'Value type mismatch: {type(config.default_value)} != {type(value)}')
                 return False
 
@@ -103,7 +105,20 @@ class ArctisManagerDbusSettingsService(ServiceInterface):
                 return True
 
         return False
+    
+    @method('GetListOptions')
+    def get_list_options(self, list_name: 's') -> 's': # type: ignore
+        result = []
+        if list_name == 'pulse_audio_devices':
+            sinks: list[TypedPulseSinkInfo] = self.core_engine.pa_audio_manager.pulse.sink_list()
+            for sink in sinks:
+                id = sink.proplist.get('node.name', '')
+                name = sink.proplist.get('node.nick', '')
 
+                if id and name:
+                    result.append({ 'id': id, 'name': name })
+
+        return json.dumps(result)
 
 class DbusManager:
     _instance: 'DbusManager|None' = None
