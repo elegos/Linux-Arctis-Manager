@@ -14,6 +14,7 @@ dependencies = [
 
 [project.scripts]
 lam-daemon = "linux_arctis_manager.scripts.daemon:main"
+lam-cli = "linux_arctis_manager.scripts.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.9.17,<0.10.0"]

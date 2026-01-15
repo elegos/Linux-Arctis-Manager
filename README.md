@@ -13,6 +13,14 @@ A replacement for SteelSeries GG software, to manage your Arctis device on Linux
 
 - SteelSeries Arctis Nova Pro Wireless
 
+## CLI commands
+
+- `lam-daemon`: executed by user-level systemd.
+- `lam-cli`*: to interact with the daemon in the terminal, and to run utilities like udev rules generation.
+- `lam-gui`*: the graphical user interface, to alter settings and see the device's status.
+
+\*: to be developed
+
 ## ⌨️ Development
 
 ### Basic commands
@@ -25,8 +33,11 @@ A replacement for SteelSeries GG software, to manage your Arctis device on Linux
 
 ### How to add support to a new device
 
-- Add a new udev rule following the same pattern of the ones already existing (`/usr/lib/udev/rules.d/91-steelseries-arctis.rules`)
 - Add a new device configuration file in `~/.config/arctis_manager/devices/`, according to the results of the reverse engineering (the temporary configuration file allows for instant device support, waiting for a software's new version to come out)
+- Update the udev rules by executing (as root / sudo):
+  - `lam-cli udev write-rules --force` to recreate the udev rules set file. This will save the rules in the system's `rules.d/91-steelseries-arctis.rules`, overwriting the existing file. Use `--force` to overwrite the file.
+  - `udevadm control --reload-rules` to reload the rules
+  - `udevadm trigger --subsystem-match=usb` to force the trigger of the updated rules (or just replug the USB device)
 
 In case of software limitations for any reason, some coding might be required (for example to support a new status or setting type).
 
