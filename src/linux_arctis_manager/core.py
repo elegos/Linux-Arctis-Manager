@@ -115,6 +115,9 @@ class CoreEngine:
         except usb.core.USBError as e:
             if e.errno not in [16, 110]: # 16 (busy), 110 (timeout)
                 self.logger.warning('USB error: %s', e)
+        except AttributeError as e:
+            # If the device disconnects, self.usb_device might be None and generate the error
+            pass
         
     
     async def loop(self):
