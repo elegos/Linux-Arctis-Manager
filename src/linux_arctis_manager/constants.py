@@ -25,11 +25,10 @@ STEELSERIES_VENDOR_ID = '0x1038'
 
 SETTINGS_FOLDER = Path.home() / '.config' / 'arctis_manager' / 'settings'
 
-DEVICES_CONFIG_FOLDER: list[Path] = [
-    Path.home() / '.config' / 'arctis_manager' / 'devices',
-    Path(PREFIX) / 'arctis_manager' / 'devices',
+HOME_CONFIG_FOLDER = Path.home() / '.config' / 'arctis_manager' / 'devices'
+PREFIXED_CONFIG_FOLDER = Path(PREFIX) / 'arctis_manager' / 'devices'
+SRC_CONFIG_FOLDER = Path(__file__).parent.parent / 'devices'
 
-    Path(__file__).parent.parent / 'devices',
-]
+DEVICES_CONFIG_FOLDER: list[Path] = [HOME_CONFIG_FOLDER, PREFIXED_CONFIG_FOLDER, SRC_CONFIG_FOLDER]
 
 UDEV_RULES_PATH = '/usr/lib/udev/rules.d/91-steelseries-arctis.rules'
