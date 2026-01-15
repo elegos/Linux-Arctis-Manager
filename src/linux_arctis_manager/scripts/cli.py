@@ -9,6 +9,7 @@ from ruamel.yaml import YAML
 
 from linux_arctis_manager.config import DeviceConfiguration
 from linux_arctis_manager.constants import DEVICES_CONFIG_FOLDER, UDEV_RULES_PATH
+from linux_arctis_manager.utils import project_version
 
 ConfigRuleset = NamedTuple(
     'ConfigRuleset',
@@ -97,7 +98,7 @@ def reload_udev_rules() -> int:
     return result.returncode
 
 def main():
-    parser = ArgumentParser()
+    parser = ArgumentParser(description=f'Arctis Manager CLI v {project_version()}')
     subparsers = parser.add_subparsers(dest='command', required=True)
 
     udev_parser = subparsers.add_parser('udev', help='UDEV rules')

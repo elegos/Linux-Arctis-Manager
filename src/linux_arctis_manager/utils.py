@@ -1,6 +1,13 @@
 from abc import ABC
 from enum import Enum
+from importlib.metadata import version, PackageNotFoundError
 from typing import Any, Callable, Generic, TypeVar
+
+def project_version() -> str:
+    try:
+        return version("linux-arctis-manager")  # metti il nome del package
+    except PackageNotFoundError:
+        return "dev"
 
 
 class JsonSerializable(ABC):
