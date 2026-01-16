@@ -63,9 +63,11 @@ System setup / settings update
 - Update the udev rules by executing (as root / sudo):
   - `[sudo] lam-cli udev write-rules --force --reload` to recreate the udev rules set file. This will save the rules in the system's `rules.d/91-steelseries-arctis.rules`, overwriting the existing file. Use `--force` to overwrite the file and `--reload` to force udev reload its rules.
 
+During the development, new labels will probably be required. In order to add them, you can copy the [en.ini](src/linux_arctis_manager/lang/en.ini) in `~/.config/arctis_manager/lang/` and edit the file there.
+
 In case of software limitations for any reason, some coding might be required (for example to support a new status or setting type).
 
-Once the configuration is completed locally, a new ticket can be raised to add both the new udev rules and configuration file. A pull request into the development branch is very welcome, specially if adding new code, too.
+Once the configuration is completed locally, a new ticket can be raised to add both the new device configuration file and the eventual languages file(s) edits. A pull request into the development branch is very welcome, specially if adding new code, too.
 
 ### Device configuration specs
 
