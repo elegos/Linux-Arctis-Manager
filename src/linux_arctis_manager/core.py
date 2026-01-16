@@ -332,7 +332,7 @@ class CoreEngine:
             self.logger.warning(f"Error sending command: {e}")
 
     def kernel_detach(self, usb_device: TypedDevice, config: DeviceConfiguration) -> None:
-        self.logger.info(f"Detaching kernel driver for device: {usb_device.idProduct:04x}:{usb_device.idVendor:04x} ({config.name})")
+        self.logger.info(f"Detaching kernel driver for device: {usb_device.idVendor:04x}:{usb_device.idProduct:04x} ({config.name})")
 
         interfaces = list(set([config.command_interface_index[0], *config.listen_interface_indexes]))
         for interface in interfaces:
