@@ -1,0 +1,122 @@
+import asyncio
+import json
+import locale
+from logging import Logger
+import logging
+from threading import Thread
+from time import sleep
+
+from dbus_next.aio.message_bus import MessageBus
+from dbus_next.message import Message
+from dbus_next.constants import MessageType
+from PySide6.QtCore import Slot, Signal
+from PySide6.QtGui import QIcon, QAction
+from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
+
+from linux_arctis_manager.constants import DBUS_BUS_NAME, DBUS_STATUS_INTERFACE_NAME, DBUS_STATUS_OBJECT_PATH
+from linux_arctis_manager.gui.base_app import QBaseDesktopApp
+from linux_arctis_manager.gui.ui_utils import get_icon_pixmap
+from linux_arctis_manager.i18n import I18n
+
+
+class QSystrayApp(QBaseDesktopApp):
+    new_status = Signal(object)
+
+    logger: Logger
+
+    app: QApplication
+    tray_icon: QSystemTrayIcon
+    menu: QMenu
+    dbus_bus: MessageBus
+
+    last_device_status: dict[str, str|int]
+
+    def __init__(self, app: QApplication, log_level: int):
+        super().__init__(app)
+
+        self.logger = logging.getLogger('SystrayApp')
+        self.logger.setLevel(log_level)
+
+        self.app = app
+
+        pixmap = get_icon_pixmap()
+        self.tray_icon = QSystemTrayIcon(QIcon(pixmap), parent=self.app)
+        self.tray_icon.setToolTip('Arctis Manager')
+
+        lang_code, _ = locale.getdefaultlocale()
+        lang_code = lang_code.split('_')[0] if lang_code else 'en'
+
+        self.last_device_status = {}
+
+        self.menu = QMenu()
+        self.menu_setup()
+        
+        self.new_status.connect(self.on_new_status)
+        self.dbus_poll_thread = Thread(target=self.poll_dbus_thread, daemon=True)
+        self.dbus_poll_thread.start()
+
+        self.tray_icon.setContextMenu(self.menu)
+    
+    def poll_dbus_thread(self):
+        while not self.is_stopping():
+            asyncio.run(self.dbus_poll())
+            sleep(2)
+    
+    async def dbus_poll(self):
+        dbus_bus = await MessageBus().connect()
+        reply = await dbus_bus.call(Message(
+            destination=DBUS_BUS_NAME,
+            path=DBUS_STATUS_OBJECT_PATH,
+            interface=DBUS_STATUS_INTERFACE_NAME,
+            member='GetStatus',
+            message_type=MessageType.METHOD_CALL
+        ))
+
+        if reply is None:
+            self.logger.error('Error getting status: no reply')
+            return
+
+        if reply.message_type == MessageType.ERROR:
+            self.logger.error('Error getting status: %s', reply.body)
+            return
+
+        self.new_status.emit(json.loads(reply.body[0]) or {})
+    
+    def on_new_status(self, status: dict[str, str|int]):
+        self.last_device_status = status
+        self.menu_setup()
+
+    async def start(self):
+        self.logger.info('Starting Systray app.')
+        self.tray_icon.show()
+
+        self.dbus_bus = await MessageBus().connect()
+
+        self.app.exec()
+
+    def menu_setup(self) -> None:
+        self.menu.clear()
+        self._menu_actions = {}
+
+        for status, value in self.last_device_status.items():
+            self._menu_actions['status_' + status] = QAction(f'{I18n.translate('status', status)}: {I18n.translate('status_values', value)}')
+            self.menu.addAction(self._menu_actions['status_' + status])
+
+        if self.last_device_status:
+            self.menu.addSeparator()
+
+        self._menu_actions['exit'] = QAction(I18n.translate('ui', 'exit'))
+        self._menu_actions['exit'].triggered.connect(self.sig_stop)
+        self.menu.addAction(self._menu_actions['exit'])
+    
+    def is_stopping(self):
+        return hasattr(self, '_stopping') and self._stopping
+
+    @Slot()
+    def sig_stop(self):
+        if self.is_stopping():
+            return
+        self._stopping = True
+
+        self.logger.debug('Received shutdown signal, shutting down.')
+        self.app.quit()

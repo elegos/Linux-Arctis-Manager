@@ -8,7 +8,7 @@ from linux_arctis_manager.dbus_service import DbusManager
 from linux_arctis_manager.utils import project_version
 
 
-async def main():
+async def main_async():
     logging.basicConfig(level=logging.INFO, format='[%(levelname)7s] %(name)20s: %(message)s')
 
     logger = logging.getLogger('Daemon')
@@ -32,7 +32,11 @@ def sigterm_handler(
     ) -> None:
     DbusManager.getInstance().stop()
 
-signal.signal(signal.SIGINT, sigterm_handler)
-signal.signal(signal.SIGTERM, sigterm_handler)
+def main():
+    signal.signal(signal.SIGINT, sigterm_handler)
+    signal.signal(signal.SIGTERM, sigterm_handler)
 
-asyncio.run(main())
+    asyncio.run(main_async())
+
+if __name__ == '__main__':
+    main()
