@@ -59,7 +59,7 @@ def write_udev_rules(rules_path: Path, create_directories: bool, force_write: bo
             config = DeviceConfiguration(config_yaml)
             products[config.vendor_id] = ConfigRuleset(config.vendor_id, config.product_ids, config.name)
     
-    rule_template = 'SUBSYSTEM=="usb", DEVTYPE=="usb_device", ATTR{{idVendor}}=="{idVendor}", ATTR{{idProduct}}=="{idProducts}", TAG+="uaccess"'
+    rule_template = 'SUBSYSTEM=="usb", ENV{{DEVTYPE}}=="usb_device", ATTRS{{idVendor}}=="{idVendor}", ATTRS{{idProduct}}=="{idProducts}", TAG+="uaccess"'
     rules = []
     for vendor_id, ruleset in products.items():
         rule = rule_template.format(
