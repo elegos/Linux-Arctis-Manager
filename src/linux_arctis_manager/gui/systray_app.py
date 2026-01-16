@@ -83,6 +83,10 @@ class QSystrayApp(QBaseDesktopApp):
         self.new_status.emit(json.loads(reply.body[0]) or {})
     
     def on_new_status(self, status: dict[str, str|int]):
+        status = dict(sorted(status.items(), key=lambda x: x[0]))
+        if self.last_device_status == status:
+            return
+
         self.last_device_status = status
         self.menu_setup()
 
