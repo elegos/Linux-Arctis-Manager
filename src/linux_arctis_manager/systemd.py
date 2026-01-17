@@ -14,8 +14,7 @@ def is_systemd_unit_enabled() -> bool:
 
 def ensure_systemd_unit(enable: bool = False) -> None:
     path = HOME_SYSTEMD_SERVICE_FOLDER / SYSTEMD_SERVICE_NAME
-    if not path.is_file():
-        write_systemd_service(path)
+    write_systemd_service(path)
     if enable:
         subprocess.run(['systemctl', '--user', 'enable', '--now', SYSTEMD_SERVICE_NAME], check=True)
 
@@ -33,6 +32,9 @@ RestartSec=1
 
 [Install]
 WantedBy=graphical-session.target'''
+    
+    if path.exists() and path.read_text() == f'{template}\n':
+        return
 
     with open(path, 'w') as f:
         f.writelines([f'{line}\n' for line in template.split('\n')])
