@@ -79,6 +79,27 @@ device:
         wireless_mode: 0x0d
         wireless_pairing: 0x0e
         headset_power_status: 0x0f
+    representation:
+      headset:
+        - headset_power_status
+        - headset_battery_charge
+        - noise_cancelling
+        - transparent_noise_cancelling_level
+        - auto_off_time_minutes
+      mic:
+        - mic_status
+        - mic_led_brightness
+      gamedac:
+        - station_volume
+        - charge_slot_battery_charge
+      bluetooth:
+        - bluetooth_powerup_state
+        - bluetooth_power_status
+        - bluetooth_auto_mute
+        - bluetooth_connection
+      wireless:
+        - wireless_mode
+        - wireless_pairing
   
   online_status:
     status_variable: headset_power_status
@@ -146,7 +167,7 @@ device:
   status_parse:
     station_volume:
       type: percentage
-      perc_min: -56
+      perc_min: 56
       perc_max: 0
     media_mix:
       type: percentage

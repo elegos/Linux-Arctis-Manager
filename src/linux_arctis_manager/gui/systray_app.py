@@ -29,7 +29,7 @@ class QSystrayApp(QBaseDesktopApp):
     menu: QMenu
     dbus_bus: MessageBus
 
-    last_device_status: dict[str, str|int]
+    last_device_status: dict[str, dict[str, dict[str, str|int]]]
 
     def __init__(self, app: QApplication, log_level: int):
         super().__init__(app)
@@ -82,8 +82,7 @@ class QSystrayApp(QBaseDesktopApp):
 
         self.new_status.emit(json.loads(reply.body[0]) or {})
     
-    def on_new_status(self, status: dict[str, str|int]):
-        status = dict(sorted(status.items(), key=lambda x: x[0]))
+    def on_new_status(self, status: dict[str, dict[str, dict[str, str|int]]]):
         if self.last_device_status == status:
             return
 
@@ -102,11 +101,25 @@ class QSystrayApp(QBaseDesktopApp):
         self.menu.clear()
         self._menu_actions = {}
 
-        for status, value in self.last_device_status.items():
-            self._menu_actions['status_' + status] = QAction(f'{I18n.translate('status', status)}: {I18n.translate('status_values', value)}')
-            self.menu.addAction(self._menu_actions['status_' + status])
+        sections = 0
 
-        if self.last_device_status:
+        for _, status_obj in self.last_device_status.items():
+            if not status_obj:
+                continue
+
+            if sections > 0:
+                self.menu.addSeparator()
+            sections += 1
+
+            for status, status_o in status_obj.items():
+                self._menu_actions['status_' + status] = QAction(
+                    f'{I18n.translate('status', status)}: '
+                    f'{I18n.translate('status_values', status_o['value'])}'
+                    f'{'%' if status_o['type'] == 'percentage' else ''}'
+                )
+                self.menu.addAction(self._menu_actions['status_' + status])
+
+        if sections:
             self.menu.addSeparator()
 
         self._menu_actions['exit'] = QAction(I18n.translate('ui', 'exit'))

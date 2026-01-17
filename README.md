@@ -109,6 +109,10 @@ device:
         bluetooth_power_status: 0x04
         bluetooth_connection: 0x05
         # ...
+    representation:      # Categorization and ordering
+      category1:         # Translation in [status] section of language file
+        - station_volume # List of settings that apply to the category
+        - station_charge # If you want to omiss one or more settings in the representation, it's ok
   
   online_status: # OPTIONAL. Used to detect whether the device is connected AND online (useful for wireless devices). If not defined, it will be considered always online if connected via USB
     status_variable: status_variable_to_check_against     # The settings variable's name
@@ -325,12 +329,41 @@ Returns boolean (true: setting saved, false: setting not found / not saved)
 - **Response format**: JSON
 - **Specs**:
 
-Returns an object with the series of configured status values, in the mapped values as defined in **YAML's device.status_parse.[status_name] types**.
+Returns an object with the series of configured status values, in the mapped values as defined in **YAML's device.status_parse.[status_name] types** and categorized in **YAML's device.status.representation**.
 
-If no device is connected, an empty string will return.
+If no device is connected, an empty object will return.
+
+Each setting has two attributes:
+
+- `value`: the (parsed, but not translated) value
+- `type`: "label" in case of string, or the relative type, as defined in `device.status_parse.[status].type`
 
 ```json
-{"bluetooth_powerup_state": "off", "bluetooth_auto_mute": "off", "bluetooth_power_status": "off", "bluetooth_connection": "off", "headset_battery_charge": 25, "charge_slot_battery_charge": 100, "transparent_noise_cancelling_level": 100, "mic_status": "unmuted", "noise_cancelling": "off", "mic_led_brightness": 100, "auto_off_time_minutes": 30, "wireless_mode": "speed", "wireless_pairing": "connected", "headset_power_status": "online"}
+{
+    "headset": {
+        "headset_power_status": {
+            "value": "online",
+            "type": "label"
+        },
+        "headset_battery_charge": {
+            "value": 87,
+            "type": "percentage"
+        },
+        "noise_cancelling": {
+            "value": "off",
+            "type": "label"
+        },
+        "transparent_noise_cancelling_level": {
+            "value": 100,
+            "type": "percentage"
+        },
+        "auto_off_time_minutes": {
+            "value": 30,
+            "type": "int_int_mapping"
+        }
+    },
+    ...
+}
 ```
 
 ### name.giacomofurlan.ArctisManager.Next.Config

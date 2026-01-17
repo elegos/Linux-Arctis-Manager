@@ -115,6 +115,7 @@ class ConfigPadding:
 class ConfigStatus:
     request: int
     response_mapping: list[ConfigStatusResponseMapping]
+    representation: dict[str, list[str]]
 
     def __post_init__(self):
         raw_mappings: list[dict[str, int]] = self.response_mapping # pyright: ignore[reportAssignmentType]
@@ -181,7 +182,11 @@ class DeviceConfiguration:
         
         raw_status = raw_config.get('status', {})
         if raw_status:
-            self.status = ConfigStatus(raw_status.get('request', 0), raw_status.get('response_mapping', []))
+            self.status = ConfigStatus(
+                request=raw_status.get('request', 0),
+                response_mapping=raw_status.get('response_mapping', []),
+                representation=raw_status.get('representation', {}),
+            )
         
         raw_status_parse: dict[str, dict[str, Any]] = raw_config.get('status_parse', {})
         self.status_parse = {}

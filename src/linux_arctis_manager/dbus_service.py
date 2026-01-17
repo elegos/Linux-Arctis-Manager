@@ -31,7 +31,25 @@ class ArctisManagerDbusStatusService(ServiceInterface):
 
     @method('GetStatus')
     def get_status(self) -> 's': # type: ignore
-        return json.dumps(parsed_status(self.core_engine.device_status, self.core_engine.device_config)) if self.core_engine.device_status else ''
+        status, config = self.core_engine.device_status, self.core_engine.device_config
+        if not status or not config:
+            return json.dumps({})
+
+        result = {}
+        raw_status = parsed_status(self.core_engine.device_status, self.core_engine.device_config)
+        for category, status_list in config.status.representation.items():
+            result[category] = {}
+            for status in status_list:
+                if status in raw_status:
+                    result[category][status] = {
+                        'value': raw_status[status],
+                        'type': 'label' if type(raw_status[status]) == str else config.status_parse[status].type.value
+                    }
+            if not result[category]:
+                del result[category]
+
+        return json.dumps(result)
+
 
 class ArctisManagerDbusSettingsService(ServiceInterface):
     def __init__(self, core: CoreEngine):
