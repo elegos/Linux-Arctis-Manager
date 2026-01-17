@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QApplication
 
 from linux_arctis_manager.gui.base_app import QBaseDesktopApp
 from linux_arctis_manager.gui.systray_app import QSystrayApp
+from linux_arctis_manager.systemd import ensure_systemd_unit
 
 
 def main():
@@ -34,6 +35,8 @@ def main():
         raise Exception('Not implemented yet')
     
     if app and main_app:
+        ensure_systemd_unit(True)
+
         timer = QTimer()
         timer.timeout.connect(lambda: None)
         timer.start(500)
