@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt, QMetaObject, QTimer
 from PySide6.QtWidgets import QApplication
 
 from linux_arctis_manager.gui.base_app import QBaseDesktopApp
+from linux_arctis_manager.gui.main_app import QMainApp
 from linux_arctis_manager.gui.systray_app import QSystrayApp
 from linux_arctis_manager.systemd import ensure_systemd_unit
 
@@ -28,11 +29,11 @@ def main():
 
     main_app: QApplication|None = None
     app: QBaseDesktopApp|None = None
+    main_app = QApplication(sys.argv)
     if args.systray:
-        main_app = QApplication(sys.argv)
         app = QSystrayApp(main_app, log_level)
     else:
-        raise Exception('Not implemented yet')
+        app = QMainApp(main_app, log_level)
     
     if app and main_app:
         ensure_systemd_unit(True)
@@ -43,7 +44,10 @@ def main():
 
         def stop_app(*_) -> None:
             QTimer.singleShot(0, app.sig_stop)
+            if timer.isActive():
+                timer.stop()
 
+        main_app.lastWindowClosed.connect(stop_app)
         signal.signal(signal.SIGINT, stop_app)
         signal.signal(signal.SIGTERM, stop_app)
 

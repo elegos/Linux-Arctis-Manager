@@ -60,7 +60,7 @@ class QSystrayApp(QBaseDesktopApp):
     def poll_dbus_thread(self):
         while not self.is_stopping():
             asyncio.run(self.dbus_poll())
-            sleep(2)
+            sleep(1)
     
     async def dbus_poll(self):
         dbus_bus = await MessageBus().connect()
