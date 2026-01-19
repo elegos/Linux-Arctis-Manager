@@ -14,7 +14,7 @@ from linux_arctis_manager.systemd import ensure_systemd_unit
 
 def main():
     parser = ArgumentParser()
-    parser.add_argument('--systray', action='store_true')
+    parser.add_argument('--systray', action='store_true', help='Run systray app, instead of opening the main window')
     parser.add_argument('--verbose', '-v', action='count', default=0, help='Increase verbosity (up to -vvvv)')
     args = parser.parse_args()
 
