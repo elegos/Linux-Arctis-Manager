@@ -111,11 +111,14 @@ class QMainApp(QBaseDesktopApp):
         elif panel == 'device':
             raise NotImplementedError
     
-    async def start(self):
+    def start_sync(self):
         self.logger.info('Starting Main Window app.')
         self.main_window.show()
 
         self.app.exec()
+    
+    async def start(self):
+        self.start_sync()
     
     def on_settings_received(self, settings):
         if settings == self.settings:

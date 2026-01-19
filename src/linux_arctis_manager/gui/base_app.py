@@ -7,3 +7,4 @@ class QBaseDesktopApp(QObject):
 
     def start(self):
         raise NotImplementedError("This method should be implemented by subclasses")
+    

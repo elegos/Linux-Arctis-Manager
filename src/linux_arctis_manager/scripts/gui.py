@@ -27,31 +27,29 @@ def main():
 
     logging.basicConfig(level=log_level, format='%(name)20s %(levelname)8s | %(message)s')
 
-    main_app: QApplication|None = None
-    app: QBaseDesktopApp|None = None
-    main_app = QApplication(sys.argv)
+    app = QApplication(sys.argv)
     if args.systray:
-        app = QSystrayApp(main_app, log_level)
+        q_object = QSystrayApp(app, log_level)
+        app.setQuitOnLastWindowClosed(False)
     else:
-        app = QMainApp(main_app, log_level)
+        q_object = QMainApp(app, log_level)
     
-    if app and main_app:
-        ensure_systemd_unit(True)
+    ensure_systemd_unit(True)
 
-        timer = QTimer()
-        timer.timeout.connect(lambda: None)
-        timer.start(500)
+    timer = QTimer()
+    timer.timeout.connect(lambda: None)
+    timer.start(500)
 
-        def stop_app(*_) -> None:
-            QTimer.singleShot(0, app.sig_stop)
-            if timer.isActive():
-                timer.stop()
+    def stop_app(*_) -> None:
+        QTimer.singleShot(0, q_object.sig_stop)
+        q_object.sig_stop()
+        if timer.isActive():
+            timer.stop()
 
-        main_app.lastWindowClosed.connect(stop_app)
-        signal.signal(signal.SIGINT, stop_app)
-        signal.signal(signal.SIGTERM, stop_app)
+    signal.signal(signal.SIGINT, stop_app)
+    signal.signal(signal.SIGTERM, stop_app)
 
-        asyncio.run(app.start())
+    asyncio.run(q_object.start())
 
 if __name__ == '__main__':
     main()

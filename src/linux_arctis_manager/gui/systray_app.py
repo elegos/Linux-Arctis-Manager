@@ -15,6 +15,7 @@ from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 
 from linux_arctis_manager.constants import DBUS_BUS_NAME, DBUS_STATUS_INTERFACE_NAME, DBUS_STATUS_OBJECT_PATH
 from linux_arctis_manager.gui.base_app import QBaseDesktopApp
+from linux_arctis_manager.gui.main_app import QMainApp
 from linux_arctis_manager.gui.ui_utils import get_icon_pixmap
 from linux_arctis_manager.i18n import I18n
 
@@ -60,7 +61,7 @@ class QSystrayApp(QBaseDesktopApp):
     def poll_dbus_thread(self):
         while not self.is_stopping():
             asyncio.run(self.dbus_poll())
-            sleep(1)
+            sleep(2)
     
     async def dbus_poll(self):
         dbus_bus = await MessageBus().connect()
@@ -101,14 +102,16 @@ class QSystrayApp(QBaseDesktopApp):
         self.menu.clear()
         self._menu_actions = {}
 
-        sections = 0
+        self._menu_actions['open_app'] = QAction(I18n.translate('ui', 'open_app'))
+        self._menu_actions['open_app'].triggered.connect(self.open_main_window)
+        self.menu.addAction(self._menu_actions['open_app'])
 
+        sections = 0
         for _, status_obj in self.last_device_status.items():
             if not status_obj:
                 continue
 
-            if sections > 0:
-                self.menu.addSeparator()
+            self.menu.addSeparator()
             sections += 1
 
             for status, status_o in status_obj.items():
@@ -129,10 +132,20 @@ class QSystrayApp(QBaseDesktopApp):
     def is_stopping(self):
         return hasattr(self, '_stopping') and self._stopping
 
+    def open_main_window(self):
+        if not hasattr(self, '_main_app'):
+            self._main_app = QMainApp(self.app, self.logger.level)
+
+        self._main_app.start_sync()
+
     @Slot()
     def sig_stop(self):
         if self.is_stopping():
             return
+        
+        if hasattr(self, '_main_app'):
+            self._main_app.sig_stop()
+
         self._stopping = True
 
         self.logger.debug('Received shutdown signal, shutting down.')
