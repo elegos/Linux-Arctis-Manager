@@ -39,4 +39,4 @@ class I18n:
 
     @staticmethod
     def translate(section: str, key: str|int) -> str:
-        return f'{I18n.get_instance().translations.get(section, f'{key}', fallback=key)}'
+        return f'{I18n.get_instance().translations.get(section, f'{key}', fallback=key)}'.split('#')[0].strip()
