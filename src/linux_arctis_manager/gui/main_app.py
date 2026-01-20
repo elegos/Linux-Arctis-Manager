@@ -131,7 +131,6 @@ class QMainApp(QBaseDesktopApp):
         if status == self.status:
             return
         
-        print(status)
         self.status = status
 
     @Slot()
