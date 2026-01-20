@@ -33,6 +33,7 @@ def main():
         app.setQuitOnLastWindowClosed(False)
     else:
         q_object = QMainApp(app, log_level)
+        app.setQuitOnLastWindowClosed(True)
     
     ensure_systemd_unit(True)
 
@@ -48,6 +49,9 @@ def main():
 
     signal.signal(signal.SIGINT, stop_app)
     signal.signal(signal.SIGTERM, stop_app)
+
+    if app.quitOnLastWindowClosed():
+        app.lastWindowClosed.connect(stop_app)
 
     asyncio.run(q_object.start())
 
