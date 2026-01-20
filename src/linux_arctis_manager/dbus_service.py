@@ -32,7 +32,7 @@ class ArctisManagerDbusStatusService(ServiceInterface):
     @method('GetStatus')
     def get_status(self) -> 's': # type: ignore
         status, config = self.core_engine.device_status, self.core_engine.device_config
-        if not status or not config:
+        if not status or not config or not config.status:
             return json.dumps({})
 
         result = {}
