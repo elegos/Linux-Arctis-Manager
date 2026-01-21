@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QListWidget, QL
 
 from linux_arctis_manager.gui.base_app import QBaseDesktopApp
 from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
+from linux_arctis_manager.gui.settings_widget import QSettingsWidget
 from linux_arctis_manager.gui.status_widget import QStatusWidget
 from linux_arctis_manager.gui.ui_utils import get_icon_pixmap
 from linux_arctis_manager.i18n import I18n
@@ -36,8 +37,25 @@ class QMainApp(QBaseDesktopApp):
 
         # Qt stuff
         self.main_window = self.main_window_setup()
+
         self.status_widget = QStatusWidget(self.main_panel)
+        self.general_settings_widget = QSettingsWidget(self.main_panel, 'general', 'general')
+        self.device_settings_widget = QSettingsWidget(self.main_panel, 'device', 'device')
+
+        self.main_panel_widgets: dict[str, QWidget] = {
+            'status': self.status_widget,
+            'general': self.general_settings_widget,
+            'device': self.device_settings_widget,
+        }
+
+        for widget in self.main_panel_widgets.values():
+            widget.hide()
+            self.main_panel_layout.addWidget(widget)
+
         self.dbus_wrapper.sig_status.connect(self.status_widget.update_status)
+        self.dbus_wrapper.sig_settings.connect(self.general_settings_widget.update_settings)
+        self.dbus_wrapper.sig_settings.connect(self.device_settings_widget.update_settings)
+
         self.switch_panel('status')
 
         # Pollers
@@ -101,15 +119,14 @@ class QMainApp(QBaseDesktopApp):
         return window
     
     def switch_panel(self, panel: Literal['status', 'general', 'device']) -> None:
-        while self.main_panel_layout.count():
-            self.main_panel_layout.removeItem(self.main_panel_layout.itemAt(0))
+        if not self.main_panel_widgets[panel].isHidden():
+            return
 
-        if panel == 'status':
-            self.main_panel_layout.addWidget(self.status_widget)
-        elif panel == 'general':
-            raise NotImplementedError
-        elif panel == 'device':
-            raise NotImplementedError
+        for name, widget in self.main_panel_widgets.items():
+            if name == panel:
+                widget.show()
+            else:
+                widget.hide()
     
     def start_sync(self):
         self.logger.info('Starting Main Window app.')

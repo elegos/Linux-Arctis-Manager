@@ -15,10 +15,10 @@ class DbusWrapper(QObject):
     sig_status = Signal(object)
     sig_settings = Signal(object)
 
+    logger = logging.getLogger('DbusWrapper')
+
     def __init__(self, parent: QObject|None = None):
         super().__init__(parent)
-
-        self.logger = logging.getLogger('DbusWrapper')
 
     def stop(self):
         self.logger.info("Stopping D-Bus wrapper...")
@@ -31,6 +31,60 @@ class DbusWrapper(QObject):
     def request_settings(self, one_time = False, frequency_seconds: int = 1) -> None:
         request_thread = Thread(target=self.request_settings_thread, kwargs={'frequency_seconds': 0 if one_time else frequency_seconds})
         request_thread.start()
+    
+    @staticmethod
+    def request_list_options(list_name: str, qt_signal: SignalInstance):
+        request_thread = Thread(target=DbusWrapper.request_list_options_thread, kwargs={'list_name': list_name, 'qt_signal': qt_signal})
+        request_thread.start()
+    
+    @staticmethod
+    def request_list_options_thread(list_name: str, qt_signal: SignalInstance):
+        asyncio.run(DbusWrapper.request_list_options_async(list_name, qt_signal))
+    
+    @staticmethod
+    async def request_list_options_async(list_name: str, qt_signal: SignalInstance):
+        dbus_bus = await MessageBus().connect()
+        reply = await dbus_bus.call(Message(
+            destination=DBUS_BUS_NAME,
+            path=DBUS_SETTINGS_OBJECT_PATH,
+            interface=DBUS_SETTINGS_INTERFACE_NAME,
+            member='GetListOptions',
+            message_type=MessageType.METHOD_CALL,
+            signature='s',
+            body=[list_name],
+        ))
+
+        if reply is None:
+            DbusWrapper.logger.error('Error getting settings: no reply')
+
+        elif reply.message_type == MessageType.ERROR:
+            DbusWrapper.logger.error('Error getting settings: %s', reply.body)
+
+        else:
+            obj = {'name': list_name, 'list': json.loads(reply.body[0]) or []}
+            qt_signal.emit(obj)
+
+    @staticmethod
+    def change_setting(name: str, value: int|bool|str) -> None:
+        request_thread = Thread(target=DbusWrapper.change_setting_thread, kwargs={'name': name, 'value': value})
+        request_thread.start()
+    
+    @staticmethod
+    def change_setting_thread(name: str, value: int|bool|str):
+        asyncio.run(DbusWrapper.change_setting_async(name, value))
+    
+    @staticmethod
+    async def change_setting_async(name: str, value: int|bool|str):
+        dbus_bus = await MessageBus().connect()
+        await dbus_bus.call(Message(
+            destination=DBUS_BUS_NAME,
+            path=DBUS_SETTINGS_OBJECT_PATH,
+            interface=DBUS_SETTINGS_INTERFACE_NAME,
+            member='SetSetting',
+            message_type=MessageType.METHOD_CALL,
+            signature='ss',
+            body=[name, json.dumps(value)],
+        ))
     
     def request_status_thread(self, frequency_seconds: int):
         asyncio.run(self.dbus_request_async(
