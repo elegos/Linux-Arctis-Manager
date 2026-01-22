@@ -48,10 +48,11 @@ class PulseAudioManager:
             return
         
         self.logger.info(f'Creating virtual sink "{name}" -> "{sink_output}"...')
+        escaped_node_description = description.replace(' ', '\\ ')
         self.pulse.module_load(
             'module-null-sink',
             f'sink_name={name} '
-            f'sink_properties=node.description="{description.replace(' ', '\\ ')}"'
+            f'sink_properties=node.description="{escaped_node_description}"'
         )
 
         self.pulse.module_load(

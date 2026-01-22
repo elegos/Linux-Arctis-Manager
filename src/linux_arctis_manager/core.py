@@ -92,7 +92,7 @@ class CoreEngine:
             return
         
         try:
-            read_input: list[int] = list(await asyncio.to_thread(self.usb_device.read, endpoint, 64, 1))
+            read_input: list[int] = list(await asyncio.to_thread(self.usb_device.read, endpoint, 64, 1000))
             if self.device_config is None:
                 return
 

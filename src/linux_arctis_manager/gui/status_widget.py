@@ -52,8 +52,8 @@ class QStatusWidget(QWidget):
 
             for status, status_o in status_obj.items():
                 label = QLabel(
-                    f'{I18n.translate('status', status)}: '
-                    f'{I18n.translate('status_values', status_o['value'])}'
-                    f'{'%' if status_o['type'] == 'percentage' else ''}'
+                    f"{I18n.translate('status', status)}: "
+                    f"{I18n.translate('status_values', status_o['value'])}"
+                    f"{'%' if status_o['type'] == 'percentage' else ''}"
                 )
                 self.main_layout.addWidget(label)

@@ -116,9 +116,9 @@ class QSystrayApp(QBaseDesktopApp):
 
             for status, status_o in status_obj.items():
                 self._menu_actions['status_' + status] = QAction(
-                    f'{I18n.translate('status', status)}: '
-                    f'{I18n.translate('status_values', status_o['value'])}'
-                    f'{'%' if status_o['type'] == 'percentage' else ''}'
+                    f"{I18n.translate('status', status)}: "
+                    f"{I18n.translate('status_values', status_o['value'])}"
+                    f"{'%' if status_o['type'] == 'percentage' else ''}"
                 )
                 self.menu.addAction(self._menu_actions['status_' + status])
 
