@@ -16,12 +16,11 @@ A replacement for SteelSeries GG software, to manage your Arctis device on Linux
 ## CLI commands
 
 - `lam-daemon`: executed by user-level systemd.
-- `lam-cli`*: to interact with the daemon in the terminal, and to run utilities like udev rules generation.
-- `lam-gui`*: the graphical user interface, to alter settings and see the device's status.
+- `lam-cli`: to run utilities like udev rules generation, desktop entries installation etc.
+- `lam-gui`: the graphical user interface, to alter settings and see the device's status.
 
-\*: to be developed
 
-## 🖥️ Install
+## 🖥️ Install & setup
 
 ### From sources
 
@@ -35,17 +34,21 @@ Wheel file creation
 Wheel installation
 - `pip install dist/linux_arctis_manager-*.whl`
 
-System setup / settings update
-- `sudo lam-cli udev write-rules --force --reload` (add / update the udev rules file and reload them)
-
 ### From wheel (released version)
 
 Wheel installation
 - `pip install linux_arctis_manager-....whl`
 
-System setup / settings update
-- `sudo lam-cli udev write-rules --force --reload` (add / update the udev rules file and reload them)
+### At each update
 
+- `lam-cli udev write-rules --force --reload` (add / update the udev rules file and reload them)
+- `lam-cli desktop write` (add the desktop menu entries)
+
+## Uninstall / cleanup
+- `lam-cli desktop remove` (remove the desktop menu entries)
+- `systemctl --user disable --now arctis-manager` (disables and stops arctis-manager service)
+- `rm ~/.config/systemd/user/arctis-manager.service` (removes the systemd's user-level arctis-manager service file)
+- `sudo rm /usr/lib/udev/rules.d/91-steelseries-arctis.rules` (remove udev rules)
 
 ## ⌨️ Development
 
