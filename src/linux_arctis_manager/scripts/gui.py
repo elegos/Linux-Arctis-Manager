@@ -17,6 +17,7 @@ def main():
     parser = ArgumentParser()
     parser.add_argument('--systray', action='store_true', help='Run systray app, instead of opening the main window')
     parser.add_argument('--verbose', '-v', action='count', default=0, help='Increase verbosity (up to -vvvv)')
+    parser.add_argument('--no-enforce-systemd', action='store_true', help='Do not enforce systemd unit')
     args = parser.parse_args()
 
     log_level = logging.CRITICAL
@@ -35,7 +36,8 @@ def main():
         q_object = QMainApp(app, log_level)
         app.setQuitOnLastWindowClosed(True)
     
-    ensure_systemd_unit(True)
+    if not args.no_enforce_systemd:
+        ensure_systemd_unit(True)
 
     timer = QTimer()
     timer.timeout.connect(lambda: None)

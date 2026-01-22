@@ -12,6 +12,14 @@
             "console": "integratedTerminal"
         },
         {
+            "name": "Main window (no systemd)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/linux_arctis_manager/scripts/gui.py",
+            "console": "integratedTerminal",
+            "args": ["--no-enforce-systemd"]
+        },
+        {
             "name": "Main window",
             "type": "debugpy",
             "request": "launch",
