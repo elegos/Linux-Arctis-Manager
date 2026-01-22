@@ -123,6 +123,11 @@ device:
         step: 1
         min_label: off
         max_label: high
+        values_mapping:
+          0x00: off
+          0x01: low
+          0x02: medium  
+          0x03: high
         default: 0x00 # off
         update_sequence: [0x06, 0x39, 'value']
       mic_led_brightness:
@@ -151,6 +156,14 @@ device:
         step: 1
         min_label: never
         max_label: 60_minutes
+        values_mapping:
+          0x00: never
+          0x01: 1_minutes
+          0x02: 5_minutes
+          0x03: 10_minutes
+          0x04: 15_minutes
+          0x05: 30_minutes
+          0x06: 60_minutes
         default: 0x05 # 30 minutes
         update_sequence: [0x06, 0xc1, 'value']
     wireless:

@@ -164,6 +164,11 @@ min_label: slider_setting_min          # As found in the language ini file
 max_label: slider_setting_max          # As found in the language ini file
 default: 0x0a                          # The value set if none was before
 update_sequence: [0x06, 0x37, 'value'] # The setting's command update sequence
+values_mapping:                        # OPTIONAL: if the slider needs different representation of the values
+  0: off                               # Labels as found in [settings_values]
+  1: low
+  2: medium
+  3: high
 ```
 
 ```yaml

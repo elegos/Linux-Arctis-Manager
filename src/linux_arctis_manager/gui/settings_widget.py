@@ -131,10 +131,20 @@ class QSettingsWidget(QWidget):
             slider.setValue(int(float(value)))
             widget_layout.addWidget(slider)
 
-            widget_value_label = QLabel(f'{value}')
+            def slider_value_callback(config: ConfigSetting) -> Callable[[bool|str|int], str]:
+                def get_slider_value(value: bool|str|int) -> str:
+                    return I18n.get_instance().translate(
+                        'settings_values',
+                        config.get_kwargs().get('values_mapping', {}).get(f'{value}', value)
+                    )
+
+                return get_slider_value
+
+            slider_value = slider_value_callback(config)
+            widget_value_label = QLabel(slider_value(value))
             widget_layout.addWidget(widget_value_label)
 
-            slider.valueChanged.connect(lambda value: widget_value_label.setText(f'{value}'))
+            slider.valueChanged.connect(lambda value: widget_value_label.setText(slider_value(value)))
             slider.valueChanged.connect(lambda value: callback(config, value))
         elif config.type == SettingType.SELECT:
             widget = QComboBox()
