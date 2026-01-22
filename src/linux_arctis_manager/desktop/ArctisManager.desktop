@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Arctis Manager
+Exec=lam-gui
+Icon=arctis-manager
+Type=Application
+Terminal=false
+Categories=Utility;Application;

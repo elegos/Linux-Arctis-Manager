@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Arctis Manager (system tray)
+Exec=lam-gui --systray
+Icon=arctis-manager
+Type=Application
+Terminal=false
+Categories=Utility;Application;
+StartupNotify=true
