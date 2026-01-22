@@ -6,7 +6,7 @@ from linux_arctis_manager.config import ConfigSetting, ConfigStatusResponseMappi
 
 
 def test_config_parse():
-    config_path = Path(__file__).parent.parent / 'src' / 'devices' / 'nova_pro_wireless.yaml'
+    config_path = Path(__file__).parent.parent / 'src' / 'linux_arctis_manager' / 'devices' / 'nova_pro_wireless.yaml'
     yaml = YAML(typ='safe')
     config_yaml = yaml.load(config_path)
     config = DeviceConfiguration(config_yaml)
@@ -37,7 +37,7 @@ def test_config_parse():
     assert hasattr(config.status.response_mapping[2], 'headset_power_status')
     assert getattr(config.status.response_mapping[2], 'headset_power_status') == 0x0f
     assert len(config.status.representation.keys()) == 5
-    assert list(config.status.representation.keys()) == ['headset', 'mic', 'bluetooth', 'wireless', 'gamedac']
+    assert list(config.status.representation.keys()) == ['headset', 'mic', 'gamedac', 'bluetooth', 'wireless']
     assert config.status.representation['gamedac'] == ['station_volume', 'charge_slot_battery_charge']
 
     assert len(config.status_parse) == 17
