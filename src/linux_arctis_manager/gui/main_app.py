@@ -141,7 +141,6 @@ class QMainApp(QBaseDesktopApp):
         if settings == self.settings:
             return
         
-        print(settings)
         self.settings = settings
 
     def on_status_received(self, status):
