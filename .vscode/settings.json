@@ -1,8 +1,5 @@
 {
     "files.insertFinalNewline": true,
-    "python.analysis.extraPaths": [
-        "src"
-    ],
     "editor.codeActionsOnSave": {
         "source.organizeImports": "explicit"
     },
