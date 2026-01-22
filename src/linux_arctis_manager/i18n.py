@@ -1,7 +1,6 @@
-from configparser import ConfigParser
 import logging
+from configparser import ConfigParser
 from pathlib import Path
-import sys
 
 from linux_arctis_manager.constants import HOME_LANG_FOLDER
 

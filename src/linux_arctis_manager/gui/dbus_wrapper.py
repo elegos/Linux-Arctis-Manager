@@ -9,7 +9,12 @@ from dbus_next.constants import MessageType
 from dbus_next.message import Message
 from PySide6.QtCore import QObject, Signal, SignalInstance
 
-from linux_arctis_manager.constants import DBUS_BUS_NAME, DBUS_SETTINGS_INTERFACE_NAME, DBUS_SETTINGS_OBJECT_PATH, DBUS_STATUS_INTERFACE_NAME, DBUS_STATUS_OBJECT_PATH
+from linux_arctis_manager.constants import (DBUS_BUS_NAME,
+                                            DBUS_SETTINGS_INTERFACE_NAME,
+                                            DBUS_SETTINGS_OBJECT_PATH,
+                                            DBUS_STATUS_INTERFACE_NAME,
+                                            DBUS_STATUS_OBJECT_PATH)
+
 
 class DbusWrapper(QObject):
     sig_status = Signal(object)

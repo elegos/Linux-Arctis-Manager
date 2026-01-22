@@ -1,15 +1,16 @@
-from argparse import ArgumentParser
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
+from argparse import ArgumentParser
+from pathlib import Path
 from typing import NamedTuple
 
 from ruamel.yaml import YAML
 
 from linux_arctis_manager.config import DeviceConfiguration
-from linux_arctis_manager.constants import DEVICES_CONFIG_FOLDER, UDEV_RULES_PATH
+from linux_arctis_manager.constants import (DEVICES_CONFIG_FOLDER,
+                                            UDEV_RULES_PATH)
 from linux_arctis_manager.utils import project_version
 
 ConfigRuleset = NamedTuple(

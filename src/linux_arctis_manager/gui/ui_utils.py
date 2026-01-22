@@ -1,9 +1,9 @@
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from PySide6 import QtSvg
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPainter, QPalette, QPixmap
-from PySide6 import QtSvg
 from PySide6.QtWidgets import QApplication
 
 ICON_PATH = Path(__file__).parent / 'images' / 'steelseries_logo.svg'

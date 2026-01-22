@@ -1,7 +1,8 @@
 from abc import ABC
 from enum import Enum
-from importlib.metadata import version, PackageNotFoundError
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Callable, Generic, TypeVar
+
 
 def project_version() -> str:
     try:

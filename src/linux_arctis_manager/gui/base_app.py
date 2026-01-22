@@ -1,5 +1,6 @@
 from PySide6.QtCore import QObject, Slot
 
+
 class QBaseDesktopApp(QObject):
     @Slot()
     def sig_stop(self):

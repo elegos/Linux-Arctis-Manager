@@ -1,8 +1,11 @@
 import logging
 import time
+
 import pulsectl
 
-from linux_arctis_manager.constants import PULSE_CHAT_NODE_NAME, PULSE_MEDIA_NODE_NAME, STEELSERIES_VENDOR_ID
+from linux_arctis_manager.constants import (PULSE_CHAT_NODE_NAME,
+                                            PULSE_MEDIA_NODE_NAME,
+                                            STEELSERIES_VENDOR_ID)
 
 ONLY_PHYSICAL = 1
 ONLY_VIRTUAL = 2

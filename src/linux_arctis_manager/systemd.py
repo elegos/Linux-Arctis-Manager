@@ -1,6 +1,8 @@
-from pathlib import Path
 import subprocess
-from linux_arctis_manager.constants import HOME_SYSTEMD_SERVICE_FOLDER, SYSTEMD_SERVICE_NAME
+from pathlib import Path
+
+from linux_arctis_manager.constants import (HOME_SYSTEMD_SERVICE_FOLDER,
+                                            SYSTEMD_SERVICE_NAME)
 
 
 def is_systemd_unit_enabled() -> bool:

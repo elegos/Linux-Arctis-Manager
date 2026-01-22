@@ -1,6 +1,7 @@
-from PySide6.QtCore import QPoint, Qt, QRect, QPropertyAnimation, QEasingCurve, Property
-from PySide6.QtGui import QPaintEvent, QPainter
-from PySide6.QtWidgets import QWidget, QCheckBox
+from PySide6.QtCore import (Property, QEasingCurve, QPoint, QPropertyAnimation,
+                            QRect, Qt)
+from PySide6.QtGui import QPainter, QPaintEvent
+from PySide6.QtWidgets import QCheckBox, QWidget
 
 LEFT_MARGIN = 3
 

@@ -1,15 +1,20 @@
 import asyncio
 import logging
 from typing import Any, Coroutine, Literal, cast
+
 import usb
 from usb.core import Device
 
-from linux_arctis_manager.config import DeviceConfiguration, load_device_configurations, parsed_status
-from linux_arctis_manager.constants import PULSE_CHAT_NODE_NAME, PULSE_MEDIA_NODE_NAME
-from linux_arctis_manager.settings import DeviceSettings, GeneralSettings
+from linux_arctis_manager.config import (DeviceConfiguration,
+                                         load_device_configurations,
+                                         parsed_status)
+from linux_arctis_manager.constants import (PULSE_CHAT_NODE_NAME,
+                                            PULSE_MEDIA_NODE_NAME)
 from linux_arctis_manager.pactl import PulseAudioManager
+from linux_arctis_manager.settings import DeviceSettings, GeneralSettings
 from linux_arctis_manager.usb_devices_monitor import USBDevicesMonitor
 from linux_arctis_manager.utils import ObservableDict
+
 
 class TypedDevice(Device):
     idVendor: int

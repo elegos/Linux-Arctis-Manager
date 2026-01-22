@@ -24,6 +24,8 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "autoflake>=2.3.1",
+    "isort>=7.0.0",
     "pytest>=9.0.2",
 ]
 

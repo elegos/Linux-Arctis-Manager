@@ -1,10 +1,10 @@
-from argparse import ArgumentParser
 import asyncio
 import logging
 import signal
 import sys
+from argparse import ArgumentParser
 
-from PySide6.QtCore import Qt, QMetaObject, QTimer
+from PySide6.QtCore import QMetaObject, Qt, QTimer
 from PySide6.QtWidgets import QApplication
 
 from linux_arctis_manager.gui.base_app import QBaseDesktopApp

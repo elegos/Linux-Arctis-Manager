@@ -7,11 +7,16 @@ from dbus_next.aio.message_bus import MessageBus
 from dbus_next.service import ServiceInterface, method
 
 from linux_arctis_manager.config import parsed_status
-from linux_arctis_manager.constants import \
-    DBUS_BUS_NAME, DBUS_CONFIG_INTERFACE_NAME, DBUS_CONFIG_OBJECT_PATH, DBUS_SETTINGS_OBJECT_PATH, \
-    DBUS_SETTINGS_INTERFACE_NAME, DBUS_STATUS_INTERFACE_NAME, DBUS_STATUS_OBJECT_PATH
+from linux_arctis_manager.constants import (DBUS_BUS_NAME,
+                                            DBUS_CONFIG_INTERFACE_NAME,
+                                            DBUS_CONFIG_OBJECT_PATH,
+                                            DBUS_SETTINGS_INTERFACE_NAME,
+                                            DBUS_SETTINGS_OBJECT_PATH,
+                                            DBUS_STATUS_INTERFACE_NAME,
+                                            DBUS_STATUS_OBJECT_PATH)
 from linux_arctis_manager.core import CoreEngine
 from linux_arctis_manager.pactl import TypedPulseSinkInfo
+
 
 class ArctisManagerDbusConfigService(ServiceInterface):
     def __init__(self, core: CoreEngine):

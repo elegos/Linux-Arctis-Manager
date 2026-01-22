@@ -1,12 +1,15 @@
 from threading import Lock
-from typing import Any, Callable
+from typing import Callable
+
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, QComboBox
+from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QSlider,
+                               QVBoxLayout, QWidget)
 
 from linux_arctis_manager.config import ConfigSetting, SettingType
 from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
 from linux_arctis_manager.gui.qt_widgets.q_dual_state import QDualState
 from linux_arctis_manager.i18n import I18n
+
 
 class QSettingsWidget(QWidget):
     sig_list_received = Signal(object)

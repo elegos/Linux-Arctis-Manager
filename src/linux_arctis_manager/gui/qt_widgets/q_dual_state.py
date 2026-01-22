@@ -1,9 +1,10 @@
 from typing import Literal
 
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 from linux_arctis_manager.gui.qt_widgets.q_toggle import QToggle
+
 
 class QDualState(QWidget):
     checkStateChanged = Signal(Qt.CheckState)

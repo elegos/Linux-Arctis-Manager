@@ -1,8 +1,8 @@
-from PySide6.QtGui import QPalette
-from PySide6.QtWidgets import QVBoxLayout, QWidget, QLabel, QApplication
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from linux_arctis_manager.i18n import I18n
+
 
 class QStatusWidget(QWidget):
     main_layout: QVBoxLayout

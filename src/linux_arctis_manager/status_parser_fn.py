@@ -1,6 +1,5 @@
 from typing import Callable, Literal, ParamSpec, TypeVar
 
-
 P = ParamSpec("P")
 R = TypeVar("R")
 

@@ -1,19 +1,21 @@
 import asyncio
 import json
 import locale
-from logging import Logger
 import logging
+from logging import Logger
 from threading import Thread
 from time import sleep
 
 from dbus_next.aio.message_bus import MessageBus
-from dbus_next.message import Message
 from dbus_next.constants import MessageType
-from PySide6.QtCore import Slot, Signal
-from PySide6.QtGui import QIcon, QAction
-from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
+from dbus_next.message import Message
+from PySide6.QtCore import Signal, Slot
+from PySide6.QtGui import QAction, QIcon
+from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from linux_arctis_manager.constants import DBUS_BUS_NAME, DBUS_STATUS_INTERFACE_NAME, DBUS_STATUS_OBJECT_PATH
+from linux_arctis_manager.constants import (DBUS_BUS_NAME,
+                                            DBUS_STATUS_INTERFACE_NAME,
+                                            DBUS_STATUS_OBJECT_PATH)
 from linux_arctis_manager.gui.base_app import QBaseDesktopApp
 from linux_arctis_manager.gui.main_app import QMainApp
 from linux_arctis_manager.gui.ui_utils import get_icon_pixmap

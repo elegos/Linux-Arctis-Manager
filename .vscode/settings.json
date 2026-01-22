@@ -3,6 +3,9 @@
     "python.analysis.extraPaths": [
         "src"
     ],
+    "editor.codeActionsOnSave": {
+        "source.organizeImports": "explicit"
+    },
     "python.testing.pytestEnabled": true,
     "python.testing.unittestEnabled": false
 }

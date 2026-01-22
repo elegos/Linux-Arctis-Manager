@@ -3,7 +3,8 @@ from typing import Literal
 
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QListWidget,
+                               QListWidgetItem, QVBoxLayout, QWidget)
 
 from linux_arctis_manager.gui.base_app import QBaseDesktopApp
 from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
@@ -11,6 +12,7 @@ from linux_arctis_manager.gui.settings_widget import QSettingsWidget
 from linux_arctis_manager.gui.status_widget import QStatusWidget
 from linux_arctis_manager.gui.ui_utils import get_icon_pixmap
 from linux_arctis_manager.i18n import I18n
+
 
 class QMainApp(QBaseDesktopApp):
     app: QApplication

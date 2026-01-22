@@ -1,14 +1,15 @@
-from dataclasses import dataclass
-from enum import Enum
 import inspect
 import logging
-from typing import Callable, Any, Literal
+from dataclasses import dataclass
+from enum import Enum
+from typing import Any, Callable, Literal
 
 from ruamel.yaml import YAML
 
 from linux_arctis_manager import status_parser_fn
 from linux_arctis_manager.constants import DEVICES_CONFIG_FOLDER
 from linux_arctis_manager.utils import JsonSerializable
+
 
 class PaddingPosition(Enum):
     START = 'start'
