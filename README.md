@@ -98,7 +98,7 @@ Once the configuration is completed locally, a new ticket can be raised to add b
 
 This tutorial should kick start your reverse engineering journey!
 
-[![Wireshark tutorial on YouTube](docs/images/wireshark_fast_tutorial.png)]([docs/videos/Wireshark_fast_tutorial.mp4](https://www.youtube.com/watch?v=zWbdnHwTr3M))
+[![Wireshark tutorial on YouTube](docs/images/wireshark_fast_tutorial.png)](https://www.youtube.com/watch?v=zWbdnHwTr3M)
 
 ### Device configuration specs
 
