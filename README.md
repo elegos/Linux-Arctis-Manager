@@ -32,7 +32,7 @@ A replacement for SteelSeries GG software, to manage your Arctis device on Linux
 |Arctis Pro|❌|❌|1252|
 
 
-- SteelSeries Arctis Nova Pro Wireless
+\*: experimental support, needs test by the community. Open an issue in case of problem(s)
 
 ## CLI commands
 
