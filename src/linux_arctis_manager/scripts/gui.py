@@ -29,6 +29,7 @@ def main():
     logging.basicConfig(level=log_level, format='%(name)20s %(levelname)8s | %(message)s')
 
     app = QApplication(sys.argv)
+    q_object = None
     if args.systray:
         q_object = QSystrayApp(app, log_level)
         app.setQuitOnLastWindowClosed(False)
@@ -55,7 +56,8 @@ def main():
     if app.quitOnLastWindowClosed():
         app.lastWindowClosed.connect(stop_app)
 
-    asyncio.run(q_object.start())
+    if q_object:
+        asyncio.run(q_object.start())
 
 if __name__ == '__main__':
     main()
