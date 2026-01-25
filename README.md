@@ -43,22 +43,19 @@ A replacement for SteelSeries GG software, to manage your Arctis device on Linux
 
 ## 🖥️ Install & setup
 
-### From sources
+### Build wheel from sources
 
 Installation of uv (one-timer, then restart the terminal and ensure that `uv` is in `$PATH`)
-- `pip install --upgrade uv`
+- `pip install --user --upgrade uv`
 
 Wheel file creation
 - `rm -rf dist`
 - `uv build`
 
-Wheel installation
-- `pip install dist/linux_arctis_manager-*.whl`
-
-### From wheel (released version)
+### From wheel (built or from releases page)
 
 Wheel installation
-- `pip install linux_arctis_manager-....whl`
+- `pip install --user path/to/linux_arctis_manager-....whl`
 
 ### At each update
 
