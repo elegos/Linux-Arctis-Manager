@@ -1,3 +1,4 @@
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -21,6 +22,8 @@ def ensure_systemd_unit(enable: bool = False) -> None:
         subprocess.run(['systemctl', '--user', 'enable', '--now', SYSTEMD_SERVICE_NAME], check=True)
 
 def write_systemd_service(path: Path) -> None:
+    daemon_path = shutil.which('lam-daemon')
+
     template = f'''[Unit]
 Description=Arctis Manager
 StartLimitInterval=1min
@@ -28,7 +31,7 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-ExecStart={Path.home()}/.local/bin/lam-daemon
+ExecStart={daemon_path}
 Restart=on-failure
 RestartSec=1
 
