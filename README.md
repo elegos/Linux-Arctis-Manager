@@ -40,6 +40,8 @@ A replacement for SteelSeries GG software, to manage your Arctis device on Linux
 - `lam-cli`: to run utilities like udev rules generation, desktop entries installation etc.
 - `lam-gui`: the graphical user interface, to alter settings and see the device's status.
 
+Each command can be called with `-h` or `--help` to get all the options for the commands and subcommands.
+
 
 ## 🖥️ Install & setup
 
@@ -80,7 +82,7 @@ If you want, you can add the systray app to the startup applications. The daemon
 
 - Run the daemon: `uv run lam-daemon`
 - Run the CLI: `uv run lam-cli`
-- Run the GUI: `uv run lam-gui`
+- Run the GUI: `uv run lam-gui [--no-enforce-systemd]` - use the option to avoid force enabling the daemon, in case you're working on it
 
 ### Documentation
 
