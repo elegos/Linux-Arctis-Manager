@@ -102,6 +102,8 @@ class CoreEngine:
                 return
 
             if self.device_config.status is not None:
+                self.logger.debug(f'Response: {read_input}')
+
                 for mapping in self.device_config.status.response_mapping:
                     starts_with = f'{mapping.starts_with:02x}'
                     if len(starts_with) % 2 != 0:
