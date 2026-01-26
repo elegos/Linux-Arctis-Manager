@@ -73,10 +73,8 @@ Wheel installation
 ### Basic commands
 
 - Run the daemon: `uv run lam-daemon`
-- Run the CLI: `uv run lam-cli`*
-- Run the GUI: `uv run lam-gui`*
-
-\*: to be developed
+- Run the CLI: `uv run lam-cli`
+- Run the GUI: `uv run lam-gui`
 
 ### How to add support to a new device
 
@@ -89,6 +87,26 @@ During the development, new labels will probably be required. In order to add th
 In case of software limitations for any reason, some coding might be required (for example to support a new status or setting type).
 
 Once the configuration is completed locally, a new ticket can be raised to add both the new device configuration file and the eventual languages file(s) edits. A pull request into the development branch is very welcome, specially if adding new code, too.
+
+#### USB interfaces
+
+In order to get the command interface and the listen interfaces, you can use Wireshark to derivate the information, or guess it running `lam-cli tools arctis-devices`. The command will list all the SteelSeries USB devices, listing all the HID interfaces and their relative endpoints. There should be usually only one interface with two endpoints (IN and OUT) with the packet size big enough to handle information. This is a sample output for an Arctis Nova Pro Wireless device:
+
+```bash
+❯ lam-cli tools arctis-devices 
+SteelSeries Arctis Nova Pro Wireless (4152:4832)
+        Configuration: 1
+                HID interface (num : alt): 3 : 0
+                        Endpoint: 83 Dir=IN Type=Interrupt MaxPacketSize=2 
+                HID interface (num : alt): 4 : 0
+                        Endpoint: 84 Dir=IN Type=Interrupt MaxPacketSize=64 
+                        Endpoint: 04 Dir=OUT Type=Interrupt MaxPacketSize=64
+```
+
+In this case there is only one interface (4, 0) with two endpoints with a max packet size of 64 bytes, while the other HID interface has only an IN endpoint with very small MaxPacketSize of 2 bytes. This means that:
+
+- Command and listen interface is 4, 0
+- The command padding's length is 64, presumably with zero-filler at the end of the message (this can be derived via Wireshark sniffing)
 
 
 ### Brief Wireshark tutorial
