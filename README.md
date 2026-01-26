@@ -57,10 +57,16 @@ Wheel file creation
 Wheel installation
 - `pip install --user path/to/linux_arctis_manager-....whl`
 
+### One-time after install
+
+- `lam-cli desktop write` (add the desktop menu entries. It's not strictly required to update them at each update.)
+
+If you want, you can add the systray app to the startup applications. The daemon will be enabled at the first application's run, and will start when the graphical session starts indipendently from the GUI (which is a client to the daemon).
+
 ### At each update
 
 - `lam-cli udev write-rules --force --reload` (add / update the udev rules file and reload them)
-- `lam-cli desktop write` (add the desktop menu entries)
+
 
 ## Uninstall / cleanup
 - `lam-cli desktop remove` (remove the desktop menu entries)
