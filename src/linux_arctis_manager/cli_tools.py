@@ -31,7 +31,7 @@ def arctis_usb_info(vendor_id: int = 0x1038, bInterfaceClass: int = 0x03):
         else:
             device = cast(TypedDevice, element)
         
-        print(f'{device.manufacturer} {device.product} ({device.idVendor}:{device.idProduct})')
+        print(f'{device.manufacturer} {device.product} ({device.idVendor:04x}:{device.idProduct:04x})')
         for config in device:
             print(f'\tConfiguration: {config.bConfigurationValue}')
             for interface in config:

@@ -94,7 +94,7 @@ In order to get the command interface and the listen interfaces, you can use Wir
 
 ```bash
 ❯ lam-cli tools arctis-devices 
-SteelSeries Arctis Nova Pro Wireless (4152:4832)
+SteelSeries Arctis Nova Pro Wireless (1038:12e0)
         Configuration: 1
                 HID interface (num : alt): 3 : 0
                         Endpoint: 83 Dir=IN Type=Interrupt MaxPacketSize=2 
