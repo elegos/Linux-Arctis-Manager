@@ -96,6 +96,8 @@ For the first, you can cheat by reading the source of the [Sapd's HeadsetControl
 
 Most of the states are represented by linear sequences, starting from 0x00 or 0x01 up to the maximum value. For example, you can plug a fully charged battery and see a value of 0x08 --> this means that the battery status might have up to 9 different states (0x00 -> 0x08).
 
+The status section is made of two items: the already discussed request sequence, to get the status of the device, and the status mapping part. The latter is a list of objects with: `starts_with` and the list of states. This is because the headset might send on the same endpoint different messages. Typically on the Arctis Nova Pro, when you send the status request message (0x06b0), you get a message starting with 0x06b0, with most of the states. At the same time, the device will also send messages with different header (in the particular case at least 0x0725 for the volume and 0x0745 for the channels mix), and these messages will have different headers, and the offset values will mean differently.
+
 The status parse section is described in details in the specs documentation, with the (currently) supported types. If a new type of setting requires support, a PR is required to be done.
 
 ### settings
