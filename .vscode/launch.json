@@ -33,6 +33,14 @@
             "program": "${workspaceFolder}/src/linux_arctis_manager/scripts/gui.py",
             "args": ["--systray"],
             "console": "integratedTerminal"
+        },
+        {
+            "name": "Tools: USB arctis devices",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/linux_arctis_manager/scripts/cli.py",
+            "args": ["tools", "arctis-devices"],
+            "console": "integratedTerminal"
         }
     ]
 }

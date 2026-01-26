@@ -8,6 +8,7 @@ from typing import NamedTuple
 
 from ruamel.yaml import YAML
 
+from linux_arctis_manager.cli_tools import arctis_usb_info
 from linux_arctis_manager.config import DeviceConfiguration
 from linux_arctis_manager.constants import (DEVICES_CONFIG_FOLDER,
                                             UDEV_RULES_PATH)
@@ -191,6 +192,13 @@ def main():
     destkop_subparsers.add_parser('write', help='Write the desktop entries')
     destkop_subparsers.add_parser('remove', help='Remove the desktop entries')
 
+    # Tools
+    tools_parser = subparsers.add_parser('tools', help='Reverse engineering tools')
+
+    usb_devices_subparser = tools_parser.add_subparsers(dest='action', required=True)
+    arctis_devices_parser = usb_devices_subparser.add_parser('arctis-devices', help='List important Arctis device(s) information, like HID interfaces, alternate configs, etc.')
+    arctis_devices_parser.add_argument('--vendor-id', default=0x1038, type=int)
+
     args = parser.parse_args()
 
     if not hasattr(args, 'action'):
@@ -211,3 +219,9 @@ def main():
             return write_desktop_entries()
         elif args.action == 'remove':
             return remove_desktop_entries()
+    elif args.command == 'tools':
+        if args.action == 'arctis-devices':
+            return arctis_usb_info(args.vendor_id)
+
+if __name__ == '__main__':
+    main()
