@@ -42,7 +42,7 @@ def arctis_usb_info(vendor_id: int = 0x1038, bInterfaceClass: int = 0x03):
                     print(
                         f'\t\t\tEndpoint: {endpoint.bEndpointAddress:02x} '
                         f'Dir={endpoint_direction(endpoint.bEndpointAddress)} '
-                        f'Type={endpoint_direction(endpoint.bmAttributes)} '
+                        f'Type={endpoint_type(endpoint.bmAttributes)} '
                         f'MaxPacketSize={endpoint.wMaxPacketSize} '
                     )
         
