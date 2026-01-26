@@ -13,23 +13,23 @@ A replacement for SteelSeries GG software, to manage your Arctis device on Linux
 
 |Device|Channels mix|Advanced features|Product ID(s)|
 |------|------------|-----------------|-------------|
-|Arctis 1 / Xbox|❌|❌|12b3, 12b6|
-|Arctis 1 Wireless|❌|❌||
-|Arctis 3 Console Edition|❌|❌||
-|Arctis 7 / Gen 2|❌|❌|1260, 12ad|
-|Arctis 7+ / PS5 / Xbox / Destiny|❌|❌|220e, 2212, 2216, 2236|
-|Arctis Nova 3|❌|❌|12ec|
+|Arctis 1 / Xbox                      |❌|❌|12b3, 12b6|
+|Arctis 1 Wireless                    |❌|❌||
+|Arctis 3 Console Edition             |❌|❌||
+|Arctis 7 / Gen 2                     |❌|❌|1260, 12ad|
+|Arctis 7+ / PS5 / Xbox / Destiny     |❌|❌|220e, 2212, 2216, 2236|
+|Arctis Nova 3                        |❌|❌|12ec|
 |Arctis Nova 3P Wireless / 3X Wireless|❌|❌|2269, 226d|
-|Arctis Nova 5|❌|❌|2232, 2253|
-|Arctis Nova 7P|❌|❌|220a|
-|Arctis Nova 7X|❌|❌|12d7|
-|Arctis Nova 9|❌|❌|12c2|
-|Arctis Nova Elite|❌|❌||
-|Arctis Nova Pro Wireless / X|✅|✅|12e0, 12e5|
-|Arctis Nova Pro|❌|❌||
-|Arctis Pro GameDAC|❌|❌|1280|
-|Arctis Pro Wireless|❌|❌|1290|
-|Arctis Pro|❌|❌|1252|
+|Arctis Nova 5                        |❌|❌|2232, 2253|
+|Arctis Nova 7P                       |❌|❌|220a|
+|Arctis Nova 7X                       |❌|❌|12d7|
+|Arctis Nova 9                        |❌|❌|12c2|
+|Arctis Nova Elite                    |❌|❌||
+|Arctis Nova Pro Wireless / X         |✅|✅|12e0, 12e5|
+|Arctis Nova Pro                      |❌|❌||
+|Arctis Pro GameDAC                   |❌|❌|1280|
+|Arctis Pro Wireless                  |❌|❌|1290|
+|Arctis Pro                           |❌|❌|1252|
 
 
 \*: experimental support, needs test by the community. Open an issue in case of problem(s)
