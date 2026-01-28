@@ -31,10 +31,15 @@ class DeviceSettings(JsonSerializable):
             return
 
         yaml = YAML(typ='safe')
-        raw = yaml.load(settings_file)
+        raw = yaml.load(settings_file) or {}
 
-        if raw:
-            self.settings = ObservableDict(raw)
+        for key in raw:
+            # Clean old / invalid settings
+            if key in self.settings:
+                self.settings[key] = int(raw[key])
+
+        # if raw:
+        #     self.settings = ObservableDict(raw)
 
     def __setattr__(self, name: str, value: Any) -> None:
         if name in ('vendor_id', 'product_id', 'settings'):
