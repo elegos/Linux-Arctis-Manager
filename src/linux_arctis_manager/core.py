@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import datetime
 from typing import Any, Coroutine, Literal, cast
 
 import usb
@@ -129,22 +130,27 @@ class CoreEngine:
     
     async def loop(self):
         listen_coroutines: list[asyncio.Task] = []
-        tick = 0
+        # tick = 0
         while not self._stopping:
+            start = datetime.now()
             if not self.usb_device:
                 await asyncio.sleep(0.1)
                 continue
 
             if self.device_config is not None:
                 listen_coroutines = [asyncio.create_task(self.listen_endpoint_loop(interface_id)) for interface_id in self.device_config.listen_interface_indexes]
-
-            if tick % 100 == 0:
-                self.request_device_status()
             
-            tick += 1
-            tick %= 100
+            self.request_device_status()
+
+            # if tick % 100 == 0:
+            #     self.request_device_status()
+            
+            # tick += 1
+            # tick %= 100
         
             await asyncio.gather(*listen_coroutines)
+            end = datetime.now()
+            await asyncio.sleep(min(2 - (end - start).total_seconds(), 2))
 
     def on_device_connected(self, vendor_id: int, product_id: int) -> None:
         for device_config in self.device_configurations:
