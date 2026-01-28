@@ -1,5 +1,6 @@
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from linux_arctis_manager.constants import (HOME_SYSTEMD_SERVICE_FOLDER,
@@ -22,7 +23,7 @@ def ensure_systemd_unit(enable: bool = False) -> None:
         subprocess.run(['systemctl', '--user', 'enable', '--now', SYSTEMD_SERVICE_NAME], check=True)
 
 def write_systemd_service(path: Path) -> None:
-    daemon_path = shutil.which('lam-daemon')
+    daemon_path = shutil.which('lam-daemon') or Path(sys.argv[0]).resolve().parent / 'lam-daemon'
 
     template = f'''[Unit]
 Description=Arctis Manager
