@@ -2,7 +2,10 @@ from pathlib import Path
 
 from ruamel.yaml import YAML
 
-from linux_arctis_manager.config import ConfigSetting, ConfigStatusResponseMapping, DeviceConfiguration, PaddingPosition, SettingType, StatusParseType
+from linux_arctis_manager.config import (ConfigSetting,
+                                         ConfigStatusResponseMapping,
+                                         DeviceConfiguration, PaddingPosition,
+                                         SettingType, StatusParseType)
 
 
 def test_config_parse():
@@ -58,24 +61,26 @@ def test_config_parse():
 
     assert config.settings is not None
 
-    assert len(config.settings) == 3
+    assert len(config.settings) == 4
+    assert 'headset' in config.settings
     assert 'microphone' in config.settings
     assert 'power_management' in config.settings
     assert 'wireless' in config.settings
 
-    assert len(config.settings['microphone']) == 4
+    assert len(config.settings['headset']) == 1
+    assert len(config.settings['microphone']) == 3
     assert len(config.settings['power_management']) == 1
     assert len(config.settings['wireless']) == 1
     
-    mic_settings: list[ConfigSetting] = config.settings['microphone']
-    mic_gain = next((s for s in mic_settings if s.name == 'mic_gain'), None)
-    assert mic_gain is not None
-    assert mic_gain.name == 'mic_gain'
-    assert mic_gain.type == SettingType.TOGGLE
-    assert mic_gain.default_value == 0x01
-    mic_gain_kwargs = mic_gain.get_kwargs()
-    assert len(mic_gain_kwargs) == 1
-    assert mic_gain_kwargs['values'] == {'off': 0x00, 'on': 0x01, 'off_label': 'high', 'on_label': 'low'}
+    headset_settings: list[ConfigSetting] = config.settings['headset']
+    gain = next((s for s in headset_settings if s.name == 'gain'), None)
+    assert gain is not None
+    assert gain.name == 'gain'
+    assert gain.type == SettingType.TOGGLE
+    assert gain.default_value == 0x02
+    gain_kwargs = gain.get_kwargs()
+    assert len(gain_kwargs) == 1
+    assert gain_kwargs['values'] == {'off': 0x01, 'on': 0x02, 'off_label': 'high', 'on_label': 'low'}
 
 def test_ConfigStatusResponseMapping_get_status_values():
     mapping = ConfigStatusResponseMapping(starts_with=0x123b, status1=0x02, status2=0x03)

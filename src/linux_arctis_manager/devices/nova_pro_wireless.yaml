@@ -37,7 +37,7 @@ device:
     - [0x06, 0x47, 0x64, 0x00, 0x64]
     - [0x06, 0x83, 0x01]
     - [0x06, 0x89, 0x00]
-    - [0x06, 0x27, 'settings.mic_gain']           # Mic Gain (0x01: low, 0x02: high)
+    - [0x06, 0x27, 'settings.gain']               # Audio Gain (0x01: low, 0x02: high)
     - [0x06, 0xb3, 0x00]
     - [0x06, 0x39, 'settings.mic_side_tone']      # Set the sidetone to 0 (off) -> possible values: 0 (off 1 (low 2 (medium 3 (high)
     - [0x06, 0xbf, 'settings.mic_led_brightness'] # Mute mic led brightness (out of 10)
@@ -106,6 +106,16 @@ device:
     online_value: online
 
   settings:
+    headset:
+      gain:
+        type: toggle
+        values:
+          off: 0x01
+          on: 0x02
+          off_label: high
+          on_label: low
+        default: 0x02 # high
+        update_sequence: [0x06, 0x27, 'value']
     microphone:
       mic_volume:
         type: slider
@@ -139,15 +149,6 @@ device:
         max_label: perc_100
         default: 0x0a # 100%
         update_sequence: [0x06, 0xbf, 'value']
-      mic_gain:
-        type: toggle
-        values:
-          off: 0x00
-          on: 0x01
-          off_label: high
-          on_label: low
-        default: 0x01 # high
-        update_sequence: [0x06, 0x27, 'value']
     power_management:
       pm_shutdown:
         type: slider
