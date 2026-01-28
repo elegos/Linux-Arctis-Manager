@@ -9,7 +9,8 @@
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/src/linux_arctis_manager/scripts/daemon.py",
-            "console": "integratedTerminal"
+            "console": "integratedTerminal",
+            "args": ["-vvvv"]
         },
         {
             "name": "Main window (no systemd)",
@@ -17,13 +18,22 @@
             "request": "launch",
             "program": "${workspaceFolder}/src/linux_arctis_manager/scripts/gui.py",
             "console": "integratedTerminal",
-            "args": ["--no-enforce-systemd"]
+            "args": ["--no-enforce-systemd", "-vvvv"]
         },
         {
             "name": "Main window",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/src/linux_arctis_manager/scripts/gui.py",
+            "console": "integratedTerminal",
+            "args": ["-vvvv"]
+        },
+        {
+            "name": "Systray app (no systemd)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/linux_arctis_manager/scripts/gui.py",
+            "args": ["--systray", "--no-enforce-systemd", "-vvvv"],
             "console": "integratedTerminal"
         },
         {
@@ -31,7 +41,7 @@
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/src/linux_arctis_manager/scripts/gui.py",
-            "args": ["--systray"],
+            "args": ["--systray", "-vvvv"],
             "console": "integratedTerminal"
         },
         {

@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QListWidget,
 
 from linux_arctis_manager.gui.base_app import QBaseDesktopApp
 from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
+from linux_arctis_manager.gui.main_app_proto_widget import QMainAppProtoWidget
 from linux_arctis_manager.gui.settings_widget import QSettingsWidget
 from linux_arctis_manager.gui.status_widget import QStatusWidget
 from linux_arctis_manager.gui.ui_utils import get_icon_pixmap
@@ -16,7 +17,7 @@ from linux_arctis_manager.i18n import I18n
 
 class QMainApp(QBaseDesktopApp):
     app: QApplication
-    main_window: QWidget
+    main_window: QMainAppProtoWidget
 
     side_panel: QListWidget
     main_panel: QWidget
@@ -61,13 +62,23 @@ class QMainApp(QBaseDesktopApp):
         self.switch_panel('status')
 
         # Pollers
-        self.dbus_wrapper.request_settings()
-        self.dbus_wrapper.request_status()
+        # self.dbus_wrapper.request_settings()
+        # self.dbus_wrapper.request_status()
 
         self.destroyed.connect(self.sig_stop)
+        self.main_window.visibilityChanged.connect(self.on_visibility_changed)
     
-    def main_window_setup(self) -> QWidget:
-        window = QWidget()
+    def on_visibility_changed(self, visible: bool):
+        if visible:
+            self.logger.debug('App is visible, starting dbus polling')
+            self.dbus_wrapper.request_settings(one_time=True)
+            self.dbus_wrapper.request_status(one_time=True)
+        else:
+            self.logger.debug('App is hidden, stopping dbus polling')
+            self.dbus_wrapper.stop()
+    
+    def main_window_setup(self) -> QMainAppProtoWidget:
+        window = QMainAppProtoWidget()
 
         window.setWindowFlags(Qt.WindowType.Window)
         window.setWindowTitle('Arctis Manager')

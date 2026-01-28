@@ -53,6 +53,9 @@ class QSystrayApp(QBaseDesktopApp):
 
         self.menu = QMenu()
         self.menu_setup()
+        self.do_polling = False
+        self.menu.aboutToShow.connect(self.start_polling)
+        self.menu.aboutToHide.connect(self.stop_polling)
         
         self.new_status.connect(self.on_new_status)
         self.dbus_poll_thread = Thread(target=self.poll_dbus_thread, daemon=True)
@@ -60,12 +63,24 @@ class QSystrayApp(QBaseDesktopApp):
 
         self.tray_icon.setContextMenu(self.menu)
     
+    def start_polling(self):
+        self.do_polling = True
+    
+    def stop_polling(self):
+        self.do_polling = False
+    
     def poll_dbus_thread(self):
         while not self.is_stopping():
-            asyncio.run(self.dbus_poll())
-            sleep(2)
+            if self.do_polling:
+                asyncio.run(self.dbus_poll())
+                sleep(2)
+            else:
+                # Wait for do_polling faster
+                sleep(.5)
     
     async def dbus_poll(self):
+        self.logger.debug('Polling dbus...')
+
         dbus_bus = await MessageBus().connect()
         reply = await dbus_bus.call(Message(
             destination=DBUS_BUS_NAME,
