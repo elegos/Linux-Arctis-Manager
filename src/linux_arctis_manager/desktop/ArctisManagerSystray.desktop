@@ -1,6 +1,6 @@
 [Desktop Entry]
 Name=Arctis Manager (system tray)
-Exec=lam-gui --systray
+Exec=/bin/sh -c 'exec lam-gui --systray >/dev/null 2>&1'
 Icon=arctis-manager
 Type=Application
 Terminal=false

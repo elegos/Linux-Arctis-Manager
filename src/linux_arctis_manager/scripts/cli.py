@@ -149,8 +149,8 @@ def write_desktop_entries() -> int:
 
     lam_gui = shutil.which('lam-gui')
     if lam_gui:
-        DESKTOP_WINDOW_PATH.write_text(DESKTOP_WINDOW_PATH.read_text().replace('Exec=lam-gui', f'Exec={lam_gui}'))
-        DESKTOP_SYSTRAY_PATH.write_text(DESKTOP_SYSTRAY_PATH.read_text().replace('Exec=lam-gui', f'Exec={lam_gui}'))
+        DESKTOP_WINDOW_PATH.write_text(DESKTOP_WINDOW_PATH.read_text().replace('exec lam-gui', lam_gui))
+        DESKTOP_SYSTRAY_PATH.write_text(DESKTOP_SYSTRAY_PATH.read_text().replace('exec lam-gui', lam_gui))
 
     DESKTOP_WINDOW_PATH.chmod(0o755)
     DESKTOP_SYSTRAY_PATH.chmod(0o755)

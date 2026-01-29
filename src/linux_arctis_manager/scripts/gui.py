@@ -4,10 +4,9 @@ import signal
 import sys
 from argparse import ArgumentParser
 
-from PySide6.QtCore import QMetaObject, Qt, QTimer
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
-from linux_arctis_manager.gui.base_app import QBaseDesktopApp
 from linux_arctis_manager.gui.main_app import QMainApp
 from linux_arctis_manager.gui.systray_app import QSystrayApp
 from linux_arctis_manager.systemd import ensure_systemd_unit
