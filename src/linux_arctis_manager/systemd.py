@@ -18,6 +18,7 @@ def is_systemd_unit_enabled() -> bool:
 
 def ensure_systemd_unit(enable: bool = False) -> None:
     path = HOME_SYSTEMD_SERVICE_FOLDER / SYSTEMD_SERVICE_NAME
+    path.parent.mkdir(parents=True, exist_ok=True)
     write_systemd_service(path)
     if enable:
         subprocess.run(['systemctl', '--user', 'enable', '--now', SYSTEMD_SERVICE_NAME], check=True)
