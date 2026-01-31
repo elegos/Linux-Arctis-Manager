@@ -1,6 +1,5 @@
 import asyncio
 import logging
-from datetime import datetime
 from typing import Any, Coroutine, Literal, cast
 
 import usb
@@ -91,14 +90,14 @@ class CoreEngine:
         if self.usb_device is None:
             return
 
-        endpoint = self.guess_interface_endpoint('in', interface_id)
+        endpoint, max_packet_size = self.guess_interface_endpoint('in', interface_id)
 
         if not endpoint:
             self.logger.warning(f'Failed to find listen interface endpoint for device: {self.usb_device.idProduct:04x}:{self.usb_device.idVendor:04x}')
             return
         
         try:
-            read_input: list[int] = list(await asyncio.to_thread(self.usb_device.read, endpoint, 64, 1000))
+            read_input: list[int] = list(await asyncio.to_thread(self.usb_device.read, endpoint, max_packet_size, 200))
             if self.device_config is None:
                 return
 
@@ -130,9 +129,7 @@ class CoreEngine:
     
     async def loop(self):
         listen_coroutines: list[asyncio.Task] = []
-        # tick = 0
         while not self._stopping:
-            start = datetime.now()
             if not self.usb_device:
                 await asyncio.sleep(0.1)
                 continue
@@ -141,16 +138,8 @@ class CoreEngine:
                 listen_coroutines = [asyncio.create_task(self.listen_endpoint_loop(interface_id)) for interface_id in self.device_config.listen_interface_indexes]
             
             self.request_device_status()
-
-            # if tick % 100 == 0:
-            #     self.request_device_status()
-            
-            # tick += 1
-            # tick %= 100
         
             await asyncio.gather(*listen_coroutines)
-            end = datetime.now()
-            await asyncio.sleep(min(2 - (end - start).total_seconds(), 2))
 
     def on_device_connected(self, vendor_id: int, product_id: int) -> None:
         for device_config in self.device_configurations:
@@ -295,7 +284,7 @@ class CoreEngine:
         if self.usb_device is None:
             raise Exception('USB device is not available')
 
-        endpoint = self.guess_interface_endpoint('out', self.device_config.command_interface_index[0], self.device_config.command_interface_index[1])
+        endpoint, _ = self.guess_interface_endpoint('out', self.device_config.command_interface_index[0], self.device_config.command_interface_index[1])
         if endpoint is None:
             raise Exception(f"Failed to find command interface endpoint for device: {self.usb_device.idProduct:04x}:{self.usb_device.idVendor:04x}")
 
@@ -362,9 +351,12 @@ class CoreEngine:
                 self.logger.info(f"Kernel driver inactive on interface {interface}, re-attaching...")
                 usb_device.attach_kernel_driver(interface)
     
-    def guess_interface_endpoint(self, direction: Literal['in', 'out'], interface_index: int, interface_alternate_setting: int = 0) -> int | None:
+    def guess_interface_endpoint(self, direction: Literal['in', 'out'], interface_index: int, interface_alternate_setting: int = 0) -> tuple[int | None, int | None]:
+        '''
+        Returns the endpoint address and max packet size for the given interface index and alternate setting.
+        '''
         if self.usb_device is None:
-            return None
+            return None, None
 
         directions = {'in': usb.util.ENDPOINT_IN, 'out': usb.util.ENDPOINT_OUT}
 
@@ -379,9 +371,9 @@ class CoreEngine:
 
         for endpoint in interface.endpoints():
             if usb.util.endpoint_direction(endpoint.bEndpointAddress) == directions[direction]:
-                return endpoint.bEndpointAddress
+                return endpoint.bEndpointAddress, endpoint.wMaxPacketSize
 
-        return None
+        return None, None
 
     def request_device_status(self):
         if not self.usb_device or not self.device_config or not self.device_config.status:
