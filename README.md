@@ -65,11 +65,14 @@ lam-cli desktop write # Only to produce the desktop entries; optional after firs
 lam-cli udev write-rules --force --reload # Required for first installation or new devices support only
 ```
 
-## Uninstall / cleanup
+## ⛔ Uninstall / cleanup
 - `lam-cli desktop remove` (remove the desktop menu entries)
 - `systemctl --user disable --now arctis-manager` (disables and stops arctis-manager service)
 - `rm ~/.config/systemd/user/arctis-manager.service` (removes the systemd's user-level arctis-manager service file)
+- `rm ~/.config/arctis_manager` (user preferences and custom device / lang files)
 - `sudo rm /usr/lib/udev/rules.d/91-steelseries-arctis.rules` (remove udev rules)
+- `pipx uninstall linux_arctis_manager` (pipx)
+- `pip uninstall linux_arctis_manager` (pip)
 
 ## ⌨️ Development
 
