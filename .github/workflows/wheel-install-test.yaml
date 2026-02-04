@@ -1,0 +1,62 @@
+name: Wheel install test (Linux)
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test-linux:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        distro:
+          - fedora:42
+          - fedora:43
+          - ubuntu:24.04
+          - ubuntu:25.10
+          - debian:trixie-slim
+          - debian:bookworm-slim
+          - archlinux:latest
+          - cachyos/cachyos:latest
+
+
+    container:
+      image: ${{ matrix.distro }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          set -e
+          if command -v apt-get >/dev/null; then
+            DEBIAN_FRONTEND="noninteractive" apt-get update
+            DEBIAN_FRONTEND="noninteractive" apt-get install -y python3 python3-pip python3-venv pipx curl libpulse0
+          elif command -v dnf >/dev/null; then
+            dnf install -y python3 python3-pip pipx pulseaudio-libs
+          elif command -v pacman >/dev/null; then
+            pacman -Sy --noconfirm python python-pip python-pipx libpulse
+          else
+            echo "Unsupported package manager"
+            exit 1
+          fi
+
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Ensure PATHs
+        run: |
+          pipx ensurepath
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Build wheel
+        run: |
+          python --version | awk '{split($2,v,"."); print v[1]"."v[2]}' > .python-version
+          uv build
+    
+      - name: Install test (pipx, pip)
+        run: |
+          chmod +x tests/install-wheel-test.sh
+          ./tests/install-wheel-test.sh
