@@ -57,7 +57,7 @@ rm -rf dist
 uv build
 
 # Install the .whl package
-find ./dist -name "*.whl" | head -n1 | xargs pipx install --force-reinstall
+find ./dist -name "*.whl" | head -n1 | xargs pipx install
 # ALT using pip: find ./dist -name "*.whl" | head -n1 | xargs pip install --user --force-reinstall
 
 # Setup
