@@ -2,6 +2,8 @@
 
 A replacement for SteelSeries GG software, to manage your Arctis device on Linux!
 
+[![CI](https://github.com/elegos/Linux-Arctis-Manager/actions/workflows/wheel-install-test.yaml/badge.svg?branch=develop)](https://github.com/elegos/Linux-Arctis-Manager/actions/workflows/wheel-install-test.yaml)
+
 ## 👍 Key points
 
 - Enable the Media and Chat audio streams
@@ -45,30 +47,23 @@ Each command can be called with `-h` or `--help` to get all the options for the 
 
 ## 🖥️ Install & setup
 
-### Build wheel from sources
+Prerequisites: `uv` ([installation guide](https://docs.astral.sh/uv/getting-started/installation/)), `pip` or `pipx` (some distros will REQUIRE pipx).
 
-Installation of uv (one-timer, then restart the terminal and ensure that `uv` is in `$PATH`)
-- `pip install --user --upgrade uv`
+**pipx is recommended** for dependencies isolation, while pip will have a smaller footprint.
 
-Wheel file creation
-- `rm -rf dist`
-- `uv build`
+```bash
+# Build the .whl package. Skip this if downloading from releases page
+rm -rf dist
+uv build
 
-### From wheel (built or from releases page)
+# Install the .whl package
+find ./dist -name "*.whl" | head -n1 | xargs pipx install --force-reinstall
+# ALT using pip: find ./dist -name "*.whl" | head -n1 | xargs pip install --user --force-reinstall
 
-Wheel installation
-- `pip install --user path/to/linux_arctis_manager-....whl`
-
-### One-time after install
-
-- `lam-cli desktop write` (add the desktop menu entries. It's not strictly required to update them at each update.)
-
-If you want, you can add the systray app to the startup applications. The daemon will be enabled at the first application's run, and will start when the graphical session starts indipendently from the GUI (which is a client to the daemon).
-
-### At each update
-
-- `lam-cli udev write-rules --force --reload` (add / update the udev rules file and reload them)
-
+# Setup
+lam-cli desktop write # Only to produce the desktop entries; optional after first installation
+lam-cli udev write-rules --force --reload # Required for first installation or new devices support only
+```
 
 ## Uninstall / cleanup
 - `lam-cli desktop remove` (remove the desktop menu entries)
