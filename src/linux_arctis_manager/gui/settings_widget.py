@@ -154,7 +154,8 @@ class QSettingsWidget(QWidget):
             options = self._option_lists.get(config.options_source, [])
             if options:
                 widget.addItems([o['name'] for o in options])
-                widget.setCurrentIndex(options.index(next((o for o in options if o['id'] == value))))
+                option = next((o for o in options if o['id'] == value), None)
+                widget.setCurrentIndex(options.index(option or options[0]))
             widget.currentIndexChanged.connect(lambda index: callback(config, self._option_lists[config.options_source][index]['id']))
         else:
             widget = QLabel(f'UNKNOWN TYPE: {config.type}')
