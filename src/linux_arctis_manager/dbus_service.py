@@ -135,7 +135,7 @@ class ArctisManagerDbusSettingsService(ServiceInterface):
         if list_name == 'pulse_audio_devices':
             sinks: list[TypedPulseSinkInfo] = self.core_engine.pa_audio_manager.pulse.sink_list()
             for sink in sinks:
-                id = sink.proplist.get('node.name', '')
+                id = sink.proplist.get('node.nick', '')
                 name = sink.proplist.get('node.nick', '')
 
                 if id and name:
