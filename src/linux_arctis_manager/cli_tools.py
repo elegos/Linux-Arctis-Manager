@@ -31,6 +31,9 @@ def arctis_usb_info(vendor_id: int = 0x1038, bInterfaceClass: int = 0x03):
         else:
             device = cast(TypedDevice, element)
         
+        if not hasattr(device, 'langids') or not device.langids:
+            device._langids = (1033,) # Fixed value for English (United States)
+        
         print(f'{device.manufacturer} {device.product} ({device.idVendor:04x}:{device.idProduct:04x})')
         for config in device:
             print(f'\tConfiguration: {config.bConfigurationValue}')
