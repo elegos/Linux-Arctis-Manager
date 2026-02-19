@@ -11,7 +11,7 @@ from ruamel.yaml import YAML
 from linux_arctis_manager.cli_tools import arctis_usb_info
 from linux_arctis_manager.config import DeviceConfiguration
 from linux_arctis_manager.constants import (DEVICES_CONFIG_FOLDER,
-                                            UDEV_RULES_PATH)
+                                            UDEV_RULES_PATHS)
 from linux_arctis_manager.utils import project_version
 
 ConfigRuleset = NamedTuple(
@@ -179,7 +179,7 @@ def main():
     udev_subparsers = udev_parser.add_subparsers(dest='action', required=True)
 
     write_parser = udev_subparsers.add_parser('write-rules', help='Write the udev rules')
-    write_parser.add_argument('--rules-path', default=UDEV_RULES_PATH, type=Path)
+    write_parser.add_argument('--rules-path', default=None, type=Path)
     write_parser.add_argument('--create-directories', action='store_true')
     write_parser.add_argument('--force', action='store_true')
     write_parser.add_argument('--reload', action='store_true')
@@ -207,7 +207,12 @@ def main():
 
     if args.command == 'udev':
         if args.action == 'write-rules':
-            result = write_udev_rules(args.rules_path, args.create_directories, args.force)
+            rules_path = args.rules_path if args.rules_path else next((Path(p) for p in UDEV_RULES_PATHS if Path(p).parent.is_dir()), None)
+            if not rules_path:
+                print('No valid rules path found. Please specify one with --rules-path.')
+                sys.exit(1)
+
+            result = write_udev_rules(rules_path, args.create_directories, args.force)
             if result != 0:
                 sys.exit(result)
             if args.reload:
