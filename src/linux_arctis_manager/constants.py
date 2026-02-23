@@ -22,7 +22,7 @@ HOME_SYSTEMD_SERVICE_FOLDER = Path.home() / '.config' / 'systemd' / 'user'
 PULSE_MEDIA_NODE_NAME = 'Arctis_Media'
 PULSE_CHAT_NODE_NAME = 'Arctis_Chat'
 
-STEELSERIES_VENDOR_ID = '0x1038'
+STEELSERIES_VENDOR_ID = 0x1038
 
 SETTINGS_FOLDER = Path.home() / '.config' / 'arctis_manager' / 'settings'
 

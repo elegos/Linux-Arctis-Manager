@@ -29,11 +29,19 @@ class PulseAudioManager:
         self.pulse = pulsectl.Pulse('linux-arctis-manager')
         self.logger = logging.getLogger('PulseAudioManager')
     
-    def get_arctis_sinks(self, mode: int = ALL_SINKS) -> list[TypedPulseSinkInfo]:
+    def get_arctis_sinks(self, mode: int = ALL_SINKS, vendor_id: int = STEELSERIES_VENDOR_ID, product_id: int|list[int]|None = None) -> list[TypedPulseSinkInfo]:
         sinks: list[TypedPulseSinkInfo] = self.pulse.sink_list()
         sinks = sinks if type(sinks) is list else [sinks] # pyright: ignore[reportAssignmentType]
 
-        physical = [s for s in sinks if s.proplist.get('device.vendor.id', '') == STEELSERIES_VENDOR_ID]
+        def check_prod_id(product_id_attr: str) -> bool:
+            if product_id is None:
+                return True
+
+            lst = product_id if type(product_id) is list else [product_id]
+
+            return product_id_attr in [f'0x{pid:04x}' for pid in lst]
+
+        physical = [s for s in sinks if s.proplist.get('device.vendor.id', '') == f'0x{vendor_id:04x}' and check_prod_id(s.proplist.get('device.product.id', ''))]
         virtual = [s for s in sinks if s.proplist.get('node.name', '') in (PULSE_MEDIA_NODE_NAME, PULSE_CHAT_NODE_NAME)]
 
         if mode == ONLY_PHYSICAL:
@@ -81,9 +89,9 @@ class PulseAudioManager:
         product_id_hex = f'0x{product_id:04x}'
 
         while attempts > 0:
-            for sink in self.get_arctis_sinks(ONLY_PHYSICAL):
-                if sink.proplist.get('device.vendor.id', '') == vendor_id_hex and sink.proplist.get('device.product.id', '') == product_id_hex:
-                    return True
+            if next((s for s in self.get_arctis_sinks(ONLY_PHYSICAL, vendor_id=vendor_id, product_id=product_id)), None):
+                return True
+
             attempts -= 1
             time.sleep(1)
         
@@ -127,8 +135,8 @@ class PulseAudioManager:
         if chat:
             self.pulse.volume_set_all_chans(chat, chat_mix / 100)
 
-    def sinks_setup(self, device_name: str):
-        real_sink = self.get_arctis_sinks(ONLY_PHYSICAL)
+    def sinks_setup(self, device_name: str, vendor_id: int, product_id: int|list[int]|None):
+        real_sink = self.get_arctis_sinks(ONLY_PHYSICAL, vendor_id=vendor_id, product_id=product_id)
 
         if not real_sink:
             self.logger.warning('No SteelSeries Arctis sink found.')

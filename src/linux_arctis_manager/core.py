@@ -223,7 +223,7 @@ class CoreEngine:
                 self.send_command(self.translate_init_bytes(bytes), endpoint)
 
         self.pa_audio_manager.wait_for_physical_device(self.usb_device.idVendor, self.usb_device.idProduct)
-        self.pa_audio_manager.sinks_setup(self.device_config.name)
+        self.pa_audio_manager.sinks_setup(self.device_config.name, self.device_config.vendor_id, self.device_config.product_ids)
 
         self.redirect_to_media_sink()
     
