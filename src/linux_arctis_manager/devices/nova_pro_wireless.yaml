@@ -112,8 +112,8 @@ device:
         values:
           off: 0x01
           on: 0x02
-          off_label: high
-          on_label: low
+          off_label: low
+          on_label: high
         default: 0x02 # high
         update_sequence: [0x06, 0x27, 'value']
     microphone:
