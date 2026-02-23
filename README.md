@@ -65,6 +65,23 @@ lam-cli desktop write # Only to produce the desktop entries; optional after firs
 lam-cli udev write-rules --force --reload # Required for first installation or new devices support only
 ```
 
+### Bazzite instructions
+```bash
+# Prerequisites
+curl -LsSf https://astral.sh/uv/install.sh | sh
+brew install pipx
+mkdir -p $HOME/.local/share/applications
+
+# Build
+rm -rf dist
+uv build
+# Install
+pipx install --force dist/linux_arctis_manager-*-py3-none-any.whl
+# Setup
+lam-cli desktop write
+lam-cli udev write-rules --force --reload --rules-path /etc/udev/rules.d/91-steelseries-arctis.rules
+```
+
 ## ⛔ Uninstall / cleanup
 - `lam-cli desktop remove` (remove the desktop menu entries)
 - `systemctl --user disable --now arctis-manager` (disables and stops arctis-manager service)
