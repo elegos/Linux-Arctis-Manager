@@ -52,6 +52,15 @@ Prerequisites: `uv` ([installation guide](https://docs.astral.sh/uv/getting-star
 **pipx is recommended** for dependencies isolation, while pip will have a smaller footprint.
 
 ```bash
+# Prerequisites
+curl -LsSf https://astral.sh/uv/install.sh | sh
+brew install pipx
+mkdir -p $HOME/.local/share/applications
+
+# Download the sources and enter them
+git clone https://github.com/elegos/Linux-Arctis-Manager.git
+cd Linux-Arctis-Manager
+
 # Build the .whl package. Skip this if downloading from releases page
 rm -rf dist
 uv build
@@ -63,23 +72,6 @@ find ./dist -name "*.whl" | head -n1 | xargs pipx install --force
 # Setup
 lam-cli desktop write # Only to produce the desktop entries; optional after first installation
 lam-cli udev write-rules --force --reload # Required for first installation or new devices support only
-```
-
-### Bazzite instructions
-```bash
-# Prerequisites
-curl -LsSf https://astral.sh/uv/install.sh | sh
-brew install pipx
-mkdir -p $HOME/.local/share/applications
-
-# Build
-rm -rf dist
-uv build
-# Install
-pipx install --force dist/linux_arctis_manager-*-py3-none-any.whl
-# Setup
-lam-cli desktop write
-lam-cli udev write-rules --force --reload --rules-path /etc/udev/rules.d/91-steelseries-arctis.rules
 ```
 
 ## ⛔ Uninstall / cleanup
