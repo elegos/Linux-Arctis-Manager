@@ -29,9 +29,25 @@ class PulseAudioManager:
         self.pulse = pulsectl.Pulse('linux-arctis-manager')
         self.logger = logging.getLogger('PulseAudioManager')
     
+    def sink_list_wrapper(self) -> list[TypedPulseSinkInfo]:
+        retry_attempts = 15
+
+        sinks: list[TypedPulseSinkInfo] = []
+        while retry_attempts > 0:
+            try:
+                sinks = self.pulse.sink_list()
+                break
+            except pulsectl.PulseError as e:
+                self.logger.error(f'Error while getting sink list: {e}')
+                retry_attempts -= 1
+                time.sleep(1)
+
+        sinks: list[TypedPulseSinkInfo] = sinks if type(sinks) is list else [sinks] # pyright: ignore[reportAssignmentType]
+
+        return sinks
+    
     def get_arctis_sinks(self, mode: int = ALL_SINKS, vendor_id: int = STEELSERIES_VENDOR_ID, product_id: int|list[int]|None = None) -> list[TypedPulseSinkInfo]:
-        sinks: list[TypedPulseSinkInfo] = self.pulse.sink_list()
-        sinks = sinks if type(sinks) is list else [sinks] # pyright: ignore[reportAssignmentType]
+        sinks = self.sink_list_wrapper()
 
         def check_prod_id(product_id_attr: str) -> bool:
             if product_id is None:
@@ -102,7 +118,7 @@ class PulseAudioManager:
     def redirect_audio(self, output_sink_node_name: str) -> None:
         self.logger.info(f'Redirecting audio to {output_sink_node_name}...')
 
-        sink = next((s for s in self.pulse.sink_list() if s.proplist.get('node.nick', '') == output_sink_node_name or s.proplist.get('node.name', '') == output_sink_node_name), None)
+        sink = next((s for s in self.sink_list_wrapper() if s.proplist.get('node.nick', '') == output_sink_node_name or s.proplist.get('node.name', '') == output_sink_node_name), None)
         if sink is None:
             self.logger.error(f'Failed to find sink {output_sink_node_name} to set it as default')
             return
@@ -115,7 +131,7 @@ class PulseAudioManager:
         if default_sink_name is None:
             return None
         
-        sink = next((s for s in self.pulse.sink_list() if s.proplist.get('node.name', '') == default_sink_name), None)
+        sink = next((s for s in self.sink_list_wrapper() if s.proplist.get('node.name', '') == default_sink_name), None)
 
         return sink
 
