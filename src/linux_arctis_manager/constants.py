@@ -34,6 +34,6 @@ SRC_CONFIG_FOLDER = Path(__file__).parent / 'devices'
 DEVICES_CONFIG_FOLDER: list[Path] = [HOME_CONFIG_FOLDER, SRC_CONFIG_FOLDER]
 
 UDEV_RULES_PATHS = [
+    '/etc/udev/rules.d/91-steelseries-arctis.rules',
     '/usr/lib/udev/rules.d/91-steelseries-arctis.rules',
-    '/etc/udev/rules.d/91-steelseries-arctis.rules'
 ]
