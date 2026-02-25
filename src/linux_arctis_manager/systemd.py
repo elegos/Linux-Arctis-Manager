@@ -35,7 +35,7 @@ StartLimitBurst=5
 Type=simple
 ExecStart={daemon_path}
 Restart=on-failure
-RestartSec=1
+RestartSec=5
 
 [Install]
 WantedBy=graphical-session.target'''
