@@ -58,8 +58,9 @@ brew install pipx
 mkdir -p $HOME/.local/share/applications
 
 # Download the sources and enter them
-git clone https://github.com/elegos/Linux-Arctis-Manager.git
+git clone https://github.com/elegos/Linux-Arctis-Manager.git # first time only
 cd Linux-Arctis-Manager
+git pull # to get the latest version available
 
 # Build the .whl package. Skip this if downloading from releases page
 rm -rf dist
