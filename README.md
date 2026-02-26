@@ -44,14 +44,7 @@ A replacement for SteelSeries GG software, to manage your Arctis device on Linux
 
 Each command can be called with `-h` or `--help` to get all the options for the commands and subcommands.
 
-
 ## 🖥️ Install & setup
-
-Prerequisites:
-
-- `uv` ([installation guide](https://docs.astral.sh/uv/getting-started/installation/))
-- `pip` or `pipx` (some distros will **REQUIRE** pipx). **pipx is recommended** for dependencies isolation, while pip will have a smaller footprint.
-
 
 ### Distrobox
 
@@ -62,6 +55,13 @@ curl -LsSf https://raw.githubusercontent.com/elegos/Linux-Arctis-Manager/refs/he
 ```
 
 ### Manual install
+
+#### Prerequisites
+
+- `uv` ([installation guide](https://docs.astral.sh/uv/getting-started/installation/))
+- `pip` or `pipx` (some distros will **REQUIRE** pipx). **pipx is recommended** for dependencies isolation, while pip will have a smaller footprint.
+
+#### Commands
 
 ```bash
 # Prerequisites
