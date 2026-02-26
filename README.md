@@ -55,7 +55,7 @@ curl -LsSf https://raw.githubusercontent.com/elegos/Linux-Arctis-Manager/refs/he
 ```
 ### Arch Linux (AUR)
 
-Arch Linux users can install the community-maintained package from the Arch User Repository (AUR). Please report any packaging-specific issues directly to the AUR maintainers `@tonitch` and `@Aiyahhh`
+Arch Linux users can install the community-maintained package from the Arch User Repository (AUR). Please report any packaging-specific issues directly to the AUR maintainers [@tonitch](https://aur.archlinux.org/account/tonitch) and [@Aiyahhh](https://aur.archlinux.org/account/Aiyahhh)
 
 - [Linux Arctis Manager on AUR](https://aur.archlinux.org/packages/linux-arctis-manager)
 
