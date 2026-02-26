@@ -53,6 +53,11 @@ Note on Distrobox (immutable distros like Bazzite, just to be **aware**): distro
 ```bash
 curl -LsSf https://raw.githubusercontent.com/elegos/Linux-Arctis-Manager/refs/heads/develop/scripts/distrobox.sh | sh
 ```
+### Arch User Repository
+
+Arch Linux users have the option of using the community-supported PKGBUILD. Please note that as this is a community supported option, issues with this installer should be brought to the maintainers of the AUR package.
+
+- [Linux Arctis Manager on AUR](https://aur.archlinux.org/packages/linux-arctis-manager)
 
 ### Manual install
 
