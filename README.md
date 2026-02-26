@@ -47,14 +47,26 @@ Each command can be called with `-h` or `--help` to get all the options for the 
 
 ## 🖥️ Install & setup
 
-Prerequisites: `uv` ([installation guide](https://docs.astral.sh/uv/getting-started/installation/)), `pip` or `pipx` (some distros will REQUIRE pipx).
+Prerequisites:
 
-**pipx is recommended** for dependencies isolation, while pip will have a smaller footprint.
+- `uv` ([installation guide](https://docs.astral.sh/uv/getting-started/installation/))
+- `pip` or `pipx` (some distros will **REQUIRE** pipx). **pipx is recommended** for dependencies isolation, while pip will have a smaller footprint.
+
+
+### Distrobox
+
+Note on Distrobox (immutable distros like Bazzite, just to be **aware**): distrobox executes applications within containers, mounting `/var`, `/etc` and your `/home` in the container itself. This application heavily relies on your `/home`, thus distrobox is not really used but for the installation process.
+
+```bash
+curl -LsSf https://raw.githubusercontent.com/elegos/Linux-Arctis-Manager/refs/heads/develop/scripts/distrobox.sh | sh
+```
+
+### Manual install
 
 ```bash
 # Prerequisites
 curl -LsSf https://astral.sh/uv/install.sh | sh
-brew install pipx
+# install pipx with your package manager
 mkdir -p $HOME/.local/share/applications
 
 # Download the sources and enter them
