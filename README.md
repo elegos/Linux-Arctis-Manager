@@ -10,6 +10,7 @@ A replacement for SteelSeries GG software, to manage your Arctis device on Linux
 - Configure any device via a simple configuration file
 - Enable per-device features by adding them in the relative configuration file
 - D-Bus based communication, to support different clients (alternative clients, Plasma extensions, etc)
+- [User Manual](docs/manual.md)
 
 ## 🎧 Supported devices table
 
