@@ -216,16 +216,20 @@ class CoreEngine:
             self.kernel_detach(self.usb_device, self.device_config)
 
         # Configure the device
-        if self.device_config.device_init is not None:
-            endpoint = self.get_command_endpoint_address()
-
-            for bytes in self.device_config.device_init:
-                self.send_command(self.translate_init_bytes(bytes), endpoint)
+        self.init_device()
 
         self.pa_audio_manager.wait_for_physical_device(self.usb_device.idVendor, self.usb_device.idProduct)
         self.pa_audio_manager.sinks_setup(self.device_config.name, self.device_config.vendor_id, self.device_config.product_ids)
 
         self.redirect_to_media_sink()
+    
+    def init_device(self):
+        self.logger.info("Initializing device...")
+        if self.device_config and self.device_config.device_init:
+            endpoint = self.get_command_endpoint_address()
+
+            for bytes in self.device_config.device_init:
+                self.send_command(self.translate_init_bytes(bytes), endpoint)
     
     def is_device_online(self) -> bool:
         if self.device_status is None or self.device_config is None:
