@@ -1,4 +1,6 @@
-# Linux Arctis Manager: KDE User manual 
+# Manual (KDE)
+
+This manual is a work in progress, currently it is based on an Arctis Nova Pro Wireless. As the tool is built out and more devices are encorporated this manual will exapnd. If you have issues that this manual cannot help with please reach out to us on [Discord](discord.gg/FXfvUXWXt4).
 
 - [Which App to Use?](#which-app-to-use)
 - [Status](#status)
@@ -18,7 +20,7 @@
 [Back To Top](#linux-arctis-manager)
 
 ## Status 
-Gives information on your devices if connected.
+Gives information on your devices if connected. Your information may vary depending on your device's capabilities. 
 
 <img src="./images/manual/status.png">
 
@@ -35,7 +37,7 @@ Gives information on your devices if connected.
 
 [Back To Top](#linux-arctis-manager)
 
-## Device
+## Device (Arctis Nova Pro Wireless)
 | Option | Description | 
 |--------|-------------|
 | Gain | **High**: Will sound louder and have possible distortion or clipping, more sensitive to background noise. <br /> **Low**: Will be quieter, less risk of distortion. |
