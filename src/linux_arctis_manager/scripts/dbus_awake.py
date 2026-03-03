@@ -1,6 +1,9 @@
+import asyncio
 import logging
+from typing import Any
 
 from dbus_next.aio.message_bus import MessageBus
+from dbus_next.constants import BusType
 from dbus_next.errors import (DBusError, InvalidBusNameError,
                               InvalidObjectPathError)
 
@@ -20,12 +23,12 @@ class DbusAwake:
     def __init__(self):
         self.log = logging.getLogger('DbusAwake')
 
-    async def start(self, core_engine: CoreEngine) -> None:
+    async def start(self, core_engine: CoreEngine) -> asyncio.Future[Any]:
         self.log.info("Initializing service...")
 
         self.core_engine = core_engine
 
-        bus = await MessageBus().connect()
+        bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
         
         bus_name = 'org.freedesktop.login1'
         object_path = '/org/freedesktop/login1'
@@ -36,6 +39,8 @@ class DbusAwake:
             manager = obj.get_interface('org.freedesktop.login1.Manager')
 
             manager.on_prepare_for_sleep(self.on_prepare_for_sleep)
+
+            return asyncio.get_event_loop().create_future()
         except InvalidObjectPathError:
             self.log.error('Failed to introspect org.freedesktop.login1 : /org/freedesktop/login1. Object path is invalid.')
             return
