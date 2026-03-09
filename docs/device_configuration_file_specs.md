@@ -12,7 +12,11 @@ device:
     position: end
     filler: 0x00
 
-  command_interface_index: [4, 0] # USB interface number and alternate setting to write commands (status request, device initialization). The former can be analyzed via usb-devices, or by chance. The latter should typically be 0.
+  command_interface_index: [4, 0] # USB interface number and alternate setting to write commands (status request, device initialization).
+                                  # The former can be analyzed via usb-devices, or by chance. The latter should typically be 0.
+                                  #
+                                  # !!! IF SET TO [0, x]: communication will happen on endpoint 0x00 (for devices like Arctis Nova 7), with the given {x} wIndex (which is the target interface).
+                                  # You can find the wIndex within the USBHID messages in Wireshark, addressing Endpoint = 0x00, under Setup Data
   listen_interface_indexes: [4] # USB interface number to listen for the status.
 
   device_init: # OPTIONAL, the list of commands to initialize the device, for example the GameDAC

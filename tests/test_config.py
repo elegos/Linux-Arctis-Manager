@@ -80,7 +80,7 @@ def test_config_parse():
     assert gain.default_value == 0x02
     gain_kwargs = gain.get_kwargs()
     assert len(gain_kwargs) == 1
-    assert gain_kwargs['values'] == {'off': 0x01, 'on': 0x02, 'off_label': 'high', 'on_label': 'low'}
+    assert gain_kwargs['values'] == {'off': 1, 'on': 2, 'off_label': 'low', 'on_label': 'high'}
 
 def test_ConfigStatusResponseMapping_get_status_values():
     mapping = ConfigStatusResponseMapping(starts_with=0x123b, status1=0x02, status2=0x03)

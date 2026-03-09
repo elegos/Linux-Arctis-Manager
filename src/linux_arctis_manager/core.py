@@ -229,7 +229,7 @@ class CoreEngine:
             endpoint = self.get_command_endpoint_address()
 
             for bytes in self.device_config.device_init:
-                self.send_command(self.translate_init_bytes(bytes), endpoint)
+                self.send_command(self.translate_init_bytes(bytes), endpoint, self.device_config.command_interface_index[1])
     
     def is_device_online(self) -> bool:
         if self.device_status is None or self.device_config is None:
@@ -288,12 +288,12 @@ class CoreEngine:
         if self.usb_device is None:
             raise Exception('USB device is not available')
 
-        endpoint, _ = self.guess_interface_endpoint('out', self.device_config.command_interface_index[0], self.device_config.command_interface_index[1])
+        endpoint, _ = 0x00, None if self.device_config.command_interface_index[0] == 0x00 else self.guess_interface_endpoint('out', self.device_config.command_interface_index[0], self.device_config.command_interface_index[1])
         if endpoint is None:
             raise Exception(f"Failed to find command interface endpoint for device: {self.usb_device.idProduct:04x}:{self.usb_device.idVendor:04x}")
 
         return endpoint
-    
+
     def on_setting_changed(self, setting: str, value: int) -> None:
         if self.device_config is None:
             self.logger.warning('Attempted to change setting without a device configuration')
@@ -310,9 +310,9 @@ class CoreEngine:
             return
 
         endpoint = self.get_command_endpoint_address()
-        self.send_command(config.get_update_sequence(value), endpoint)
+        self.send_command(config.get_update_sequence(value), endpoint, self.device_config.command_interface_index[1])
 
-    def send_command(self, command: list[int], endpoint: int) -> None:
+    def send_command(self, command: list[int], endpoint: int, control_interface_index: int = 0) -> None:
         if self.device_config is None:
             raise Exception('Device configuration is not available')
     
@@ -333,7 +333,19 @@ class CoreEngine:
         command_lst = [int.from_bytes([int(command_str[i:i+2], 16)], 'big') for i in range(0, len(command_str), 2)]
 
         try:
-            self.usb_device.write(endpoint, command_lst)
+            if endpoint != 0x00:
+                self.usb_device.write(endpoint, command_lst)
+            else:
+                # Assuming SET_REPORT
+                bmRequestType = usb.util.build_request_type(
+                    direction=usb.util.CTRL_OUT,
+                    type=usb.util.CTRL_TYPE_CLASS,
+                    recipient=usb.util.CTRL_RECIPIENT_INTERFACE
+                )
+                bRequest = 0x09  # SET_REPORT
+                wValue = (0x02 << 8) | 0x00
+                wIndex = control_interface_index
+                self.usb_device.ctrl_transfer(bmRequestType, bRequest, wValue, wIndex, command_lst)
         except usb.core.USBError as e:
             self.logger.warning(f"Error sending command: {e}")
 
@@ -342,6 +354,8 @@ class CoreEngine:
 
         interfaces = list(set([config.command_interface_index[0], *config.listen_interface_indexes]))
         for interface in interfaces:
+            if interface == 0x00:
+                continue
             if usb_device.is_kernel_driver_active(interface):
                 self.logger.info(f"Kernel driver active on interface {interface}, detaching...")
                 usb_device.detach_kernel_driver(interface)
@@ -351,6 +365,8 @@ class CoreEngine:
 
         interfaces = list(set([config.command_interface_index[0], *config.listen_interface_indexes]))
         for interface in interfaces:
+            if interface == 0x00:
+                continue
             if not usb_device.is_kernel_driver_active(interface):
                 self.logger.info(f"Kernel driver inactive on interface {interface}, re-attaching...")
                 usb_device.attach_kernel_driver(interface)
@@ -384,13 +400,13 @@ class CoreEngine:
             return
         
         endpoint = self.get_command_endpoint_address()
-        self.send_command([self.device_config.status.request], endpoint)
+        self.send_command([self.device_config.status.request], endpoint, self.device_config.command_interface_index[1])
 
     def teardown(self) -> None:
         self.pa_audio_manager.sinks_teardown()
         if self.usb_device:
             try:
-                if self.device_config is not None:
+                if self.device_config is not None and self.device_config.command_interface_index[0] != 0x00:
                     usb.util.release_interface(self.usb_device, self.device_config.command_interface_index[0])
                 if self.device_config and usb.core.find(idVendor=self.device_config.vendor_id):
                     self.kernel_attach(self.usb_device, self.device_config)
