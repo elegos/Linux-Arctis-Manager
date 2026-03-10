@@ -213,6 +213,10 @@ class CoreEngine:
 
         if self.usb_device is not None:
             self.logger.info(f"Found device {self.usb_device.idProduct:04x}:{self.usb_device.idVendor:04x} ({self.device_config.name})")
+            try:
+                self.usb_device.reset()
+            except usb.core.USBError as e:
+                self.logger.warning(f"Error resetting USB device (non-fatal): {e}")
             self.kernel_detach(self.usb_device, self.device_config)
 
         # Configure the device
@@ -345,6 +349,11 @@ class CoreEngine:
             if usb_device.is_kernel_driver_active(interface):
                 self.logger.info(f"Kernel driver active on interface {interface}, detaching...")
                 usb_device.detach_kernel_driver(interface)
+            try:
+                usb.util.claim_interface(usb_device, interface)
+                self.logger.info(f"Claimed interface {interface}")
+            except usb.core.USBError as e:
+                self.logger.warning(f"Error claiming interface {interface}: {e}")
     
     def kernel_attach(self, usb_device: TypedDevice, config: DeviceConfiguration) -> None:
         self.logger.info(f"Re-attaching kernel driver for device: {usb_device.idProduct:04x}:{usb_device.idVendor:04x} ({config.name})")
@@ -391,12 +400,18 @@ class CoreEngine:
         if self.usb_device:
             try:
                 if self.device_config is not None:
-                    usb.util.release_interface(self.usb_device, self.device_config.command_interface_index[0])
+                    interfaces = list(set([self.device_config.command_interface_index[0], *self.device_config.listen_interface_indexes]))
+                    for interface in interfaces:
+                        try:
+                            usb.util.release_interface(self.usb_device, interface)
+                        except usb.core.USBError:
+                            pass
                 if self.device_config and usb.core.find(idVendor=self.device_config.vendor_id):
                     self.kernel_attach(self.usb_device, self.device_config)
             except usb.core.USBError as e:
                 self.logger.warning(f"Error re-attaching kernel driver: {e}")
-        
+            finally:
+                usb.util.dispose_resources(self.usb_device)
         self.redirect_audio_on_disconnect()
         
         self.usb_device = None
