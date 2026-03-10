@@ -144,6 +144,7 @@ def write_desktop_entries() -> int:
     shutil.copyfile(Path(__file__).parent.parent / 'gui' / 'images' / 'steelseries_logo.svg', ICON_PATH)
 
     # 2. write the desktop entries
+    DESKTOP_WINDOW_PATH.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(Path(__file__).parent.parent / 'desktop' / 'ArctisManager.desktop', DESKTOP_WINDOW_PATH)
     shutil.copyfile(Path(__file__).parent.parent / 'desktop' / 'ArctisManagerSystray.desktop', DESKTOP_SYSTRAY_PATH)
 
