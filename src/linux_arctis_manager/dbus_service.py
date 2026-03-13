@@ -4,9 +4,9 @@ import json
 import logging
 
 from dbus_next.aio.message_bus import MessageBus
-from dbus_next.service import ServiceInterface, method
+from dbus_next.service import ServiceInterface, method, signal
 
-from linux_arctis_manager.config import parsed_status
+from linux_arctis_manager.config import DeviceConfiguration, parsed_status
 from linux_arctis_manager.constants import (DBUS_BUS_NAME,
                                             DBUS_CONFIG_INTERFACE_NAME,
                                             DBUS_CONFIG_OBJECT_PATH,
@@ -33,27 +33,47 @@ class ArctisManagerDbusStatusService(ServiceInterface):
     def __init__(self, core: CoreEngine):
         super().__init__(DBUS_STATUS_INTERFACE_NAME)
         self.core_engine = core
-
-    @method('GetStatus')
-    def get_status(self) -> 's': # type: ignore
-        status, config = self.core_engine.device_status, self.core_engine.device_config
-        if not status or not config or not config.status:
+        self.last_device_status = ''
+        self.core_engine.register_status_observer(self._on_status_changed)
+    
+    @staticmethod
+    def _device_status_to_dbus_status(device_status: dict[str, int]|None, device_config: DeviceConfiguration|None) -> str:
+        if not device_status or not device_config or not device_config.status:
             return json.dumps({})
-
+        
         result = {}
-        raw_status = parsed_status(self.core_engine.device_status, self.core_engine.device_config)
-        for category, status_list in config.status.representation.items():
+        raw_status = parsed_status(device_status, device_config)
+        for category, status_list in device_config.status.representation.items():
             result[category] = {}
             for status in status_list:
                 if status in raw_status:
                     result[category][status] = {
                         'value': raw_status[status],
-                        'type': 'label' if type(raw_status[status]) == str else config.status_parse[status].type.value
+                        'type': 'label' if type(raw_status[status]) == str else device_config.status_parse[status].type.value
                     }
             if not result[category]:
                 del result[category]
 
         return json.dumps(result)
+        
+
+    @signal('StatusChanged')
+    def signal_status_changed(self, status_json_str: 's') -> 's': # type: ignore
+        return status_json_str
+
+    def _on_status_changed(self, new_status: dict[str, int]) -> None:
+        dumped = self._device_status_to_dbus_status(new_status, self.core_engine.device_config)
+
+        if dumped == self.last_device_status:
+            return
+
+        self.last_device_status = dumped
+
+        self.signal_status_changed(dumped)
+
+    @method('GetStatus')
+    def method_get_status(self) -> 's': # type: ignore
+        return self._device_status_to_dbus_status(self.core_engine.device_status, self.core_engine.device_config)
 
 
 class ArctisManagerDbusSettingsService(ServiceInterface):
