@@ -37,7 +37,7 @@ class CoreEngine:
     media_mix: int
     chat_mix: int
 
-    device_status_observers: list[Callable[[dict[str, int]]]]
+    device_status_observers: list[Callable[[dict[str, int]], None]]
     
     def __init__(self) -> None:
         self.media_mix = 100
