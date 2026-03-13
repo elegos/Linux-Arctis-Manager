@@ -249,7 +249,7 @@ class CoreEngine:
 
         return online_status_config is None or parsed.get(online_status_config.status_variable) == online_status_config.online_value
     
-    def register_observer(self, observer: Callable[[dict[str, int]], None]):
+    def register_status_observer(self, observer: Callable[[dict[str, int]], None]):
         if observer not in self.device_status_observers:
             self.device_status_observers.append(observer)
 
