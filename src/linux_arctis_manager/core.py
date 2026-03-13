@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Any, Coroutine, Literal, cast
+from typing import Any, Callable, Coroutine, Literal, cast
 
 import usb
 from usb.core import Device
@@ -36,10 +36,13 @@ class CoreEngine:
 
     media_mix: int
     chat_mix: int
+
+    device_status_observers: list[Callable[[dict[str, int]]]]
     
     def __init__(self) -> None:
         self.media_mix = 100
         self.chat_mix = 100
+        self.device_status_observers = []
 
         self.general_settings = GeneralSettings.read_from_file()
 
@@ -50,7 +53,7 @@ class CoreEngine:
         self.reload_device_configurations()
         self.usb_devices_monitor.register_on_connect(self.on_device_connected)
         self.usb_devices_monitor.register_on_disconnect(self.on_device_disconnected)
-    
+
     def new_device_status(self) -> ObservableDict:
         device_status = ObservableDict()
         device_status.add_observer(self.on_device_status_changed)
@@ -246,12 +249,20 @@ class CoreEngine:
 
         return online_status_config is None or parsed.get(online_status_config.status_variable) == online_status_config.online_value
     
+    def register_observer(self, observer: Callable[[dict[str, int]], None]):
+        if observer not in self.device_status_observers:
+            self.device_status_observers.append(observer)
+
     def on_device_status_changed(self, key: str, value: int):
         if self.device_config and self.device_config.online_status and key == self.device_config.online_status.status_variable:
             if self.is_device_online():
                 self.redirect_to_media_sink()
             else:
                 self.redirect_audio_on_disconnect()
+
+        if self.device_status:
+            for observer in self.device_status_observers:
+                observer(self.device_status.to_dict())
     
     def redirect_to_media_sink(self):
         if not self.general_settings.redirect_audio_on_connect or not self.is_device_online():
