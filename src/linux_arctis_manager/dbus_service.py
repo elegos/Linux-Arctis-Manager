@@ -33,6 +33,7 @@ class ArctisManagerDbusStatusService(ServiceInterface):
     def __init__(self, core: CoreEngine):
         super().__init__(DBUS_STATUS_INTERFACE_NAME)
         self.core_engine = core
+        self.last_device_status = ''
         self.core_engine.register_status_observer(self._on_status_changed)
     
     @staticmethod
@@ -62,7 +63,12 @@ class ArctisManagerDbusStatusService(ServiceInterface):
 
     def _on_status_changed(self, new_status: dict[str, int]) -> None:
         dumped = self._device_status_to_dbus_status(new_status, self.core_engine.device_config)
-        
+
+        if dumped == self.last_device_status:
+            return
+
+        self.last_device_status = dumped
+
         self.signal_status_changed(dumped)
 
     @method('GetStatus')
