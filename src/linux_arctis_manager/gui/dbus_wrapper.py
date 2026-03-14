@@ -5,6 +5,7 @@ from threading import Thread
 from time import sleep
 
 from dbus_next.aio.message_bus import MessageBus
+from dbus_next.aio.proxy_object import ProxyInterface
 from dbus_next.constants import MessageType
 from dbus_next.message import Message
 from PySide6.QtCore import QObject, Signal, SignalInstance
@@ -25,9 +26,53 @@ class DbusWrapper(QObject):
     def __init__(self, parent: QObject|None = None):
         super().__init__(parent)
 
+        self._dbus: MessageBus|None = None
+        self._stopping = False
+
+        self._status_signal_loop: asyncio.AbstractEventLoop|None = None
+        self._stop_status_signal_future: asyncio.Future|None = None
+
+        self._status_iface: ProxyInterface|None = None
+
+    async def dbus(self):
+        if not self._dbus:
+            self._dbus = await MessageBus().connect()
+
+        return self._dbus
+    
+    async def status_iface(self):
+        if not self._status_iface:
+            bus = await self.dbus()
+            introspection = await bus.introspect(DBUS_BUS_NAME, DBUS_STATUS_OBJECT_PATH)
+            obj = bus.get_proxy_object(DBUS_BUS_NAME, DBUS_STATUS_OBJECT_PATH, introspection)
+            self._status_iface = obj.get_interface(DBUS_STATUS_INTERFACE_NAME)
+
+        return self._status_iface
+
+    def start(self):
+        self.request_status(one_time=True)
+        self.request_settings(one_time=True)
+
+        status_signal_thread = Thread(target=lambda: asyncio.run(self._register_status_dbus_signal()))
+        status_signal_thread.start()
+    
+    async def _register_status_dbus_signal(self):
+        def callback(status: str) -> None:
+            self.sig_status.emit(json.loads(status) or {})
+
+        (await self.status_iface()).on_status_changed(callback) # type: ignore
+
+        self._status_signal_loop = asyncio.get_running_loop()
+        self._stop_status_signal_future = self._status_signal_loop.create_future()
+        await self._stop_status_signal_future
+
+        (await self.status_iface()).off_status_changed(callback) # type: ignore
+
     def stop(self):
         self.logger.info("Stopping D-Bus wrapper...")
         self._stopping = True
+        if self._status_signal_loop and self._stop_status_signal_future:
+            self._status_signal_loop.call_soon_threadsafe(self._stop_status_signal_future.set_result, None)
 
     def request_status(self, one_time = False, frequency_seconds: int = 1) -> None:
         request_thread = Thread(target=self.request_status_thread, kwargs={'frequency_seconds': 0 if one_time else frequency_seconds})
