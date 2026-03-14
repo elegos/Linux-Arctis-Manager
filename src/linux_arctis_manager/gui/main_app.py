@@ -60,22 +60,9 @@ class QMainApp(QBaseDesktopApp):
         self.dbus_wrapper.sig_settings.connect(self.device_settings_widget.update_settings)
 
         self.switch_panel('status')
-
-        # Pollers
-        # self.dbus_wrapper.request_settings()
-        # self.dbus_wrapper.request_status()
+        self.dbus_wrapper.start()
 
         self.destroyed.connect(self.sig_stop)
-        self.main_window.visibilityChanged.connect(self.on_visibility_changed)
-    
-    def on_visibility_changed(self, visible: bool):
-        if visible:
-            self.logger.debug('App is visible, starting dbus polling')
-            self.dbus_wrapper.request_settings(one_time=True)
-            self.dbus_wrapper.request_status(one_time=True)
-        else:
-            self.logger.debug('App is hidden, stopping dbus polling')
-            self.dbus_wrapper.stop()
     
     def main_window_setup(self) -> QMainAppProtoWidget:
         window = QMainAppProtoWidget()
