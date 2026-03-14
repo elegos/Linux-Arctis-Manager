@@ -144,8 +144,6 @@ class DeviceConfiguration:
             raise ValueError("Invalid configuration: 'device.vendor_id' must be specified and non-zero")
         if not self.product_ids:
             raise ValueError("Invalid configuration: 'device.product_ids' must be a non-empty list")
-        if not self.command_interface_index[0] >= 0 or not self.command_interface_index[1] >= 0:
-            raise ValueError("Invalid configuration: 'device.command_interface_index' must represent [bInterfaceNumber and bAlternateSetting]")
         if not self.listen_interface_indexes:
             raise ValueError("Invalid configuration: 'device.listen_interface_indexes' must be a non-empty list")
         if any(i < 0 for i in self.listen_interface_indexes):
