@@ -34,24 +34,27 @@ class DbusWrapper(QObject):
 
         self._status_iface: ProxyInterface|None = None
 
-    async def dbus(self):
-        if not self._dbus:
-            self._dbus = await MessageBus().connect()
-
-        return self._dbus
-    
     async def status_iface(self):
         if not self._status_iface:
-            bus = await self.dbus()
+            bus = await MessageBus().connect()
             introspection = await bus.introspect(DBUS_BUS_NAME, DBUS_STATUS_OBJECT_PATH)
             obj = bus.get_proxy_object(DBUS_BUS_NAME, DBUS_STATUS_OBJECT_PATH, introspection)
             self._status_iface = obj.get_interface(DBUS_STATUS_INTERFACE_NAME)
 
         return self._status_iface
 
+    async def settings_iface(self):
+        if not self._status_iface:
+            bus = await MessageBus().connect()
+            introspection = await bus.introspect(DBUS_BUS_NAME, DBUS_SETTINGS_OBJECT_PATH)
+            obj = bus.get_proxy_object(DBUS_BUS_NAME, DBUS_SETTINGS_OBJECT_PATH, introspection)
+            self._status_iface = obj.get_interface(DBUS_SETTINGS_INTERFACE_NAME)
+
+        return self._status_iface
+
     def start(self):
-        self.request_status(one_time=True)
-        self.request_settings(one_time=True)
+        self.request_status()
+        self.request_settings()
 
         status_signal_thread = Thread(target=lambda: asyncio.run(self._register_status_dbus_signal()))
         status_signal_thread.start()
@@ -66,21 +69,31 @@ class DbusWrapper(QObject):
         self._stop_status_signal_future = self._status_signal_loop.create_future()
         await self._stop_status_signal_future
 
-        (await self.status_iface()).off_status_changed(callback) # type: ignore
-
     def stop(self):
         self.logger.info("Stopping D-Bus wrapper...")
         self._stopping = True
         if self._status_signal_loop and self._stop_status_signal_future:
             self._status_signal_loop.call_soon_threadsafe(self._stop_status_signal_future.set_result, None)
 
-    def request_status(self, one_time = False, frequency_seconds: int = 1) -> None:
-        request_thread = Thread(target=self.request_status_thread, kwargs={'frequency_seconds': 0 if one_time else frequency_seconds})
+    def request_status(self) -> None:
+        request_thread = Thread(target=lambda: asyncio.run(self._request_status_async()))
         request_thread.start()
 
-    def request_settings(self, one_time = False, frequency_seconds: int = 1) -> None:
-        request_thread = Thread(target=self.request_settings_thread, kwargs={'frequency_seconds': 0 if one_time else frequency_seconds})
+    async def _request_status_async(self):
+        iface = await self.status_iface()
+        result = await iface.call_get_status() # type: ignore
+
+        self.sig_status.emit(json.loads(result) or {})
+
+    def request_settings(self) -> None:
+        request_thread = Thread(target=lambda: asyncio.run(self._request_settings_async()))
         request_thread.start()
+    
+    async def _request_settings_async(self):
+        iface = await self.settings_iface()
+        result = await iface.call_get_settings() # type: ignore
+
+        self.sig_settings.emit(json.loads(result) or {})
     
     @staticmethod
     def request_list_options(list_name: str, qt_signal: SignalInstance):
@@ -136,48 +149,3 @@ class DbusWrapper(QObject):
             body=[name, json.dumps(value)],
         ))
     
-    def request_status_thread(self, frequency_seconds: int):
-        asyncio.run(self.dbus_request_async(
-            self.sig_status,
-            frequency_seconds,
-            DBUS_BUS_NAME,
-            DBUS_STATUS_OBJECT_PATH,
-            DBUS_STATUS_INTERFACE_NAME,
-            'GetStatus',
-        ))
-    
-    def request_settings_thread(self, frequency_seconds: int):
-        asyncio.run(self.dbus_request_async(
-            self.sig_settings,
-            frequency_seconds,
-            DBUS_BUS_NAME,
-            DBUS_SETTINGS_OBJECT_PATH,
-            DBUS_SETTINGS_INTERFACE_NAME,
-            'GetSettings',
-        ))
-    
-    async def dbus_request_async(self, sig: SignalInstance, freq: int,destination: str, path: str, interface: str, member: str):
-        while not self._stopping:
-            dbus_bus = await MessageBus().connect()
-            reply = await dbus_bus.call(Message(
-                destination=destination,
-                path=path,
-                interface=interface,
-                member=member,
-                message_type=MessageType.METHOD_CALL
-            ))
-
-            if reply is None:
-                self.logger.error('Error getting settings: no reply')
-
-            elif reply.message_type == MessageType.ERROR:
-                self.logger.error('Error getting settings: %s', reply.body)
-
-            else:
-                sig.emit(json.loads(reply.body[0]) or {})
-
-            if freq == 0:
-                return
-            
-            sleep(freq)
-
