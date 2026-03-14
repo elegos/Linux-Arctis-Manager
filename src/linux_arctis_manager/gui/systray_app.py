@@ -17,6 +17,7 @@ from linux_arctis_manager.constants import (DBUS_BUS_NAME,
                                             DBUS_STATUS_INTERFACE_NAME,
                                             DBUS_STATUS_OBJECT_PATH)
 from linux_arctis_manager.gui.base_app import QBaseDesktopApp
+from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
 from linux_arctis_manager.gui.main_app import QMainApp
 from linux_arctis_manager.gui.ui_utils import get_icon_pixmap
 from linux_arctis_manager.i18n import I18n
@@ -30,7 +31,7 @@ class QSystrayApp(QBaseDesktopApp):
     app: QApplication
     tray_icon: QSystemTrayIcon
     menu: QMenu
-    dbus_bus: MessageBus
+    dbus_wrapper: DbusWrapper
 
     last_device_status: dict[str, dict[str, dict[str, str|int]]]
 
@@ -54,51 +55,13 @@ class QSystrayApp(QBaseDesktopApp):
         self.menu = QMenu()
         self.menu_setup()
         self.do_polling = False
-        self.menu.aboutToShow.connect(self.start_polling)
-        self.menu.aboutToHide.connect(self.stop_polling)
-        
+
         self.new_status.connect(self.on_new_status)
-        self.dbus_poll_thread = Thread(target=self.poll_dbus_thread, daemon=True)
-        self.dbus_poll_thread.start()
+
+        self.dbus_wrapper = DbusWrapper()
+        self.dbus_wrapper.sig_status.connect(lambda status: self.new_status.emit(status or {}))
 
         self.tray_icon.setContextMenu(self.menu)
-    
-    def start_polling(self):
-        self.do_polling = True
-    
-    def stop_polling(self):
-        self.do_polling = False
-    
-    def poll_dbus_thread(self):
-        while not self.is_stopping():
-            if self.do_polling:
-                asyncio.run(self.dbus_poll())
-                sleep(2)
-            else:
-                # Wait for do_polling faster
-                sleep(.5)
-    
-    async def dbus_poll(self):
-        self.logger.debug('Polling dbus...')
-
-        dbus_bus = await MessageBus().connect()
-        reply = await dbus_bus.call(Message(
-            destination=DBUS_BUS_NAME,
-            path=DBUS_STATUS_OBJECT_PATH,
-            interface=DBUS_STATUS_INTERFACE_NAME,
-            member='GetStatus',
-            message_type=MessageType.METHOD_CALL
-        ))
-
-        if reply is None:
-            self.logger.error('Error getting status: no reply')
-            return
-
-        if reply.message_type == MessageType.ERROR:
-            self.logger.error('Error getting status: %s', reply.body)
-            return
-
-        self.new_status.emit(json.loads(reply.body[0]) or {})
     
     def on_new_status(self, status: dict[str, dict[str, dict[str, str|int]]]):
         if self.last_device_status == status:
@@ -110,8 +73,7 @@ class QSystrayApp(QBaseDesktopApp):
     async def start(self):
         self.logger.info('Starting Systray app.')
         self.tray_icon.show()
-
-        self.dbus_bus = await MessageBus().connect()
+        self.dbus_wrapper.start()
 
         self.app.exec()
 
@@ -164,6 +126,7 @@ class QSystrayApp(QBaseDesktopApp):
             self._main_app.sig_stop()
 
         self._stopping = True
+        self.dbus_wrapper.stop()
 
         self.logger.debug('Received shutdown signal, shutting down.')
         self.app.quit()
