@@ -157,7 +157,7 @@ class DbusWrapper(QObject):
         ))
     
     async def dbus_request_async(self, sig: SignalInstance, freq: int,destination: str, path: str, interface: str, member: str):
-        while not hasattr(self, '_stopping'):
+        while not self._stopping:
             dbus_bus = await MessageBus().connect()
             reply = await dbus_bus.call(Message(
                 destination=destination,
