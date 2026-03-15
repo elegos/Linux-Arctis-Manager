@@ -303,7 +303,7 @@ class CoreEngine:
         if self.usb_device is None:
             raise Exception('USB device is not available')
 
-        endpoint, _ = 0x00, None if self.device_config.command_interface_index[0] == 0x00 else self.guess_interface_endpoint('out', self.device_config.command_interface_index[0], self.device_config.command_interface_index[1])
+        endpoint, _ = (0x00, None) if self.device_config.command_interface_index[0] == 0x00 else self.guess_interface_endpoint('out', self.device_config.command_interface_index[0], self.device_config.command_interface_index[1])
         if endpoint is None:
             raise Exception(f"Failed to find command interface endpoint for device: {self.usb_device.idProduct:04x}:{self.usb_device.idVendor:04x}")
 
