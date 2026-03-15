@@ -38,9 +38,6 @@ class DeviceSettings(JsonSerializable):
             if key in self.settings:
                 self.settings[key] = int(raw[key])
 
-        # if raw:
-        #     self.settings = ObservableDict(raw)
-
     def __setattr__(self, name: str, value: Any) -> None:
         if name in ('vendor_id', 'product_id', 'settings'):
             super().__setattr__(name, value)
