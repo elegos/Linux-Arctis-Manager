@@ -80,6 +80,8 @@ class ArctisManagerDbusSettingsService(ServiceInterface):
     def __init__(self, core: CoreEngine):
         super().__init__(DBUS_SETTINGS_INTERFACE_NAME)
         self.core_engine = core
+        self.core_engine.register_device_settings_observer(self._on_status_changed)
+        self.core_engine.register_general_settings_observer(self._on_status_changed)
         self.logger = logging.getLogger('ArctisManagerDbusSettingsService')
     
     def settings_to_json(self, general_settings: GeneralSettings, device_config: DeviceConfiguration|None, device_settings: DeviceSettings|None) -> str:
@@ -94,9 +96,12 @@ class ArctisManagerDbusSettingsService(ServiceInterface):
 
         if device_config and device_settings:
             settings.update({'device': device_settings.settings})
+        if device_config and device_settings:
+            settings.update({'device': device_settings.settings})
             settings['settings_config'].update({
                 config.name: config.to_dict()
                 for config in list(itertools.chain.from_iterable(
+                    device_config.settings.values()
                     device_config.settings.values()
                 ))
             })

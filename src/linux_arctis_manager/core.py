@@ -38,11 +38,15 @@ class CoreEngine:
     chat_mix: int
 
     device_status_observers: list[Callable[[dict[str, int]], None]]
+    device_settings_observers: list[Callable[[DeviceSettings], None]]
+    general_settings_observers: list[Callable[[GeneralSettings], None]]
     
     def __init__(self) -> None:
         self.media_mix = 100
         self.chat_mix = 100
         self.device_status_observers = []
+        self.device_settings_observers = []
+        self.general_settings_observers = []
 
         self.general_settings = GeneralSettings.read_from_file()
 
