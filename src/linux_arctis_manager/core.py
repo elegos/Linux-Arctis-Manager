@@ -38,15 +38,11 @@ class CoreEngine:
     chat_mix: int
 
     device_status_observers: list[Callable[[dict[str, int]], None]]
-    device_settings_observers: list[Callable[[DeviceSettings], None]]
-    general_settings_observers: list[Callable[[GeneralSettings], None]]
     
     def __init__(self) -> None:
         self.media_mix = 100
         self.chat_mix = 100
         self.device_status_observers = []
-        self.device_settings_observers = []
-        self.general_settings_observers = []
 
         self.general_settings = GeneralSettings.read_from_file()
 
@@ -257,14 +253,6 @@ class CoreEngine:
         if observer not in self.device_status_observers:
             self.device_status_observers.append(observer)
     
-    def register_device_settings_observer(self, observer: Callable[[DeviceSettings], None]):
-        if observer not in self.device_settings_observers:
-            self.device_settings_observers.append(observer)
-    
-    def register_general_settings_observer(self, observer: Callable[[GeneralSettings], None]):
-        if observer not in self.general_settings_observers:
-            self.general_settings_observers.append(observer)
-
     def on_device_status_changed(self, key: str, value: int):
         if self.device_config and self.device_config.online_status and key == self.device_config.online_status.status_variable:
             if self.is_device_online():
@@ -339,8 +327,6 @@ class CoreEngine:
         endpoint = self.get_command_endpoint_address()
         self.send_command(config.get_update_sequence(value), endpoint, self.device_config.command_interface_index[1])
 
-        for observer in self.device_settings_observers:
-            observer(self.device_settings)
 
     def send_command(self, command: list[int], endpoint: int, control_interface_index: int = 0) -> None:
         if self.device_config is None:

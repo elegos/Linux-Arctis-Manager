@@ -80,8 +80,6 @@ class ArctisManagerDbusSettingsService(ServiceInterface):
     def __init__(self, core: CoreEngine):
         super().__init__(DBUS_SETTINGS_INTERFACE_NAME)
         self.core_engine = core
-        self.core_engine.register_device_settings_observer(self._on_status_changed)
-        self.core_engine.register_general_settings_observer(self._on_status_changed)
         self.logger = logging.getLogger('ArctisManagerDbusSettingsService')
     
     def settings_to_json(self, general_settings: GeneralSettings, device_config: DeviceConfiguration|None, device_settings: DeviceSettings|None) -> str:
@@ -105,9 +103,6 @@ class ArctisManagerDbusSettingsService(ServiceInterface):
 
         return json.dumps(settings)
 
-    def _on_status_changed(self, *args, **kwargs) -> None:
-        self.signal_settings_changed(self.settings_to_json(self.core_engine.general_settings, self.core_engine.device_config, self.core_engine.device_settings))
-    
     @signal('SettingsChanged')
     def signal_settings_changed(self, settings_json_str: 's') -> 's': # type: ignore
         return settings_json_str
@@ -140,6 +135,8 @@ class ArctisManagerDbusSettingsService(ServiceInterface):
             setattr(self.core_engine.general_settings, setting, value)
             self.core_engine.general_settings.write_to_file()
 
+            self.signal_settings_changed(self.settings_to_json(self.core_engine.general_settings, self.core_engine.device_config, self.core_engine.device_settings))
+
             return True
         
         if self.core_engine.device_config and self.core_engine.device_settings:
@@ -156,6 +153,8 @@ class ArctisManagerDbusSettingsService(ServiceInterface):
 
                 self.core_engine.device_settings.settings[setting] = value
                 self.core_engine.device_settings.write_to_file()
+
+                self.signal_settings_changed(self.settings_to_json(self.core_engine.general_settings, self.core_engine.device_config, self.core_engine.device_settings))
 
                 return True
 
