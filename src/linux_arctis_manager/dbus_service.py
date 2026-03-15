@@ -16,6 +16,7 @@ from linux_arctis_manager.constants import (DBUS_BUS_NAME,
                                             DBUS_STATUS_OBJECT_PATH)
 from linux_arctis_manager.core import CoreEngine
 from linux_arctis_manager.pactl import TypedPulseSinkInfo
+from linux_arctis_manager.settings import DeviceSettings, GeneralSettings
 
 
 class ArctisManagerDbusConfigService(ServiceInterface):
@@ -55,7 +56,6 @@ class ArctisManagerDbusStatusService(ServiceInterface):
                 del result[category]
 
         return json.dumps(result)
-        
 
     @signal('StatusChanged')
     def signal_status_changed(self, status_json_str: 's') -> 's': # type: ignore
@@ -80,12 +80,13 @@ class ArctisManagerDbusSettingsService(ServiceInterface):
     def __init__(self, core: CoreEngine):
         super().__init__(DBUS_SETTINGS_INTERFACE_NAME)
         self.core_engine = core
+        self.core_engine.register_device_settings_observer(self._on_status_changed)
+        self.core_engine.register_general_settings_observer(self._on_status_changed)
         self.logger = logging.getLogger('ArctisManagerDbusSettingsService')
-
-    @method('GetSettings')
-    def get_settings(self) -> 's': # type: ignore
+    
+    def settings_to_json(self, general_settings: GeneralSettings, device_config: DeviceConfiguration|None, device_settings: DeviceSettings|None) -> str:
         settings = {
-            'general': self.core_engine.general_settings.to_dict(),
+            'general': general_settings.to_dict(),
             'device': {},
             'settings_config': {
                 config.name: config.to_dict()
@@ -93,16 +94,27 @@ class ArctisManagerDbusSettingsService(ServiceInterface):
             },
         }
 
-        if self.core_engine.device_config and self.core_engine.device_settings:
-            settings.update({'device': self.core_engine.device_settings.settings})
+        if device_config and device_settings:
+            settings.update({'device': device_settings.settings})
             settings['settings_config'].update({
                 config.name: config.to_dict()
                 for config in list(itertools.chain.from_iterable(
-                    self.core_engine.device_config.settings.values()
+                    device_config.settings.values()
                 ))
             })
 
         return json.dumps(settings)
+
+    def _on_status_changed(self, *args, **kwargs) -> None:
+        self.signal_settings_changed(self.settings_to_json(self.core_engine.general_settings, self.core_engine.device_config, self.core_engine.device_settings))
+    
+    @signal('SettingsChanged')
+    def signal_settings_changed(self, settings_json_str: 's') -> 's': # type: ignore
+        return settings_json_str
+
+    @method('GetSettings')
+    def get_settings(self) -> 's': # type: ignore
+        return self.settings_to_json(self.core_engine.general_settings, self.core_engine.device_config, self.core_engine.device_settings)
     
     @method('SetSetting')
     def set_setting(self, setting: 's', value: 's') -> 'b': # type: ignore
