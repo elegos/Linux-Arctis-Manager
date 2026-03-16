@@ -119,7 +119,7 @@ class QSettingsWidget(QWidget):
             widget = QDualState(
                 off_text=I18n.get_instance().translate('settings_values', config.values.get('off_label', 'off')),
                 on_text=I18n.get_instance().translate('settings_values', config.values.get('on_label', 'on')),
-                init_state='right' if value == True else 'left',
+                init_state='right' if value == config.values.get('on') else 'left',
             )
             widget.checkStateChanged.connect(lambda state: callback(config, state == Qt.CheckState.Checked))
         elif config.type == SettingType.SLIDER:
