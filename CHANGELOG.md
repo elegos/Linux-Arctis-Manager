@@ -9,9 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Added
 
-- Support for Arctis Nova 7 family (thanks villain @ Discord!)
 - Support for devices communicating on control endpoint (0x00)
-- `StatusChanged` and `SettingsChanged` Dbus signals
+- Support for Arctis Nova 7 family (thanks villain @ Discord!)
+- Support for Arctis Nova 5 family (thanks @nrwlia!)
+- `StatusChanged` and `SettingsChanged` Dbus signals (subscription model instead of polling one)
 
 ## Changed
 

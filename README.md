@@ -36,7 +36,7 @@ A replacement for SteelSeries GG software, to manage your Arctis device on Linux
 
 
 \*: experimental support, needs test by the community. Open an issue in case of problem(s)  
-❎️: feature isn't supported on the device.
+❎️: feature not supported by the device.
 
 ## CLI commands
 
