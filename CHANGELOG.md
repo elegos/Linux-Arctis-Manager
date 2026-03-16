@@ -19,9 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GUI now subscribes to Dbus signals instead of continuously poll the Dbus interfaces
 
 ## Fixed
+
 - Re-initialize device on system wake up (after sleep)
 - Ensure applications directory exists before creating the desktop entry
 - Proper USB device claim
+- Fix an issue incorrectly initializing the TOGGLE UI widget
 
 ## [2.1.0] - 4 March 2026
 
