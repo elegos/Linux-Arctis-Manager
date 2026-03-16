@@ -23,7 +23,7 @@ A replacement for SteelSeries GG software, to manage your Arctis device on Linux
 |Arctis 7+ / PS5 / Xbox / Destiny     |❌|❌|220e, 2212, 2216, 2236|
 |Arctis Nova 3                        |❌|❌|12ec|
 |Arctis Nova 3P Wireless / 3X Wireless|❌|❌|2269, 226d|
-|Arctis Nova 5                        |❌|❌|2232, 2253|
+|Arctis Nova 5                        |❎️|✅|2232, 2253|
 |Arctis Nova 7P                       |❌|❌|220a|
 |Arctis Nova 7X                       |❌|❌|12d7|
 |Arctis Nova 9                        |❌|❌|12c2|
@@ -35,7 +35,8 @@ A replacement for SteelSeries GG software, to manage your Arctis device on Linux
 |Arctis Pro                           |❌|❌|1252|
 
 
-\*: experimental support, needs test by the community. Open an issue in case of problem(s)
+\*: experimental support, needs test by the community. Open an issue in case of problem(s)  
+❎️: feature isn't supported on the device.
 
 ## CLI commands
 
