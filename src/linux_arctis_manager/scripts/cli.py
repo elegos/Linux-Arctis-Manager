@@ -76,19 +76,19 @@ def write_udev_rules(rules_path: Path, create_directories: bool, force_write: bo
         return 3
     
     yaml = YAML(typ='safe')
-    products: dict[int, ConfigRuleset] = {}
+    products: list[ConfigRuleset] = []
     for config_path in DEVICES_CONFIG_FOLDER:
         for config_file in config_path.glob('*.yaml'):
             config_yaml = yaml.load(config_file)
 
             config = DeviceConfiguration(config_yaml)
-            products[config.vendor_id] = ConfigRuleset(config.vendor_id, config.product_ids, config.name)
+            products.append(ConfigRuleset(config.vendor_id, config.product_ids, config.name))
     
     rule_template = 'SUBSYSTEM=="usb", ENV{{DEVTYPE}}=="usb_device", ATTRS{{idVendor}}=="{idVendor}", ATTRS{{idProduct}}=="{idProducts}", MODE="0666", TAG+="uaccess"'
     rules = []
-    for vendor_id, ruleset in products.items():
+    for ruleset in products:
         rule = rule_template.format(
-            idVendor=f'{vendor_id:04x}',
+            idVendor=f'{ruleset.vendor_id:04x}',
             idProducts='|'.join([f'{pid:04x}' for pid in ruleset.product_ids]) if len(ruleset.product_ids) > 1 else f'{ruleset.product_ids[0]:04x}'
         )
         rules.extend(['', f'# {ruleset.device_name}', rule])

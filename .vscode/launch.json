@@ -51,6 +51,14 @@
             "program": "${workspaceFolder}/src/linux_arctis_manager/scripts/cli.py",
             "args": ["tools", "arctis-devices"],
             "console": "integratedTerminal"
+        },
+        {
+            "name": "Tools: Write udev rules",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/linux_arctis_manager/scripts/cli.py",
+            "args": ["udev", "write-rules", "--force"],
+            "console": "integratedTerminal"
         }
     ]
 }
