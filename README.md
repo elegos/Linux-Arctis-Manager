@@ -27,7 +27,7 @@ A replacement for SteelSeries GG software, to manage your Arctis device on Linux
 |Arctis Nova 7P                       |❌|❌|220a|
 |Arctis Nova 7X                       |❌|❌|12d7|
 |Arctis Nova 9                        |❌|❌|12c2|
-|Arctis Nova Elite                    |❌|❌||
+|Arctis Nova Elite                    |✅*|✅*|2270|
 |Arctis Nova Pro Wireless / X         |✅|✅|12e0, 12e5|
 |Arctis Nova Pro                      |❌|❌||
 |Arctis Pro GameDAC                   |❌|❌|1280|

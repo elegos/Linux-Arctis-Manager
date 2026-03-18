@@ -1,0 +1,269 @@
+device:
+  name: SteelSeries Arctis Nova Elite
+  vendor_id: 0x1038
+  product_ids:
+    - 0x2270 # SteelSeries Arctis Nova Elite
+  command_padding:
+    length: 64
+    position: end
+    filler: 0x00
+
+  # Observed on a live device via sysfs:
+  # - interface 3 exposes the 64-byte HID interrupt IN endpoint
+  # - commands are sent as HID SET_REPORT on control endpoint 0, interface 3
+  command_interface_index: [0, 3]
+  listen_interface_indexes: [3]
+
+  # Experimental first pass:
+  # Nova Elite appears to be the premium base-station successor to Nova Pro Wireless,
+  # so we start from the same command map until packet captures can confirm deltas.
+  device_init:
+    - [0x06, 0x20]
+    - [0x06, 0x20]
+    - [0x06, 0x10]
+    - [0x06, 0x10]
+    - [0x06, 0x10]
+    - [0x06, 0x3b]
+    - [0x06, 0x8d, 0x01]
+    - [0x06, 0x20]
+    - [0x06, 0x20]
+    - [0x06, 0x20]
+    - [0x06, 0x80]
+    - [0x06, 0x3b]
+    - [0x06, 0x8d, 0x01]
+    - [0x06, 0x33, 0x14, 0x14, 0x14]
+    - [0x06, 0xc3, 'settings.wireless_mode']
+    - [0x06, 0x2e, 0x00]
+    - [0x06, 0xc1, 'settings.pm_shutdown']
+    - [0x06, 0x85, 0x0a]
+    - [0x06, 0x37, 'settings.mic_volume']
+    - [0x06, 0xb2]
+    - [0x06, 0x47, 0x64, 0x00, 0x64]
+    - [0x06, 0x83, 0x01]
+    - [0x06, 0x89, 0x00]
+    - [0x06, 0x27, 'settings.gain']
+    - [0x06, 0xb3, 0x00]
+    - [0x06, 0x39, 'settings.mic_side_tone']
+    - [0x06, 0xbf, 'settings.mic_led_brightness']
+    - [0x06, 0x43, 0x01]
+    - [0x06, 0x69, 0x00]
+    - [0x06, 0x3b, 0x00]
+    - [0x06, 0x8d, 0x01]
+    - [0x06, 0x49, 0x01]
+    - [0x06, 0xb7, 0x00]
+    - [0x06, 0xb7, 0x00]
+    - [0x06, 0xb7, 0x00]
+    - ['status.request']
+    - [0x06, 0x20, 0x00]
+    - [0x06, 0xb7, 0x00]
+
+  status:
+    request: 0x06b0
+    response_mapping:
+      - starts_with: 0x0725
+        station_volume: 0x02
+
+      - starts_with: 0x0745
+        media_mix: 0x02
+        chat_mix: 0x03
+
+      - starts_with: 0x06b0
+        bluetooth_powerup_state: 0x02
+        bluetooth_auto_mute: 0x03
+        bluetooth_power_status: 0x04
+        bluetooth_connection: 0x05
+        headset_battery_charge: 0x06
+        charge_slot_battery_charge: 0x07
+        transparent_noise_cancelling_level: 0x08
+        mic_status: 0x09
+        noise_cancelling: 0x0a
+        mic_led_brightness: 0x0b
+        auto_off_time_minutes: 0x0c
+        wireless_mode: 0x0d
+        wireless_pairing: 0x0e
+        headset_power_status: 0x0f
+    representation:
+      headset:
+        - headset_power_status
+        - headset_battery_charge
+        - noise_cancelling
+        - transparent_noise_cancelling_level
+        - auto_off_time_minutes
+      mic:
+        - mic_status
+        - mic_led_brightness
+      gamedac:
+        - station_volume
+        - charge_slot_battery_charge
+      bluetooth:
+        - bluetooth_powerup_state
+        - bluetooth_power_status
+        - bluetooth_auto_mute
+        - bluetooth_connection
+      wireless:
+        - wireless_mode
+        - wireless_pairing
+
+  online_status:
+    status_variable: headset_power_status
+    online_value: online
+
+  settings:
+    headset:
+      gain:
+        type: toggle
+        values:
+          off: 0x01
+          on: 0x02
+          off_label: low
+          on_label: high
+        default: 0x02
+        update_sequence: [0x06, 0x27, 'value']
+    microphone:
+      mic_volume:
+        type: slider
+        min: 0x01
+        max: 0x0a
+        step: 1
+        min_label: mic_muted
+        max_label: perc_100
+        default: 0x0a
+        update_sequence: [0x06, 0x37, 'value']
+      mic_side_tone:
+        type: slider
+        min: 0x00
+        max: 0x03
+        step: 1
+        min_label: off
+        max_label: high
+        values_mapping:
+          0x00: off
+          0x01: low
+          0x02: medium
+          0x03: high
+        default: 0x00
+        update_sequence: [0x06, 0x39, 'value']
+      mic_led_brightness:
+        type: slider
+        min: 0x01
+        max: 0x0a
+        step: 1
+        min_label: perc_10
+        max_label: perc_100
+        default: 0x0a
+        update_sequence: [0x06, 0xbf, 'value']
+    power_management:
+      pm_shutdown:
+        type: slider
+        min: 0x00
+        max: 0x06
+        step: 1
+        min_label: never
+        max_label: 60_minutes
+        values_mapping:
+          0x00: never
+          0x01: 1_minutes
+          0x02: 5_minutes
+          0x03: 10_minutes
+          0x04: 15_minutes
+          0x05: 30_minutes
+          0x06: 60_minutes
+        default: 0x05
+        update_sequence: [0x06, 0xc1, 'value']
+    wireless:
+      wireless_mode:
+        type: toggle
+        values:
+          off: 0x00
+          on: 0x01
+          off_label: speed
+          on_label: range
+        default: 0x00
+        update_sequence: [0x06, 0xc3, 'value']
+
+  status_parse:
+    station_volume:
+      type: percentage
+      perc_min: 56
+      perc_max: 0
+    media_mix:
+      type: percentage
+      perc_min: 0
+      perc_max: 100
+    chat_mix:
+      type: percentage
+      perc_min: 0
+      perc_max: 100
+    bluetooth_powerup_state:
+      type: on_off
+      off: 0x00
+      on: 0x01
+    bluetooth_auto_mute:
+      type: int_str_mapping
+      values:
+        0x00: off
+        0x01: -12db
+        0x02: on
+    bluetooth_power_status:
+      type: on_off
+      off: 0x01
+      on: 0x00
+    bluetooth_connection:
+      type: int_str_mapping
+      values:
+        0x00: off
+        0x01: connected
+        0x02: disconnected
+    headset_battery_charge:
+      type: percentage
+      perc_min: 0
+      perc_max: 8
+    charge_slot_battery_charge:
+      type: percentage
+      perc_min: 0
+      perc_max: 8
+    transparent_noise_cancelling_level:
+      type: percentage
+      perc_min: 0
+      perc_max: 10
+    mic_status:
+      type: int_str_mapping
+      values:
+        0x00: unmuted
+        0x01: muted
+    noise_cancelling:
+      type: int_str_mapping
+      values:
+        0x00: off
+        0x01: low
+        0x02: high
+        0x03: transparency
+    mic_led_brightness:
+      type: percentage
+      perc_min: 0
+      perc_max: 10
+    auto_off_time_minutes:
+      type: int_int_mapping
+      values:
+        0x00: 0
+        0x01: 1
+        0x02: 5
+        0x03: 10
+        0x04: 15
+        0x05: 30
+        0x06: 60
+    wireless_mode:
+      type: int_str_mapping
+      values:
+        0x00: speed
+        0x01: range
+    wireless_pairing:
+      type: on_off
+      off: 0x00
+      on: 0x01
+    headset_power_status:
+      type: int_str_mapping
+      values:
+        0x01: offline
+        0x02: cable_charging
+        0x08: online
