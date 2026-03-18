@@ -149,7 +149,7 @@ device:
         type: discrete_map
         values_mapping:
           0x00: never
-          0x01: 1_minutes
+          0x01: 1_minute
           0x02: 5_minutes
           0x03: 10_minutes
           0x04: 15_minutes
