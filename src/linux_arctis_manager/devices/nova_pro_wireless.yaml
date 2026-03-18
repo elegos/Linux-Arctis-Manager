@@ -108,12 +108,10 @@ device:
   settings:
     headset:
       gain:
-        type: toggle
-        values:
-          off: 0x01
-          on: 0x02
-          off_label: low
-          on_label: high
+        type: discrete_map
+        values_mapping:
+          0x01: low
+          0x02: high
         default: 0x02 # high
         update_sequence: [0x06, 0x27, 'value']
     microphone:
