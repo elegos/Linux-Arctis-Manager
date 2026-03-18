@@ -90,10 +90,7 @@ device:
         default: 0x00 # off
         update_sequence: [0x39, 'value']
       mic_mute_led_brightness:
-        type: slider
-        min: 0x00
-        max: 0x0a
-        step: 1
+        type: discrete_map
         values_mapping:
           0x00: off
           0x01: low
@@ -113,10 +110,7 @@ device:
         update_sequence: [0x35, 'value']
     power_management:
       pm_shutdown:
-        type: slider
-        min: 0x00
-        max: 0x5a
-        step: 1
+        type: discrete_map
         values_mapping:
           0x00: never
           0x01: 1_minute
@@ -152,7 +146,7 @@ device:
         0x02: disconnected
         0x03: connected
     wireless_mode:
-      type: int_str_mapping
-      values:
+      type: discrete_map
+      values_mapping:
         0x00: range
         0x01: speed

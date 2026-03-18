@@ -7,6 +7,8 @@ from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QSlider,
 
 from linux_arctis_manager.config import ConfigSetting, SettingType
 from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
+from linux_arctis_manager.gui.qt_widgets.q_checkable_button_group import \
+    QCheckableButtonGroup
 from linux_arctis_manager.gui.qt_widgets.q_dual_state import QDualState
 from linux_arctis_manager.i18n import I18n
 
@@ -109,6 +111,9 @@ class QSettingsWidget(QWidget):
 
         DbusWrapper.change_setting(config.name, dbus_value)
 
+    def _values_mapping_label(self, config: ConfigSetting, value: bool|str|int) -> str:
+        return I18n.get_instance().translate('settings_values', config.get_kwargs().get('values_mapping', {}).get(f'{value}', value))
+
     def get_widget(self, config: ConfigSetting, value: bool|str|int, callback: Callable) -> QWidget|None:
         main_widget = QWidget()
         main_layout = QHBoxLayout()
@@ -136,19 +141,25 @@ class QSettingsWidget(QWidget):
 
             def slider_value_callback(config: ConfigSetting) -> Callable[[bool|str|int], str]:
                 def get_slider_value(value: bool|str|int) -> str:
-                    return I18n.get_instance().translate(
-                        'settings_values',
-                        config.get_kwargs().get('values_mapping', {}).get(f'{value}', value)
-                    )
+                    return self._values_mapping_label(config, value)
 
                 return get_slider_value
 
             slider_value = slider_value_callback(config)
-            widget_value_label = QLabel(slider_value(value))
+            widget_value_label = QLabel(self._values_mapping_label(config, value))
             widget_layout.addWidget(widget_value_label)
 
             slider.valueChanged.connect(lambda value: widget_value_label.setText(slider_value(value)))
             slider.valueChanged.connect(lambda value: callback(config, value))
+        elif config.type == SettingType.DISCRETE_MAP:
+            widget = QCheckableButtonGroup()
+
+            for map_value, map_label in config.get_kwargs().get('values_mapping', {}).items():
+                map_value = int(map_value)
+                widget.addButton(value=map_value, label=map_label, selected=(value == map_value), i18n_section='settings_values')
+
+            widget.new_value.connect(lambda value: callback(config, value))
+
         elif config.type == SettingType.SELECT:
             widget = QComboBox()
             options = self._option_lists.get(config.options_source, [])
@@ -164,4 +175,5 @@ class QSettingsWidget(QWidget):
             main_layout.addWidget(QLabel(I18n.get_instance().translate('settings', config.name)))
             main_layout.addWidget(widget)
         
+        return main_widget if widget else None
         return main_widget if widget else None

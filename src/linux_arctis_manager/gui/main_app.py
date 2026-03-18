@@ -91,7 +91,7 @@ class QMainApp(QBaseDesktopApp):
 
         window.setMinimumSize(800, 600)
         available_geometry = window.screen().availableGeometry()
-        window.resize(min(800, available_geometry.width()), min(600, available_geometry.height()))
+        window.resize(min(960, available_geometry.width()), min(600, available_geometry.height()))
 
         # SIDE PANEL
         self.side_panel = QListWidget()

@@ -82,10 +82,7 @@ device:
         default: 0x00 # off
         update_sequence: [0x3a, 'value']
       bluetooth_auto_mute:
-        type: slider
-        min: 0x00
-        max: 0x02
-        step: 1
+        type: discrete_map
         values_mapping:
           0x00: none
           0x01: -12_db
@@ -112,12 +109,7 @@ device:
         default: 0x07 # 100%
         update_sequence: [0x37, 'value']
       mic_side_tone:
-        type: slider
-        min: 0x00
-        max: 0x03
-        step: 1
-        min_label: off
-        max_label: high
+        type: discrete_map
         values_mapping:
           0x00: off
           0x01: low
@@ -126,10 +118,7 @@ device:
         default: 0x00 # off
         update_sequence: [0x39, 'value']
       mic_mute_led_brightness:
-        type: slider
-        min: 0x00
-        max: 0x03
-        step: 1
+        type: discrete_map
         values_mapping:
           0x00: off
           0x01: low
@@ -139,10 +128,7 @@ device:
         update_sequence: [0xae, 'value']
     power_management:
       pm_shutdown:
-        type: slider
-        min: 0x00
-        max: 0x5a
-        step: 1
+        type: discrete_map
         values_mapping:
           0x00: never
           0x01: 1_minute

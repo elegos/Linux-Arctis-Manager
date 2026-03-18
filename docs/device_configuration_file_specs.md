@@ -105,6 +105,18 @@ values_mapping:                        # OPTIONAL: if the slider needs different
 ```
 
 ```yaml
+# Discrete map - a discrete mapping represented by a group of checkable buttons
+type: discrete_map
+default: 0x0a                          # The value set if none was before
+update_sequence: [0x06, 0x37, 'value'] # The setting's command update sequence
+values_mapping:
+  0: off                               # Labels as found in [settings_values]
+  1: low
+  2: medium
+  3: high
+```
+
+```yaml
 # Boolean values (with custom on/off values and labels)
 type: toggle
 values:

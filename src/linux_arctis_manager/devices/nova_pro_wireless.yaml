@@ -127,12 +127,7 @@ device:
         default: 0x0a # 100%
         update_sequence: [0x06, 0x37, 'value']
       mic_side_tone:
-        type: slider
-        min: 0x00
-        max: 0x03
-        step: 1
-        min_label: off
-        max_label: high
+        type: discrete_map
         values_mapping:
           0x00: off
           0x01: low
@@ -151,12 +146,7 @@ device:
         update_sequence: [0x06, 0xbf, 'value']
     power_management:
       pm_shutdown:
-        type: slider
-        min: 0x00
-        max: 0x06
-        step: 1
-        min_label: never
-        max_label: 60_minutes
+        type: discrete_map
         values_mapping:
           0x00: never
           0x01: 1_minutes
@@ -169,13 +159,11 @@ device:
         update_sequence: [0x06, 0xc1, 'value']
     wireless:
       wireless_mode:
-        type: toggle
-        values:
-          off: 0x00
-          on: 0x01
-          off_label: speed
-          on_label: range
-        default: 0x00 # speed
+        type: discrete_map
+        values_mapping:
+          0x00: speed
+          0x01: range
+        default: 0x00
         update_sequence: [0x06, 0xc3, 'value']
 
   status_parse:

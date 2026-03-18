@@ -1,0 +1,8 @@
+QPushButton:checked {
+    background-color: palette(light);
+    color: palette(highlighted-text);
+}
+
+QPushButton:hover {
+    background-color: palette(light);
+}

@@ -16,6 +16,7 @@ class PaddingPosition(Enum):
     END = 'end'
 
 class SettingType(Enum):
+    DISCRETE_MAP = 'discrete_map'
     SLIDER = 'slider'
     TOGGLE = 'toggle'
     SELECT = 'select'
