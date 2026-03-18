@@ -146,7 +146,7 @@ device:
         0x02: disconnected
         0x03: connected
     wireless_mode:
-      type: discrete_map
+      type: int_str_mapping
       values_mapping:
         0x00: range
         0x01: speed
