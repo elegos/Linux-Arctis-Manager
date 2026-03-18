@@ -100,12 +100,10 @@ device:
         update_sequence: [0xae, 'value']
     wireless:
       wireless_mode:
-        type: toggle
-        values:
-          off: 0x01
-          on: 0x00
-          off_label: speed
-          on_label: range
+        type: discrete_map
+        values_mapping:
+          0x01: speed
+          0x00: range
         default: 0x01 # speed
         update_sequence: [0x35, 'value']
     power_management:
