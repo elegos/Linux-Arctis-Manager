@@ -1,5 +1,5 @@
 device:
-  name: SteelSeries Arctis Nova 7 (% battery)
+  name: SteelSeries Arctis Nova 7 # (% battery)
   vendor_id: 0x1038
   product_ids:
     - 0x2202 # Arctis Nova 7
