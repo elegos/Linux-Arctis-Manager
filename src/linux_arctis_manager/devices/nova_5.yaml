@@ -147,6 +147,6 @@ device:
         0x03: connected
     wireless_mode:
       type: int_str_mapping
-      values_mapping:
+      values:
         0x00: range
         0x01: speed
