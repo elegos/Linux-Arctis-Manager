@@ -4,6 +4,8 @@ A replacement for SteelSeries GG software, to manage your Arctis device on Linux
 
 [![CI](https://github.com/elegos/Linux-Arctis-Manager/actions/workflows/wheel-install-test.yaml/badge.svg?branch=develop)](https://github.com/elegos/Linux-Arctis-Manager/actions/workflows/wheel-install-test.yaml)
 
+**[Fluxer server](https://fluxer.gg/beALFGJK)** - [Discord server](https://discord.gg/FXfvUXWXt4)
+
 ## 👍 Key points
 
 - Enable the Media and Chat audio streams
