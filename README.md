@@ -1,119 +1,240 @@
 # Linux Arctis Manager
 
-A replacement for SteelSeries GG software, to manage your Arctis device on Linux!
+An open-source replacement for SteelSeries GG, to manage your Arctis headset on Linux!
 
-[![CI](https://github.com/elegos/Linux-Arctis-Manager/actions/workflows/wheel-install-test.yaml/badge.svg?branch=develop)](https://github.com/elegos/Linux-Arctis-Manager/actions/workflows/wheel-install-test.yaml)
+[![GitHub Release](https://img.shields.io/github/v/release/elegos/Linux-Arctis-Manager?label=Latest%20Release&color=brightgreen&logo=github&logoColor=white)](https://github.com/elegos/Linux-Arctis-Manager/releases)
+[![AUR Version](https://img.shields.io/aur/version/linux-arctis-manager?label=AUR%20Package&logo=arch-linux&logoColor=white&color=1793d1)](https://aur.archlinux.org/packages/linux-arctis-manager)
+[![Python](https://img.shields.io/python/required-version-toml?tomlFilePath=https://raw.githubusercontent.com/elegos/Linux-Arctis-Manager/develop/pyproject.toml&logo=python&logoColor=white&label=Python)](https://www.python.org/)
+[![Build](https://img.shields.io/github/actions/workflow/status/elegos/Linux-Arctis-Manager/wheel-install-test.yaml?branch=develop&label=Build&logo=github&logoColor=white)](https://github.com/elegos/Linux-Arctis-Manager/actions/workflows/wheel-install-test.yaml)
+[![Discord](https://img.shields.io/badge/Discord-join-7289DA?logo=discord&logoColor=white)](https://discord.gg/efQbfvnTP)
+[![Fluxer](https://img.shields.io/badge/Fluxer-join-5d5cfe?logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIzLjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCI+PHBhdGggZD0iTTQgOC41YzIuNjYtMi42NiA1LjMzLTIuNjYgOCAwczUuMzMgMi42NiA4IDAiLz48cGF0aCBkPSJNNCAxNS41YzIuNjYtMi42NiA1LjMzLTIuNjYgOCAwczUuMzMgMi42NiA4IDAiLz48L3N2Zz4=)](https://web.fluxer.app/invite/beALFGJK)
 
-**[Fluxer server](https://fluxer.gg/beALFGJK)** - [Discord server](https://discord.gg/FXfvUXWXt4)
+## 🎚️ Key Points
 
-## 👍 Key points
-
-- Enable the Media and Chat audio streams
+- Control ChatMix - enable and control balance between `Media` and `Chat` audio streams
 - Configure any device via a simple configuration file
 - Enable per-device features by adding them in the relative configuration file
 - D-Bus based communication, to support different clients (alternative clients, Plasma extensions, etc)
 
-## 🎧 Supported devices table
+## 🎧 Supported Devices
 
-|Device|Channels mix|Advanced features|Product ID(s)|
-|------|------------|-----------------|-------------|
-|Arctis 1 / Xbox                                          |❌|❌|12b3, 12b6|
-|Arctis 1 Wireless                                        |❌|❌||
-|Arctis 3 Console Edition                                 |❌|❌||
-|Arctis 7 / 7 2019 / Pro 2019 / Pro GameDAC               |❌|❌|1260, 12ad, 1252, 1280|
-|Arctis 9                                                 |❌|❌|12c2|
-|Arctis Pro Wireless                                      |❌|❌|1290|
-|Arctis Nova 3                                            |❌|❌|12ec|
-|Arctis Nova 3P Wireless / 3X Wireless                    |❌|❌|2269, 226d|
-|Arctis Nova 5                                            |❎️|✅|2232, 2253|
-|Arctis Nova 7 / 7X / Diablo IV / Gen 2 (% battery)       |✅|✅|22a1, 227e, 2258, 229e, 22a9, 22a5|
-|Arctis Nova 7 / 7X / Diablo IV / Gen 2 (discrete battery)|✅|✅|2202, 2206, 223a, 227a, 22a4|
-|Arctis Nova 7+ / PS5 / Xbox / Destiny                    |❌|❌|220e, 2212, 2216, 2236|
-|Arctis Nova 7P                                           |❌|❌|220a|
-|Arctis Nova Elite                                        |❌|❌||
-|Arctis Nova Pro Wireless / X                             |✅|✅|12e0, 12e5|
-|Arctis Nova Pro                                          |❌|❌||
+| Device | ChatMix | Advanced Features | Product ID(s) |
+|---|:---:|:---:|---|
+| Arctis 1 / Xbox | ❌ | ❌ | `12b3`, `12b6` |
+| Arctis 1 Wireless | ❌ | ❌ | ❓ |
+| Arctis 3 Console Edition | ❌ | ❌ | ❓ |
+| Arctis 7 / 7 2019 / Pro 2019 / Pro GameDAC | ❌ | ❌ | `1260`, `12ad`, `1252`, `1280` |
+| Arctis 9 | ❌ | ❌ | `12c2` |
+| Arctis Pro Wireless | ❌ | ❌ | `1290` |
+| Arctis Nova 3 | ❌ | ❌ | `12ec` |
+| Arctis Nova 3P Wireless / 3X Wireless | ❌ | ❌ | `2269`, `226d` |
+| Arctis Nova 5 | ➖ | ✅ | `2232`, `2253` |
+| Arctis Nova 7 / 7X / Diablo IV / Gen 2 (% battery) | ✅ | ✅ | `22a1`, `227e`, `2258`, `229e`, `22a9`, `22a5` |
+| Arctis Nova 7 / 7X / Diablo IV / Gen 2 (discrete battery) | ✅ | ✅ | `2202`, `2206`, `223a`, `227a`, `22a4` |
+| Arctis Nova 7+ / PS5 / Xbox / Destiny | ❌ | ❌ | `220e`, `2212`, `2216`, `2236` |
+| Arctis Nova 7P | ❌ | ❌ | `220a` |
+| Arctis Nova Elite | ❌ | ❌ | ❓ |
+| Arctis Nova Pro Wireless / X | ✅ | ✅ | `12e0`, `12e5` |
+| Arctis Nova Pro | ❌ | ❌ | ❓ |
 
+### Legend
 
-✅: feature supported by the device and implemented.
-❎️: feature not supported by the device.
+| Symbol | Description |
+| :---: | --- |
+| ✅ | **Supported:** supported and fully implemented |
+| ❌ | **Not Implemented:** support not yet available |
+| ➖ | **N/A:** not physically supported by this headset model |
+| ❓ | **Missing Data:** product ID is not yet known. [Help us find it!](https://github.com/elegos/Linux-Arctis-Manager/blob/develop/docs/device_support.md) |
 
-## CLI commands
+## ⌨️ CLI Commands
 
-- `lam-daemon`: executed by user-level systemd.
-- `lam-cli`: to run utilities like udev rules generation, desktop entries installation etc.
-- `lam-gui`: the graphical user interface, to alter settings and see the device's status.
+- `lam-daemon`: the background service that communicates with your headset, managed by systemd
+- `lam-cli`: command-line utilities for setup tasks like installing udev rules and desktop entries
+- `lam-gui`: the graphical interface to configure your headset and view its status
 
-Each command can be called with `-h` or `--help` to get all the options for the commands and subcommands.
+> [!TIP]
+> Not sure what a command does? Run it with `-h` or `--help` to see all available options.
 
-## 🖥️ Install & setup
+## 📦 Install & Setup
+
+Choose the installation method that fits your setup:
+
+- **[Distrobox](#distrobox)** - recommended for immutable distros (Bazzite, Fedora Silverblue, etc.)
+- **[Arch Linux (AUR)](#arch-linux-aur)** - community-maintained package for Arch users
+- **[Manual install](#manual-install)** - for all other Linux distros
+
+---
 
 ### Distrobox
 
-Note on Distrobox (immutable distros like Bazzite, just to be **aware**): distrobox executes applications within containers, mounting `/var`, `/etc` and your `/home` in the container itself. This application heavily relies on your `/home`, thus distrobox is not really used but for the installation process.
+Run the following script to install:
 
 ```bash
 curl -LsSf https://raw.githubusercontent.com/elegos/Linux-Arctis-Manager/refs/heads/develop/scripts/distrobox.sh | sh
 ```
+
+> [!NOTE]
+> For Immutable Distros (Bazzite, Fedora Silverblue, etc.), the app behaves like a native installation rather than an isolated container. Because Distrobox mounts your `/home`, `/var`, and `/etc` directly, the manager can interact with the system services and configuration files it needs to function.
+
+---
+
 ### Arch Linux (AUR)
 
-Arch Linux users can install the community-maintained package from the Arch User Repository (AUR). Please report any packaging-specific issues directly to the AUR maintainers [@tonitch](https://aur.archlinux.org/account/tonitch) and [@Aiyahhh](https://aur.archlinux.org/account/Aiyahhh)
+Arch Linux users can install the community-maintained package from the [Arch User Repository (AUR)](https://aur.archlinux.org/packages/linux-arctis-manager):
 
-- [Linux Arctis Manager on AUR](https://aur.archlinux.org/packages/linux-arctis-manager)
+1. Install with your preferred AUR helper:
 
-### Manual install
+   ```bash
+   yay -S linux-arctis-manager
+
+   # using paru: paru -S linux-arctis-manager
+   ```
+
+2. Continue to [Final Setup](#final-setup)
+
+> For packaging-specific issues, report directly to the AUR maintainers: [@tonitch](https://aur.archlinux.org/account/tonitch) and [@Aiyahhh](https://aur.archlinux.org/account/Aiyahhh).
+
+---
+
+### Manual Install
+
+> [!NOTE]
+> `pip` can be used instead of `pipx`, but `pipx` is recommended for better dependency isolation. Some distros will require `pipx`.
 
 #### Prerequisites
 
-- `uv` ([installation guide](https://docs.astral.sh/uv/getting-started/installation/))
-- `pip` or `pipx` (some distros will **REQUIRE** pipx). **pipx is recommended** for dependencies isolation, while pip will have a smaller footprint.
+Install `pipx` with your package manager.
 
-#### Commands
+#### Option A: Install from Release (recommended)
+
+1. Download the latest `.whl` from the [releases page](../../releases)
+2. From the directory you downloaded it to, install it:
+
+   ```bash
+   pipx install linux_arctis_manager-*.whl
+
+   # using pip: pip install --user linux_arctis_manager-*.whl
+   ```
+
+3. Continue to [Final Setup](#final-setup)
+
+#### Option B: Install from Source
+
+1. Install `uv` ([installation guide](https://docs.astral.sh/uv/getting-started/installation/)) and create the applications directory:
+
+   ```bash
+   mkdir -p $HOME/.local/share/applications
+   ```
+
+2. Get the source:
+
+   ```bash
+   git clone https://github.com/elegos/Linux-Arctis-Manager.git
+   cd Linux-Arctis-Manager
+   git pull
+   ```
+
+3. Build:
+
+   ```bash
+   rm -rf dist
+   uv build
+   ```
+
+4. Install:
+
+   ```bash
+   find ./dist -name "*.whl" | head -n1 | xargs pipx install --force
+
+   # using pip: find ./dist -name "*.whl" | head -n1 | xargs pip install --user --force-reinstall
+   ```
+
+---
+
+### Final Setup
 
 ```bash
-# Prerequisites
-curl -LsSf https://astral.sh/uv/install.sh | sh
-# install pipx with your package manager
-mkdir -p $HOME/.local/share/applications
+# required on first install, or after updating for new device support
+sudo lam-cli udev write-rules --force --reload
 
-# Download the sources and enter them
-git clone https://github.com/elegos/Linux-Arctis-Manager.git # first time only
-cd Linux-Arctis-Manager
-git pull # to get the latest version available
-
-# Build the .whl package. Skip this if downloading from releases page
-rm -rf dist
-uv build
-
-# Install the .whl package
-find ./dist -name "*.whl" | head -n1 | xargs pipx install --force
-# ALT using pip: find ./dist -name "*.whl" | head -n1 | xargs pip install --user --force-reinstall
-
-# Setup
-lam-cli desktop write # Only to produce the desktop entries; optional after first installation
-lam-cli udev write-rules --force --reload # Required for first installation or new devices support only
+# produces desktop entries — optional after first install
+lam-cli desktop write
 ```
 
-## ⛔ Uninstall / cleanup
-- `lam-cli desktop remove` (remove the desktop menu entries)
-- `systemctl --user disable --now arctis-manager` (disables and stops arctis-manager service)
-- `rm ~/.config/systemd/user/arctis-manager.service` (removes the systemd's user-level arctis-manager service file)
-- `rm ~/.config/arctis_manager` (user preferences and custom device / lang files)
-- `sudo rm /usr/lib/udev/rules.d/91-steelseries-arctis.rules` (remove udev rules)
-- `pipx uninstall linux_arctis_manager` (pipx)
-- `pip uninstall linux_arctis_manager` (pip)
+> [!NOTE]
+> Skip this if you installed via Distrobox - the setup script handles this automatically.
 
-## ⌨️ Development
+> [!TIP]
+> To launch the system tray icon automatically on login, copy its desktop entry to your autostart folder:
+>
+> ```bash
+> cp ~/.local/share/applications/lam-gui-tray.desktop ~/.config/autostart/
+> ```
 
-### Basic commands
+## 🧹 Uninstall / Cleanup
+
+1. Stop and disable the service:
+
+   ```bash
+   systemctl --user disable --now arctis-manager
+   rm ~/.config/systemd/user/arctis-manager.service
+   ```
+
+2. Remove leftover files:
+
+   ```bash
+   # desktop menu entries
+   lam-cli desktop remove
+
+   # udev rules
+   sudo rm /usr/lib/udev/rules.d/91-steelseries-arctis.rules
+
+   # user preferences and device/lang files
+   rm -rf ~/.config/arctis_manager
+   ```
+
+3. Uninstall the package:
+
+   ```bash
+   pipx uninstall linux_arctis_manager
+
+   # using pip: pip uninstall linux_arctis_manager
+   ```
+
+## 🛠️ Development
+
+### Basic Commands
 
 - Run the daemon: `uv run lam-daemon`
 - Run the CLI: `uv run lam-cli`
-- Run the GUI: `uv run lam-gui [--no-enforce-systemd]` - use the option to avoid force enabling the daemon, in case you're working on it
+- Run the GUI: `uv run lam-gui [--no-enforce-systemd]` (use this option to avoid force enabling the daemon, in case you're working on it)
 
 ### Documentation
 
-- [How to add support to a new device](docs/device_support.md)
-- [Wireshark quick tutorial](https://www.youtube.com/watch?v=zWbdnHwTr3M)
+- [How to add support for a new device](docs/device_support.md)
+- [Wireshark tutorial](https://www.youtube.com/watch?v=zWbdnHwTr3M)
 - [Device configuration specs](docs/device_configuration_file_specs.md)
 - [Dbus messaging](docs/dbus.md)
+
+## ⚠️ Troubleshooting
+
+- App or headset becomes unresponsive: `systemctl --user restart --now arctis-manager`
+- Newly supported device does not appear after an update: `lam-cli udev write-rules --force --reload`
+- App fails to start with a Qt xcb platform error: install `libxcb-cursor0` (Debian/Ubuntu) or `xcb-util-cursor` (Arch/Fedora). Required on non-Qt desktop environments like Cinnamon.
+
+## 💬 Community & Support
+
+Linux Arctis Manager is a community-driven project - the more hardware data and feedback we get, the better support becomes for everyone.
+
+Join us on:
+
+- [Discord](https://discord.gg/efQbfvnTP)
+- [Fluxer](https://web.fluxer.app/invite/beALFGJK)
+
+### Missing a Device?
+
+If your headset isn't listed in the support table, we likely just need your hardware IDs to get started. See our [Hardware Support Guide](docs/device_support.md) for instructions on how to find and submit your Product ID (PID).
+
+---
+
+Linux Arctis Manager is licensed under the [GPL-3.0](LICENSE) and is not affiliated with or endorsed by [SteelSeries ApS](https://steelseries.com). SteelSeries, Arctis, ChatMix, and SteelSeries GG are trademarks of their respective owners.
