@@ -6,8 +6,8 @@ An open-source replacement for SteelSeries GG, to manage your Arctis headset on 
 [![AUR Version](https://img.shields.io/aur/version/linux-arctis-manager?label=AUR%20Package&logo=arch-linux&logoColor=white&color=1793d1)](https://aur.archlinux.org/packages/linux-arctis-manager)
 [![Python](https://img.shields.io/python/required-version-toml?tomlFilePath=https://raw.githubusercontent.com/elegos/Linux-Arctis-Manager/develop/pyproject.toml&logo=python&logoColor=white&label=Python)](https://www.python.org/)
 [![Build](https://img.shields.io/github/actions/workflow/status/elegos/Linux-Arctis-Manager/wheel-install-test.yaml?branch=develop&label=Build&logo=github&logoColor=white)](https://github.com/elegos/Linux-Arctis-Manager/actions/workflows/wheel-install-test.yaml)
-[![Discord](https://img.shields.io/badge/Discord-join-7289DA?logo=discord&logoColor=white)](https://discord.gg/efQbfvnTP)
-[![Fluxer](https://img.shields.io/badge/Fluxer-join-5d5cfe?logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIzLjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCI+PHBhdGggZD0iTTQgOC41YzIuNjYtMi42NiA1LjMzLTIuNjYgOCAwczUuMzMgMi42NiA4IDAiLz48cGF0aCBkPSJNNCAxNS41YzIuNjYtMi42NiA1LjMzLTIuNjYgOCAwczUuMzMgMi42NiA4IDAiLz48L3N2Zz4=)](https://web.fluxer.app/invite/beALFGJK)
+[![Discord](https://img.shields.io/badge/Discord-join-7289DA?logo=discord&logoColor=white)](https://discord.gg/FXfvUXWXt4)
+[![Fluxer](https://img.shields.io/badge/Fluxer-join-5d5cfe?logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIzLjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCI+PHBhdGggZD0iTTQgOC41YzIuNjYtMi42NiA1LjMzLTIuNjYgOCAwczUuMzMgMi42NiA4IDAiLz48cGF0aCBkPSJNNCAxNS41YzIuNjYtMi42NiA1LjMzLTIuNjYgOCAwczUuMzMgMi42NiA4IDAiLz48L3N2Zz4=)](https://fluxer.gg/beALFGJK)
 
 ## 🎚️ Key Points
 
@@ -228,8 +228,8 @@ Linux Arctis Manager is a community-driven project - the more hardware data and 
 
 Join us on:
 
-- [Discord](https://discord.gg/efQbfvnTP)
-- [Fluxer](https://web.fluxer.app/invite/beALFGJK)
+- [Discord](https://discord.gg/FXfvUXWXt4)
+- [Fluxer](https://fluxer.gg/beALFGJK)
 
 ### Missing a Device?
 
