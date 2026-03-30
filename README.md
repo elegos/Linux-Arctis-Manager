@@ -187,6 +187,7 @@ lam-cli desktop write
    lam-cli desktop remove
 
    # udev rules
+   sudo rm -f /etc/udev/rules.d/91-steelseries-arctis.rules
    sudo rm /usr/lib/udev/rules.d/91-steelseries-arctis.rules
 
    # user preferences and device/lang files
