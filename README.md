@@ -155,7 +155,7 @@ Install `pipx` with your package manager.
 
 ```bash
 # required on first install, or after updating for new device support
-sudo lam-cli udev write-rules --force --reload
+lam-cli udev write-rules --force --reload
 
 # produces desktop entries — optional after first install
 lam-cli desktop write
