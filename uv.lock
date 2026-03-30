@@ -65,7 +65,7 @@ wheels = [
 
 [[package]]
 name = "linux-arctis-manager"
-version = "2.2.1"
+version = "2.3.0.dev0"
 source = { editable = "." }
 dependencies = [
     { name = "dbus-next" },

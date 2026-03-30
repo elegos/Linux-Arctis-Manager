@@ -21,7 +21,13 @@ def ensure_systemd_unit(enable: bool = False) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     write_systemd_service(path)
     if enable:
-        subprocess.run(['systemctl', '--user', 'enable', '--now', SYSTEMD_SERVICE_NAME], check=True)
+        is_enabled = subprocess.run(['systemctl', '--user', 'is-enabled', SYSTEMD_SERVICE_NAME], stdout=subprocess.DEVNULL).returncode == 0
+        is_active = subprocess.run(['systemctl', '--user', 'is-active', SYSTEMD_SERVICE_NAME], stdout=subprocess.DEVNULL).returncode == 0
+
+        if is_active:
+            subprocess.run(['systemctl', '--user', 'restart', '--now', SYSTEMD_SERVICE_NAME], check=True)
+        if not is_enabled:
+            subprocess.run(['systemctl', '--user', 'enable', '--now', SYSTEMD_SERVICE_NAME], check=True)
 
 def write_systemd_service(path: Path) -> None:
     daemon_path = shutil.which('lam-daemon') or Path(sys.argv[0]).resolve().parent / 'lam-daemon'

@@ -153,6 +153,18 @@ Install `pipx` with your package manager.
 
 ### Final Setup
 
+#### Automatic setup
+
+```bash
+lam-cli setup
+```
+
+#### Manual setup
+
+> [!NOTE]
+> If not required for specific needs, use the automatic setup.
+
+
 ```bash
 # required on first install, or after updating for new device support
 lam-cli udev write-rules --force --reload

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Added
 
 - `discrete_map` setting type
+- `lam-cli setup` all-in-one setup script
 
 ## Changed
 
