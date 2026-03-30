@@ -156,7 +156,9 @@ Install `pipx` with your package manager.
 #### Automatic setup
 
 ```bash
-lam-cli setup
+# --systray-autostart will enable the systray on startup
+# --start-now will start the systray app immediately
+lam-cli setup [--systray-autostart] [--start-now]
 ```
 
 #### Manual setup

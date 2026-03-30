@@ -16,7 +16,7 @@ def is_systemd_unit_enabled() -> bool:
 
     return False
 
-def ensure_systemd_unit(enable: bool = False) -> None:
+def ensure_systemd_unit(enable: bool = False, restart: bool = False) -> None:
     path = HOME_SYSTEMD_SERVICE_FOLDER / SYSTEMD_SERVICE_NAME
     path.parent.mkdir(parents=True, exist_ok=True)
     write_systemd_service(path)
@@ -24,10 +24,13 @@ def ensure_systemd_unit(enable: bool = False) -> None:
         is_enabled = subprocess.run(['systemctl', '--user', 'is-enabled', SYSTEMD_SERVICE_NAME], stdout=subprocess.DEVNULL).returncode == 0
         is_active = subprocess.run(['systemctl', '--user', 'is-active', SYSTEMD_SERVICE_NAME], stdout=subprocess.DEVNULL).returncode == 0
 
-        if is_active:
-            subprocess.run(['systemctl', '--user', 'restart', '--now', SYSTEMD_SERVICE_NAME], check=True)
         if not is_enabled:
-            subprocess.run(['systemctl', '--user', 'enable', '--now', SYSTEMD_SERVICE_NAME], check=True)
+            subprocess.run(['systemctl', '--user', 'enable', SYSTEMD_SERVICE_NAME], check=True)
+        if is_active:
+            if restart:
+                subprocess.run(['systemctl', '--user', 'restart', '--now', SYSTEMD_SERVICE_NAME], check=True)
+        else:
+            subprocess.run(['systemctl', '--user', 'start', '--now', SYSTEMD_SERVICE_NAME], check=True)
 
 def write_systemd_service(path: Path) -> None:
     daemon_path = shutil.which('lam-daemon') or Path(sys.argv[0]).resolve().parent / 'lam-daemon'
@@ -51,3 +54,5 @@ WantedBy=graphical-session.target'''
 
     with open(path, 'w') as f:
         f.writelines([f'{line}\n' for line in template.split('\n')])
+    
+    subprocess.run(['systemctl', '--user', 'daemon-reload'], check=True)

@@ -59,6 +59,14 @@
             "program": "${workspaceFolder}/src/linux_arctis_manager/scripts/cli.py",
             "args": ["udev", "write-rules", "--force"],
             "console": "integratedTerminal"
+        },
+        {
+            "name": "Tools: setup",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/linux_arctis_manager/scripts/cli.py",
+            "args": ["setup", "--systray-autostart", "--start-now"],
+            "console": "integratedTerminal"
         }
     ]
 }

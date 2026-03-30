@@ -101,6 +101,11 @@ ACTION=="remove", GOTO="local_end"
 {concat_rules}
 
 LABEL="local_end"'''
+    
+    if rules_path.exists() and rules_path.read_text().strip() == file_content.strip():
+        print('Rules file is up to date, skipping write.')
+        return -10
+
     if run_with_sudo:
         escaped_file_content = file_content.replace('"', '\\"')
         command = ["sh", "-c", f"echo \"{escaped_file_content}\" > \"{rules_path}\""]
@@ -200,10 +205,10 @@ def _run_udev_write(args: Namespace) -> int:
         return 1
 
     result = write_udev_rules(rules_path, args.create_directories, args.force)
-    if result != 0:
+    if result > 0:
         return result
 
-    if args.reload:
+    if args.reload and result == 0:
         return reload_udev_rules()
 
     return 0
@@ -224,7 +229,36 @@ def _run_setup(args: Namespace) -> int:
             return result
     
     print('Enabling systemd service...')
-    ensure_systemd_unit(True)
+    ensure_systemd_unit(True, True)
+
+    desktop_filename = 'ArctisManagerSystray.desktop'
+    src_dir = Path.home() / '.local' / 'share' / 'applications' / desktop_filename
+
+    if args.systray_autostart:
+        print('Enabling systray autostart...')
+        symlink_path = Path.home() / '.config' / 'autostart' / desktop_filename
+        symlink_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if symlink_path.exists():
+            symlink_path.unlink()
+
+        result = subprocess.run(['ln', '--symbolic', f'{src_dir}', f'{symlink_path}'], check=True).returncode
+        if result != 0:
+            return result
+        
+    if args.start_now:
+        print('Launching systray application...')
+
+        if shutil.which('kioclient'):
+            result = subprocess.run(['kioclient', 'exec', f'{src_dir}'], check=True).returncode
+        elif shutil.which('gtk-launch'):
+            result = subprocess.run(['gtk-launch', desktop_filename], check=True).returncode
+        else:
+            print('No known desktop environment autostart helper found, could not launch systray...')
+            result = 0
+
+        if result != 0:
+            return result
 
     return 0
 
@@ -257,6 +291,8 @@ def main():
         'setup',
         help='Full setup: write udev rules and desktop entries'
     )
+    setup_parser.add_argument('--systray-autostart', action='store_true', help='Start the systray app on login')
+    setup_parser.add_argument('--start-now', action='store_true', help='Start the application immediately')
 
     _add_udev_write_args(setup_parser)
 
