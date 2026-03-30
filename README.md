@@ -188,7 +188,7 @@ lam-cli desktop write
 
    # udev rules
    sudo rm -f /etc/udev/rules.d/91-steelseries-arctis.rules
-   sudo rm /usr/lib/udev/rules.d/91-steelseries-arctis.rules
+   sudo rm -f /usr/lib/udev/rules.d/91-steelseries-arctis.rules
 
    # user preferences and device/lang files
    rm -rf ~/.config/arctis_manager
