@@ -168,7 +168,7 @@ lam-cli desktop write
 > To launch the system tray icon automatically on login, copy its desktop entry to your autostart folder:
 >
 > ```bash
-> cp ~/.local/share/applications/lam-gui-tray.desktop ~/.config/autostart/
+> cp ~/.local/share/applications/ArctisManagerSystray.desktop ~/.config/autostart/
 > ```
 
 ## 🧹 Uninstall / Cleanup
