@@ -1,0 +1,209 @@
+device:
+  name: SteelSeries Arctis Nova Pro
+  vendor_id: 0x1038
+  product_ids:
+    - 0x12cd # Arctis Nova Pro wired / GameDAC Gen 2
+  command_padding:
+    length: 64
+    position: end
+    filler: 0x00
+
+  # This capture uses HID class control transfers on endpoint 0x00 with wIndex=4,
+  # and status notifications arrive on interface 4 / endpoint 0x88.
+  command_interface_index: [0, 4]
+  listen_interface_indexes: [4]
+
+  device_init:
+    - [0x06, 0x10]
+    - [0x06, 0x10]
+    - [0x06, 0x10]
+    - [0x06, 0x20]
+    - [0x06, 0x80] # TODO: observed during GG init; purpose still unknown
+    - [0x06, 0x39, 'settings.mic_side_tone']
+    - [0x06, 0x2e, 0x00] # Equalizer preset 0
+    - [0x06, 0x27, 'settings.gain']
+    - [0x06, 0x83, 'settings.pm_shutdown']
+    - [0x06, 0x47, 0x64, 0x00, 0x64, 0x64] # TODO: observed during GG init; meaning still unknown
+    - [0x06, 0x85, 'settings.display_brightness']
+    - [0x06, 0x37, 'settings.mic_volume']
+    - [0x06, 0x43, 'settings.volume_limiter']
+    - [0x06, 0x33, 0x14, 0x14, 0x14, 0x14, 0x14, 0x14, 0x14, 0x14, 0x14, 0x14] # 10-band EQ flat preset
+    - [0x06, 0x18]
+    - [0x06, 0x49, 0x01]
+    - [0x06, 0x8D, 0x01]
+
+
+  status:
+    request: 0x06
+    response_mapping:
+      - starts_with: 0x0725
+        station_volume: 0x02
+
+      - starts_with: 0x0745
+        media_mix: 0x02
+        chat_mix: 0x03
+
+      - starts_with: 0x0727
+        gain: 0x02
+
+      - starts_with: 0x0739
+        mic_side_tone: 0x02
+
+      - starts_with: 0x0737
+        mic_volume: 0x02
+
+      - starts_with: 0x0785
+        display_brightness: 0x02
+
+      - starts_with: 0x0783
+        pm_shutdown: 0x02
+
+      - starts_with: 0x0743
+        line_out: 0x02
+
+      - starts_with: 0x0620
+        gain: 0x04
+        mic_volume: 0x10
+        mic_side_tone: 0x11
+        line_out: 0x12
+
+    representation:
+      gamedac:
+        - station_volume
+        - display_brightness
+        - dim_screen
+        - line_out
+      chatmix:
+        - media_mix
+        - chat_mix
+      headset:
+        - gain
+        - mic_volume
+        - mic_side_tone
+  
+  settings:
+    headset:
+      gain:
+        type: toggle
+        values:
+          off: 0x01
+          on: 0x02
+          off_label: low
+          on_label: high
+        default: 0x02
+        update_sequence: [0x06, 0x27, 'value']
+      mic_volume:
+        type: slider
+        min: 0x01
+        max: 0x0a
+        step: 1
+        min_label: 1
+        max_label: 10
+        default: 0x0a
+        update_sequence: [0x06, 0x37, 'value']
+      mic_side_tone:
+        type: discrete_map
+        values_mapping:
+          0x00: off
+          0x01: low
+          0x02: medium
+          0x03: high
+        default: 0x02
+        update_sequence: [0x06, 0x39, 'value']
+    gamedac:
+      display_brightness:
+        type: slider # Inferred from 0x85 response range (0x01..0x0a); verify on-device
+        min: 0x01
+        max: 0x0a
+        step: 1
+        min_label: 1
+        max_label: 10
+        default: 0x0a
+        update_sequence: [0x06, 0x85, 'value']
+      dim_screen:
+        type: discrete_map # Inferred from 0x83 response range (0x00..0x06); verify exact minute mapping
+        values_mapping:
+          0x00: never
+          0x01: 1_minute
+          0x02: 5_minutes
+          0x03: 10_minutes
+          0x04: 15_minutes
+          0x05: 30_minutes
+          0x06: 60_minutes
+        default: 0x01
+        update_sequence: [0x06, 0x83, 'value']
+      line_out:
+        type: discrete_map
+        values_mapping:
+          0x01: Speaker
+          0x02: Stream
+        default: 0x01
+        update_sequence: [0x06, 0x43, 'value']
+
+
+  status_parse:
+    station_volume:
+      type: percentage
+      perc_min: 56
+      perc_max: 0
+    media_mix:
+      type: percentage
+      perc_min: 0
+      perc_max: 100
+    chat_mix:
+      type: percentage
+      perc_min: 0
+      perc_max: 100
+    gain:
+      type: int_str_mapping
+      values:
+        0x01: low
+        0x02: high
+    mic_side_tone:
+      type: int_str_mapping
+      values:
+        0x00: off
+        0x01: low
+        0x02: medium
+        0x03: high
+    mic_volume:
+      type: int_int_mapping
+      values:
+        0x01: 1
+        0x02: 2
+        0x03: 3
+        0x04: 4
+        0x05: 5
+        0x06: 6
+        0x07: 7
+        0x08: 8
+        0x09: 9
+        0x0a: 10
+    display_brightness:
+      type: int_int_mapping
+      values:
+        0x01: 1
+        0x02: 2
+        0x03: 3
+        0x04: 4
+        0x05: 5
+        0x06: 6
+        0x07: 7
+        0x08: 8
+        0x09: 9
+        0x0a: 10
+    dim_screen:
+      type: int_str_mapping
+      values:
+        0x00: Off
+        0x01: 1 MIN
+        0x02: 5 MIN
+        0x03: 10 MIN
+        0x04: 15 MIN
+        0x05: 30 MIN
+        0x06: 60 MIN
+    line_out:
+      type: int_str_mapping
+      values:
+        0x02: Stream
+        0x01: Speaker
