@@ -31,6 +31,13 @@ dev = [
     "pytest-cov>=7.1.0",
 ]
 
+[tool.coverage.run]
+omit = [
+    "src/linux_arctis_manager/gui/*",
+    "src/linux_arctis_manager/dbus_service.py",
+    "src/linux_arctis_manager/scripts/dbus_awake.py",
+]
+
 [tool.pyright]
 reportUnknownMemberType = "none"
 reportMissingTypeStubs = "none"
