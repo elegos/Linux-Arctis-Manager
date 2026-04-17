@@ -25,10 +25,16 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "autoflake>=2.3.1",
+    "basedpyright>=1.39.2",
     "isort>=7.0.0",
     "pytest>=9.0.2",
 ]
 
 [tool.pyright]
 reportUnknownMemberType = "none"
+reportMissingTypeStubs = "none"
+reportExplicitAny = "none"
+reportAny = "none"
+reportUnknownVariableType = "none"
+reportImplicitOverride = "none"
 extraPaths = ["src"]

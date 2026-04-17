@@ -1,7 +1,7 @@
 from abc import ABC
 from enum import Enum
 from importlib.metadata import PackageNotFoundError, version
-from typing import Any, Callable, Generic, TypeVar
+from typing import Any, Callable, ClassVar, Generic, TypeVar
 
 
 def project_version() -> str:
@@ -12,7 +12,7 @@ def project_version() -> str:
 
 
 class JsonSerializable(ABC):
-    _js_exclude_fields: list[str] = []
+    _js_exclude_fields: ClassVar[list[str]] = []
 
     def to_dict(self) -> dict[str, Any]:
         def serialize(value: Any) -> Any:
@@ -40,7 +40,7 @@ K = TypeVar('K')
 V = TypeVar('V')
 
 class ObservableDict(dict[K, V], Generic[K, V], JsonSerializable):
-    _js_exclude_fields = ['_observers']
+    _js_exclude_fields: ClassVar[list[str]] = ['_observers']
     _observers: list[Callable[[K, V], None]]
 
     def __init__(self, *args, **kwargs):
