@@ -82,15 +82,13 @@ curl -LsSf https://raw.githubusercontent.com/elegos/Linux-Arctis-Manager/refs/he
 
 Arch Linux users can install the community-maintained package from the [Arch User Repository (AUR)](https://aur.archlinux.org/packages/linux-arctis-manager):
 
-1. Install with your preferred AUR helper:
+Install with your preferred AUR helper:
 
-   ```bash
-   yay -S linux-arctis-manager
+```bash
+yay -S linux-arctis-manager
 
-   # using paru: paru -S linux-arctis-manager
-   ```
-
-2. Continue to [Final Setup](#final-setup)
+# using paru: paru -S linux-arctis-manager
+```
 
 > For packaging-specific issues, report directly to the AUR maintainers: [@tonitch](https://aur.archlinux.org/account/tonitch) and [@Aiyahhh](https://aur.archlinux.org/account/Aiyahhh).
 
@@ -158,7 +156,7 @@ lam-cli setup --start-now
 ```
 
 > [!NOTE]
-> Skip this if you installed via Distrobox - the setup script handles this automatically.
+> Skip this if you installed via Distrobox or the AUR - the setup script handles this automatically.
 
 > [!TIP]
 > To launch the system tray icon automatically on login:
