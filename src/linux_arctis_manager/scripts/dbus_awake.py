@@ -56,4 +56,7 @@ class DbusAwake:
 
     def on_prepare_for_sleep(self, going_to_sleep: bool) -> None:
         if not going_to_sleep:
-            self.core_engine.init_device()
+            try:
+                self.core_engine.init_device()
+            except Exception as e:
+                self.log.warning("Device init on wake failed (loop will handle recovery): %s", e)
