@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import sys
 from typing import Any, Callable, Coroutine, Literal, cast
 
 import usb
@@ -14,6 +15,9 @@ from linux_arctis_manager.pactl import PulseAudioManager
 from linux_arctis_manager.settings import DeviceSettings, GeneralSettings
 from linux_arctis_manager.usb_devices_monitor import USBDevicesMonitor
 from linux_arctis_manager.utils import ObservableDict
+
+
+_UNRECOVERABLE_USB_ERRNOS = frozenset({5, 32})  # EIO, EPIPE
 
 
 class TypedDevice(Device):
@@ -127,26 +131,39 @@ class CoreEngine:
 
             await asyncio.sleep(0.1)
         except usb.core.USBError as e:
-            if e.errno not in [16, 110]: # 16 (busy), 110 (timeout)
+            if e.errno in _UNRECOVERABLE_USB_ERRNOS:
+                raise
+            if e.errno not in [16, 110]:  # 16 (busy), 110 (timeout)
                 self.logger.warning('USB error: %s', e)
-        except AttributeError as e:
+        except AttributeError:
             # If the device disconnects, self.usb_device might be None and generate the error
             pass
         
     
     async def loop(self):
-        listen_coroutines: list[asyncio.Task] = []
+        _retry = False
         while not self._stopping:
             if not self.usb_device:
                 await asyncio.sleep(0.1)
                 continue
 
-            if self.device_config is not None:
-                listen_coroutines = [asyncio.create_task(self.listen_endpoint_loop(interface_id)) for interface_id in self.device_config.listen_interface_indexes]
-            
-            self.request_device_status()
-        
-            await asyncio.gather(*listen_coroutines)
+            listen_coroutines: list[asyncio.Task] = []
+            try:
+                if self.device_config is not None:
+                    listen_coroutines = [asyncio.create_task(self.listen_endpoint_loop(interface_id)) for interface_id in self.device_config.listen_interface_indexes]
+
+                self.request_device_status()
+                await asyncio.gather(*listen_coroutines)
+                _retry = False
+            except usb.core.USBError as e:
+                for task in listen_coroutines:
+                    task.cancel()
+                if _retry:
+                    self.logger.error("USB I/O error persists after device reset (errno %d), exiting for systemd restart: %s", e.errno, e)
+                    sys.exit(1)
+                _retry = True
+                self.logger.warning("USB I/O error (errno %d), tearing down device for reset...", e.errno)
+                self.teardown()
 
     def on_device_connected(self, vendor_id: int, product_id: int) -> None:
         for device_config in self.device_configurations:
@@ -227,7 +244,12 @@ class CoreEngine:
             self.kernel_detach(self.usb_device, self.device_config)
 
         # Configure the device
-        self.init_device()
+        try:
+            self.init_device()
+        except usb.core.USBError as e:
+            self.logger.warning("Device init failed after connect (will wait for reconnect): %s", e)
+            self.teardown()
+            return
 
         self.pa_audio_manager.wait_for_physical_device(self.usb_device.idVendor, self.usb_device.idProduct)
         self.pa_audio_manager.sinks_setup(self.device_config.name, self.device_config.vendor_id, self.device_config.product_ids)
@@ -367,7 +389,10 @@ class CoreEngine:
                 wIndex = control_interface_index
                 self.usb_device.ctrl_transfer(bmRequestType, bRequest, wValue, wIndex, command_lst)
         except usb.core.USBError as e:
-            self.logger.warning(f"Error sending command: {e}")
+            if e.errno in _UNRECOVERABLE_USB_ERRNOS:
+                self.logger.warning("Unrecoverable USB error (errno %d): %s", e.errno, e)
+                raise
+            self.logger.warning("Error sending command: %s", e)
 
     def kernel_detach(self, usb_device: TypedDevice, config: DeviceConfiguration) -> None:
         self.logger.info(f"Detaching kernel driver for device: {usb_device.idVendor:04x}:{usb_device.idProduct:04x} ({config.name})")

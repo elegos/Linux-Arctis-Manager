@@ -1,6 +1,6 @@
 [project]
 name = "linux-arctis-manager"
-version = "2.3.0"
+version = "2.3.1"
 description = "A replacement for SteelSeries GG software, to manage your Arctis device on Linux!"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -25,10 +25,24 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "autoflake>=2.3.1",
+    "basedpyright>=1.39.2",
     "isort>=7.0.0",
     "pytest>=9.0.2",
+    "pytest-cov>=7.1.0",
+]
+
+[tool.coverage.run]
+omit = [
+    "src/linux_arctis_manager/gui/*",
+    "src/linux_arctis_manager/dbus_service.py",
+    "src/linux_arctis_manager/scripts/dbus_awake.py",
 ]
 
 [tool.pyright]
 reportUnknownMemberType = "none"
+reportMissingTypeStubs = "none"
+reportExplicitAny = "none"
+reportAny = "none"
+reportUnknownVariableType = "none"
+reportImplicitOverride = "none"
 extraPaths = ["src"]
