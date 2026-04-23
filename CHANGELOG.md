@@ -5,12 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.3.1]
 
 ## Added
 
 - Single-instance enforcement for `lam-daemon` via PID file in `XDG_RUNTIME_DIR`
 - `--replace` flag for `lam-daemon` to stop running instance and start a new one
+
+## Fixed
+
+- USB I/O errors (errno 5/32) after system suspend/resume no longer cause infinite log spam and 100% CPU usage; the daemon now tears down the stale USB handle and waits for the device to re-enumerate, exiting cleanly for systemd to restart if recovery fails (fixes [#23](https://github.com/elegos/Linux-Arctis-Manager/issues/23))
 
 ## [2.3.0]
 
