@@ -147,16 +147,11 @@ Install `pipx` with your package manager.
    # using pip: find ./dist -name "*.whl" | head -n1 | xargs pip install --user --force-reinstall
    ```
 
----
-
-### Final Setup
+#### Final Setup
 
 ```bash
 lam-cli setup --start-now
 ```
-
-> [!NOTE]
-> Skip this if you installed via Distrobox or the AUR - the setup script handles this automatically.
 
 > [!TIP]
 > To launch the system tray icon automatically on login:
