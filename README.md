@@ -153,36 +153,24 @@ Install `pipx` with your package manager.
 
 ### Final Setup
 
-#### Automatic setup
-
 ```bash
-# --systray-autostart will enable the systray on startup
-# --start-now will start the systray app immediately
-lam-cli setup [--systray-autostart] [--start-now]
-```
-
-#### Manual setup
-
-> [!NOTE]
-> If not required for specific needs, use the automatic setup.
-
-
-```bash
-# required on first install, or after updating for new device support
-lam-cli udev write-rules --force --reload
-
-# produces desktop entries — optional after first install
-lam-cli desktop write
+lam-cli setup --start-now
 ```
 
 > [!NOTE]
 > Skip this if you installed via Distrobox - the setup script handles this automatically.
 
 > [!TIP]
-> To launch the system tray icon automatically on login, copy its desktop entry to your autostart folder:
+> To launch the system tray icon automatically on login:
 >
 > ```bash
-> cp ~/.local/share/applications/ArctisManagerSystray.desktop ~/.config/autostart/
+> lam-cli setup --systray-autostart
+> ```
+>
+> You can also setup everything at once in one line:
+>
+> ```bash
+> lam-cli setup --systray-autostart --start-now
 > ```
 
 ## 🧹 Uninstall / Cleanup
@@ -234,7 +222,7 @@ lam-cli desktop write
 ## ⚠️ Troubleshooting
 
 - App or headset becomes unresponsive: `systemctl --user restart --now arctis-manager`
-- Newly supported device does not appear after an update: `lam-cli udev write-rules --force --reload`
+- Newly supported device does not appear after an update: `lam-cli setup`
 - App fails to start with a Qt xcb platform error: install `libxcb-cursor0` (Debian/Ubuntu) or `xcb-util-cursor` (Arch/Fedora). Required on non-Qt desktop environments like Cinnamon.
 
 ## 💬 Community & Support
