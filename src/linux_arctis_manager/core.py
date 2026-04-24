@@ -34,7 +34,7 @@ class CoreEngine:
     device_config: DeviceConfiguration | None = None
     usb_device: TypedDevice | None = None
     general_settings: GeneralSettings
-    device_settings: DeviceSettings
+    device_settings: DeviceSettings | None = None
 
     device_status: ObservableDict[str, int]|None = None
 
