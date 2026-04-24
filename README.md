@@ -35,7 +35,7 @@ An open-source replacement for SteelSeries GG, to manage your Arctis headset on 
 | Arctis Nova 7P | ❌ | ❌ | `220a` |
 | Arctis Nova Elite | ❌ | ❌ | ❓ |
 | Arctis Nova Pro Wireless / X | ✅ | ✅ | `12e0`, `12e5` |
-| Arctis Nova Pro (GameDAC Gen2) | ✅ | ✅ | `12cd` |
+| Arctis Nova Pro / Xbox (GameDAC Gen2) | ✅ | ✅ | `12cb`,`12cd` |
 
 ### Legend
 
