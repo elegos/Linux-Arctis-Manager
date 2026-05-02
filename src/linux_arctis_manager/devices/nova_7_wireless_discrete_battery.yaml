@@ -3,10 +3,11 @@ device:
   vendor_id: 0x1038
   product_ids:
     - 0x2202 # Arctis Nova 7
-    - 0x2206 # Arctis Nova 7x
+    - 0x2206 # Arctis Nova 7X
+    - 0x22a4 # Arctis Nova 7X
     - 0x223a # Arctis Nova 7 Diablo IV
     - 0x227a # Arctis Nova 7 WoW Edition
-    - 0x22a4 # Arctis Nova 7X
+    - 0x22ab # Arctis Nova 7 WoW Edition
   command_padding:
     length: 64
     position: end
