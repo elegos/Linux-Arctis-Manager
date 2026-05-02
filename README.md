@@ -30,7 +30,7 @@ An open-source replacement for SteelSeries GG, to manage your Arctis headset on 
 | Arctis Nova 3P Wireless / 3X Wireless | ❌ | ❌ | `2269`, `226d` |
 | Arctis Nova 5 | ➖ | ✅ | `2232`, `2253` |
 | Arctis Nova 7 / 7X / Diablo IV / Gen 2 (% battery) | ✅ | ✅ | `22a1`, `227e`, `2258`, `229e`, `22a9`, `22a5` |
-| Arctis Nova 7 / 7X / Diablo IV / WOW / Gen 2 (discrete battery) | ✅ | ✅ | `2202`, `2206`, `223a`, `227a`, `22a4`, `22ab` |
+| Arctis Nova 7 / 7X / Diablo IV / WoW / Gen 2 (discrete battery) | ✅ | ✅ | `2202`, `2206`, `223a`, `227a`, `22a4`, `22ab` |
 | Arctis Nova 7+ / PS5 / Xbox / Destiny | ✅ | ✅ | `220e`, `2212`, `2216`, `2236` |
 | Arctis Nova 7P | ❌ | ❌ | `220a` |
 | Arctis Nova Elite | ❌ | ❌ | ❓ |
