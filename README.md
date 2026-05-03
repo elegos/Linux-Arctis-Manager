@@ -215,7 +215,9 @@ lam-cli setup --start-now
 ## ⚠️ Troubleshooting
 
 - App or headset becomes unresponsive: `systemctl --user restart --now arctis-manager`
-- Newly supported device does not appear after an update: `lam-cli setup`
+- Newly supported device does not appear after an update:
+  - Manual install/Distrobox: `lam-cli setup`
+  - AUR: `lam-cli setup --rules-path /usr/lib/udev/rules.d/91-steelseries-arctis.rules`
 - App fails to start with a Qt xcb platform error: install `libxcb-cursor0` (Debian/Ubuntu) or `xcb-util-cursor` (Arch/Fedora). Required on non-Qt desktop environments like Cinnamon.
 
 ## 💬 Community & Support
