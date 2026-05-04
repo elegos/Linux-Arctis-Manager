@@ -154,7 +154,7 @@ lam-cli setup --start-now
 ```
 
 > [!TIP]
-> To launch the system tray icon automatically on login:
+> To launch the system tray app automatically on login:
 >
 > ```bash
 > lam-cli setup --systray-autostart
