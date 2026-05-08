@@ -94,7 +94,7 @@ yay -S linux-arctis-manager
 > To launch the system tray app automatically on login:
 >
 > ```bash
-> cp ~/.local/share/applications/ArctisManagerSystray.desktop
+> cp ~/.local/share/applications/ArctisManagerSystray.desktop ~/.config/autostart/
 > ```
 
 > For packaging-specific issues, report directly to the AUR maintainers: [@tonitch](https://aur.archlinux.org/account/tonitch) and [@Aiyahhh](https://aur.archlinux.org/account/Aiyahhh).
