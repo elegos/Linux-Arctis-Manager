@@ -90,6 +90,13 @@ yay -S linux-arctis-manager
 # using paru: paru -S linux-arctis-manager
 ```
 
+> [!TIP]
+> To launch the system tray app automatically on login:
+>
+> ```bash
+> cp ~/.local/share/applications/ArctisManagerSystray.desktop
+> ```
+
 > For packaging-specific issues, report directly to the AUR maintainers: [@tonitch](https://aur.archlinux.org/account/tonitch) and [@Aiyahhh](https://aur.archlinux.org/account/Aiyahhh).
 
 ---
