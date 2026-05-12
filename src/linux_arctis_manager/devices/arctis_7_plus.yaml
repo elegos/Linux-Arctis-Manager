@@ -1,0 +1,104 @@
+device:
+  name: SteelSeries Arctis 7+
+  vendor_id: 0x1038
+  product_ids:
+    - 0x220e
+    - 0x2212
+    - 0x2216
+    - 0x2236
+  command_padding:
+    length: 64
+    position: end
+    filler: 0x00
+
+  command_interface_index: [0, 3]
+  listen_interface_indexes: [3]
+
+  device_init:
+    - ['status.request']
+    - [0x00, 0xa3, 'settings.pm_shutdown']
+    - [0x00, 0x39, 'settings.mic_side_tone']
+
+  status:
+    request: 0xb0
+    response_mapping:
+      - starts_with: 0xb0
+        headset_power_status: 0x01
+        headset_battery_charge: 0x02
+        cable_charging: 0x03
+        media_mix: 0x04
+        chat_mix: 0x05
+
+    representation:
+      headset:
+        - headset_power_status
+        - headset_battery_charge
+        - cable_charging
+        - chat_mix
+        - media_mix
+      power_management:
+        - pm_shutdown
+      mic:
+        - mic_side_tone
+  
+  online_status:
+    status_variable: headset_power_status
+    online_value: 'on'
+
+  settings:
+    microphone:
+      mic_side_tone:
+        type: discrete_map
+        values_mapping:
+          0x00: off
+          0x01: low
+          0x02: medium  
+          0x03: high
+        default: 0x00 # off
+        update_sequence: [0x00, 0x39, 'value']
+    power_management:
+      pm_shutdown:
+        type: discrete_map
+        values_mapping:
+          0x00: never
+          0x01: 1_minute
+          0x05: 5_minutes
+          0x0a: 10_minutes
+          0x0f: 15_minutes
+          0x1e: 30_minutes
+          0x2d: 45_minutes
+          0x3c: 60_minutes
+          0x4b: 75_minutes
+          0x5a: 90_minutes  
+        default: 0x1e # 30 minutes
+        update_sequence: [0x00, 0xa3, 'value']
+
+  status_parse:
+    headset_power_status:
+      type: int_str_mapping
+      values:
+        0x01: 'off'
+        0x00: 'on'
+        0x02: 'on'
+        0x03: 'on'
+    headset_battery_charge:
+      type: int_int_mapping
+      values:
+        0x00: 0
+        0x01: 25
+        0x02: 50
+        0x03: 75
+        0x04: 100
+    cable_charging:
+      type: int_str_mapping
+      values:
+        0x01: on
+        0x00: off
+    media_mix:
+      type: percentage
+      perc_min: 0
+      perc_max: 100
+    chat_mix:
+      type: percentage
+      perc_min: 0
+      perc_max: 100

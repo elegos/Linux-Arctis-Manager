@@ -34,7 +34,7 @@ class CoreEngine:
     device_config: DeviceConfiguration | None = None
     usb_device: TypedDevice | None = None
     general_settings: GeneralSettings
-    device_settings: DeviceSettings
+    device_settings: DeviceSettings | None = None
 
     device_status: ObservableDict[str, int]|None = None
 
@@ -164,6 +164,11 @@ class CoreEngine:
                 _retry = True
                 self.logger.warning("USB I/O error (errno %d), tearing down device for reset...", e.errno)
                 self.teardown()
+                await asyncio.sleep(2.0)
+                self.configure_virtual_sinks()
+                if self.usb_device is None:
+                    self.logger.error("Device did not recover after USB I/O error (errno %d), exiting for systemd restart", e.errno)
+                    sys.exit(1)
 
     def on_device_connected(self, vendor_id: int, product_id: int) -> None:
         for device_config in self.device_configurations:
