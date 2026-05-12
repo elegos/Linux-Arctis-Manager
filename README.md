@@ -30,12 +30,12 @@ An open-source replacement for SteelSeries GG, to manage your Arctis headset on 
 | Arctis Nova 3P Wireless / 3X Wireless | ❌ | ❌ | `2269`, `226d` |
 | Arctis Nova 5 | ➖ | ✅ | `2232`, `2253` |
 | Arctis Nova 7 / 7X / Diablo IV / Gen 2 (% battery) | ✅ | ✅ | `22a1`, `227e`, `2258`, `229e`, `22a9`, `22a5` |
-| Arctis Nova 7 / 7X / Diablo IV / Gen 2 (discrete battery) | ✅ | ✅ | `2202`, `2206`, `223a`, `227a`, `22a4` |
+| Arctis Nova 7 / 7X / Diablo IV / WoW / Gen 2 (discrete battery) | ✅ | ✅ | `2202`, `2206`, `223a`, `227a`, `22a4`, `22ab` |
 | Arctis Nova 7+ / PS5 / Xbox / Destiny | ✅ | ✅ | `220e`, `2212`, `2216`, `2236` |
 | Arctis Nova 7P | ❌ | ❌ | `220a` |
-| Arctis Nova Elite | ❌ | ❌ | ❓ |
+| Arctis Nova Elite | ❌ | ❌ | `2244` |
 | Arctis Nova Pro Wireless / X | ✅ | ✅ | `12e0`, `12e5` |
-| Arctis Nova Pro | ✅ | ✅ | `0x12cd` (GameDAC Gen2) |
+| Arctis Nova Pro / X (GameDAC Gen2) | ✅ | ✅ | `12cb`, `12cd` |
 
 ### Legend
 
@@ -82,15 +82,20 @@ curl -LsSf https://raw.githubusercontent.com/elegos/Linux-Arctis-Manager/refs/he
 
 Arch Linux users can install the community-maintained package from the [Arch User Repository (AUR)](https://aur.archlinux.org/packages/linux-arctis-manager):
 
-1. Install with your preferred AUR helper:
+Install with your preferred AUR helper:
 
-   ```bash
-   yay -S linux-arctis-manager
+```bash
+yay -S linux-arctis-manager
 
-   # using paru: paru -S linux-arctis-manager
-   ```
+# using paru: paru -S linux-arctis-manager
+```
 
-2. Continue to [Final Setup](#final-setup)
+> [!TIP]
+> To launch the system tray app automatically on login:
+>
+> ```bash
+> cp /usr/share/applications/ArctisManagerSystray.desktop ~/.config/autostart/
+> ```
 
 > For packaging-specific issues, report directly to the AUR maintainers: [@tonitch](https://aur.archlinux.org/account/tonitch) and [@Aiyahhh](https://aur.archlinux.org/account/Aiyahhh).
 
@@ -149,19 +154,14 @@ Install `pipx` with your package manager.
    # using pip: find ./dist -name "*.whl" | head -n1 | xargs pip install --user --force-reinstall
    ```
 
----
-
-### Final Setup
+#### Final Setup
 
 ```bash
 lam-cli setup --start-now
 ```
 
-> [!NOTE]
-> Skip this if you installed via Distrobox - the setup script handles this automatically.
-
 > [!TIP]
-> To launch the system tray icon automatically on login:
+> To launch the system tray app automatically on login:
 >
 > ```bash
 > lam-cli setup --systray-autostart
@@ -222,7 +222,9 @@ lam-cli setup --start-now
 ## ⚠️ Troubleshooting
 
 - App or headset becomes unresponsive: `systemctl --user restart --now arctis-manager`
-- Newly supported device does not appear after an update: `lam-cli setup`
+- Newly supported device does not appear after an update:
+  - Manual install/Distrobox: `lam-cli setup`
+  - AUR: `lam-cli setup --rules-path /usr/lib/udev/rules.d/91-steelseries-arctis.rules`
 - App fails to start with a Qt xcb platform error: install `libxcb-cursor0` (Debian/Ubuntu) or `xcb-util-cursor` (Arch/Fedora). Required on non-Qt desktop environments like Cinnamon.
 
 ## 💬 Community & Support
