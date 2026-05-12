@@ -3,6 +3,7 @@ device:
   vendor_id: 0x1038
   product_ids:
     - 0x12cd # Arctis Nova Pro wired / GameDAC Gen 2
+    - 0x12cb # Arctis Nova Pro wired / GameDAC Gen 2
   command_padding:
     length: 64
     position: end
