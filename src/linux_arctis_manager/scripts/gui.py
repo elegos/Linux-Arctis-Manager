@@ -28,6 +28,9 @@ def main():
     logging.basicConfig(level=log_level, format='%(name)20s %(levelname)8s | %(message)s')
 
     app = QApplication(sys.argv)
+    app.setApplicationName('Arctis Manager')
+    app.setApplicationDisplayName('Arctis Manager')
+
     q_object = None
     if args.systray:
         q_object = QSystrayApp(app, log_level)
