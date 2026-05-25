@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Added
 - Support for Arctis Nova Pro Wireless (225d)
+- Added install script by @HelpfulSoft1207
 
 ## [2.4.0]
 
