@@ -187,6 +187,37 @@ lam-cli setup --start-now
 
 Choose the method that matches your installation method:
 
+- **[Distrobox](#distrobox-1)**
+- **[Arch Linux (AUR)](#arch-linux-aur-1)**
+- **[Manual install](#manual-install-1)**
+
+### Distrobox
+
+1. Stop and disable the service:
+   ```bash
+   systemctl --user disable --now arctis-manager
+   rm ~/.config/systemd/user/arctis-manager.service
+   ```
+
+2. Remove the container:
+   ```bash
+   distrobox-rm -f arctis-manager
+   ```
+
+3. Remove leftover host files:
+
+   ```bash
+   # desktop menu entries
+   rm -f ~/.local/share/applications/ArctisManager.desktop
+
+   # udev rules
+   sudo rm -f /etc/udev/rules.d/91-steelseries-arctis.rules
+
+   # user preferences and virtual environment
+   rm -rf ~/.config/arctis_manager
+   rm -rf ~/.local/share/pipx/venvs/linux-arctis-manager
+   ```   
+
 ### Arch Linux (AUR)
 Use the system package manager:
 
@@ -213,7 +244,7 @@ sudo pacman -Rns linux-arctis-manager
    sudo rm -f /etc/udev/rules.d/91-steelseries-arctis.rules
    sudo rm -f /usr/lib/udev/rules.d/91-steelseries-arctis.rules
 
-   # user preferences and device/lang files
+   # user preferences and device files
    rm -rf ~/.config/arctis_manager
    ```
 
