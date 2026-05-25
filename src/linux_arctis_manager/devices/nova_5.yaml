@@ -3,13 +3,14 @@ device:
   vendor_id: 0x1038
   product_ids:
     - 0x2232 # Nova 5
-    - 0x2253 # Nova 5X
+    - 0x2253 # Nova 5X (2253 variant)
+    - 0x2264 # Nova 5X (2264 variant)
   command_padding:
     length: 64
     position: end
     filler: 0x00
   command_interface_index: [0, 3]
-  listen_interface_indexes: [3]
+  listen_interface_indexes: [3, 5]
 
   device_init:
     - ['status.request']
