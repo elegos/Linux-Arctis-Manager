@@ -5,11 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.4.0]
+
+## Added
+- Support for Nova Pro Wired - @HelpfulSoft1207
+- Support for Nova 7 Plus - @debbiedi
+- Support for Nova 5X (variant 2264)
 
 ## Fixed
 
+- After USB error teardown, the daemon now actively re-detects the device instead of relying solely on systemd to restart it (fixes [#23](https://github.com/elegos/Linux-Arctis-Manager/issues/23))
 - `CoreEngine.device_settings` is no longer uninitialized when no recognized device is connected; `lam-gui` no longer crashes with `AttributeError` in that scenario (fixes [#27](https://github.com/elegos/Linux-Arctis-Manager/issues/27))
+- Systray app's name set to "Arctis Manager", instead of the anonymous "lam-gui"
 
 ## [2.3.1]
 
