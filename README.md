@@ -28,7 +28,7 @@ An open-source replacement for SteelSeries GG, to manage your Arctis headset on 
 | Arctis Pro Wireless | ❌ | ❌ | `1290` |
 | Arctis Nova 3 | ❌ | ❌ | `12ec` |
 | Arctis Nova 3P Wireless / 3X Wireless | ❌ | ❌ | `2269`, `226d` |
-| Arctis Nova 5 | ➖ | ✅ | `2232`, `2253` |
+| Arctis Nova 5 | ➖ | ✅ | `2232`, `2253`, `2264` |
 | Arctis Nova 7 / 7X / Diablo IV / Gen 2 (% battery) | ✅ | ✅ | `22a1`, `227e`, `2258`, `229e`, `22a9`, `22a5` |
 | Arctis Nova 7 / 7X / Diablo IV / WoW / Gen 2 (discrete battery) | ✅ | ✅ | `2202`, `2206`, `223a`, `227a`, `22a4`, `22ab` |
 | Arctis Nova 7+ / PS5 / Xbox / Destiny | ✅ | ✅ | `220e`, `2212`, `2216`, `2236` |
@@ -111,6 +111,10 @@ yay -S linux-arctis-manager
 Install `pipx` with your package manager.
 
 #### Option A: Install from Release (recommended)
+
+> [!NOTE]
+> You can try the automatic installer via `curl -LsSf https://raw.githubusercontent.com/elegos/Linux-Arctis-Manager/refs/heads/main/scripts/install.sh | sh`
+> Nothing else is required.
 
 1. Download the latest `.whl` from the [releases page](../../releases)
 2. From the directory you downloaded it to, install it:
