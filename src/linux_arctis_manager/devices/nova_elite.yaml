@@ -112,7 +112,7 @@ device:
       - starts_with: 0x0743
         line_out: 0x02
 
-      # It's a shame we can't control input mix altogether
+      # It's a shame we can't control input mix altogether    
       - starts_with: 0x0745
         media_mix: 0x02
         chat_mix: 0x03
@@ -148,12 +148,24 @@ device:
         sonar_enabled: 0x02
 
       - starts_with: 0x07b2
-        bluetooth_powerup_state: 0x02
+        bluetooth_default: 0x02
 
       - starts_with: 0x07b3
         bluetooth_auto_mute: 0x02
 
+# 000000c0: 07b5 0200 0800 0000 0000 0000 0000 0000  ................ # bt on ( command )
+# 00000100: 07b5 0402 0800 0000 0000 0000 0000 0000  ................ # bt waiting pair
+# 00000140: 07b5 0100 0800 0000 0000 0000 0000 0000  ................ # bt off ( command )
+# 00000300: 07b5 0200 0800 0000 0000 0000 0000 0000  ................ # bt cleared paired ( command )
+# 00000a40: 07b5 0402 0800 0000 0000 0000 0000 0000  ................ # powerup headset ( status )
+# 00000ac0: 07b5 0100 0800 0000 0000 0000 0000 0000  ................ # bt off ( command )
+# 00000b00: 07b5 0402 0800 0000 0000 0000 0000 0000  ................ # bt on ( status )
+# 00000d00: 07b5 0401 0800 0000 0000 0000 0000 0000  ................ # bt paired ( status )
+# 00000d80: 07b5 0404 0800 0000 0000 0000 0000 0000  ................ # playing music thru bt ( status )
+# 00000dc0: 07b5 0401 0800 0000 0000 0000 0000 0000  ................ # stopping music ( status )
       - starts_with: 0x07b5
+#        wireless_pairing: 0x02 #  ?
+        bluetooth_connection: 0x03
         headset_power_status: 0x04
 
       - starts_with: 0x07b7
@@ -182,13 +194,6 @@ device:
       - starts_with: 0x07c3
         wireless_mode: 0x02
 
-      # Not yet handled/discovered
-      #   bluetooth_power_status: 0x04
-      #   bluetooth_connection: 0x05
-      #   wireless_pairing: 0x0e
-
-    # Status page layout: category names become headers in the GUI.
-    # Item order within each category defines display order.
     representation:
       headset:
         - headset_power_status
@@ -226,10 +231,9 @@ device:
         - wireless_mode
       #   - wireless_pairing
       bluetooth:
-        - bluetooth_powerup_state
-      #   - bluetooth_power_status
+        - bluetooth_default
         - bluetooth_auto_mute
-      #   - bluetooth_connection
+        - bluetooth_connection
 
   online_status:
     status_variable: headset_power_status
@@ -474,7 +478,7 @@ device:
         default: 0x00
         update_sequence: [0x01, 0xc3, 'value']
 
-      bluetooth_powerup_state:
+      bluetooth_default:
         type: toggle
         values:
           off: 0x00
@@ -537,13 +541,9 @@ device:
         0x00: off
         0x01: connected
         0x02: disconnected
+        0x04: active
 
-    bluetooth_power_status:
-      type: on_off
-      off: 0x01
-      on: 0x00
-
-    bluetooth_powerup_state:
+    bluetooth_default:
       type: on_off
       off: 0x00
       on: 0x01
