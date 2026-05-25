@@ -185,6 +185,17 @@ lam-cli setup --start-now
 
 ## 🧹 Uninstall / Cleanup
 
+Choose the method that matches your installation method:
+
+### Arch Linux (AUR)
+Use the system package manager:
+
+```bash
+sudo pacman -Rns linux-arctis-manager
+```
+
+### Manual Install
+
 1. Stop and disable the service:
 
    ```bash
