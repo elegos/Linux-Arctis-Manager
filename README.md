@@ -103,18 +103,24 @@ yay -S linux-arctis-manager
 
 ### Manual Install
 
-> [!NOTE]
-> `pip` can be used instead of `pipx`, but `pipx` is recommended for better dependency isolation. Some distros will require `pipx`.
-
 #### Prerequisites
 
 Install `pipx` with your package manager.
 
-#### Option A: Install from Release (recommended)
-
 > [!NOTE]
-> You can try the automatic installer via `curl -LsSf https://raw.githubusercontent.com/elegos/Linux-Arctis-Manager/refs/heads/main/scripts/install.sh | sh`
-> Nothing else is required.
+> `pip` can be used instead of `pipx`, but `pipx` is recommended for better dependency isolation. Some distros will require `pipx`.
+
+#### Option A: Quick Install (Recommended)
+
+Run the automated install script:
+
+```bash
+curl -LsSf https://raw.githubusercontent.com/elegos/Linux-Arctis-Manager/refs/heads/main/scripts/install.sh | sh
+```
+> [!TIP]
+> If you use the automated script, you can skip the Final Setup section entirely.
+
+#### Option B: Install from Release
 
 1. Download the latest `.whl` from the [releases page](../../releases)
 2. From the directory you downloaded it to, install it:
@@ -127,7 +133,7 @@ Install `pipx` with your package manager.
 
 3. Continue to [Final Setup](#final-setup)
 
-#### Option B: Install from Source
+#### Option C: Install from Source
 
 1. Install `uv` ([installation guide](https://docs.astral.sh/uv/getting-started/installation/)) and create the applications directory:
 
