@@ -112,6 +112,10 @@ Install `pipx` with your package manager.
 
 #### Option A: Install from Release (recommended)
 
+> [!NOTE]
+> You can try the automatic installer via `curl -LsSf https://raw.githubusercontent.com/elegos/Linux-Arctis-Manager/refs/heads/main/scripts/install.sh | sh`
+> Nothing else is required.
+
 1. Download the latest `.whl` from the [releases page](../../releases)
 2. From the directory you downloaded it to, install it:
 
