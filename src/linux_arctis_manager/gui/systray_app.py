@@ -51,6 +51,7 @@ class QSystrayApp(QBaseDesktopApp):
         lang_code = lang_code.split('_')[0] if lang_code else 'en'
 
         self.last_device_status = {}
+        self.last_device_settings = {}
 
         self.menu = QMenu()
         self.menu_setup()
@@ -60,6 +61,7 @@ class QSystrayApp(QBaseDesktopApp):
 
         self.dbus_wrapper = DbusWrapper()
         self.dbus_wrapper.sig_status.connect(lambda status: self.new_status.emit(status or {}))
+        self.dbus_wrapper.sig_settings.connect(self.on_new_settings)
 
         self.tray_icon.setContextMenu(self.menu)
     
@@ -68,6 +70,13 @@ class QSystrayApp(QBaseDesktopApp):
             return
 
         self.last_device_status = status
+        self.menu_setup()
+
+    def on_new_settings(self, settings: dict):
+        if self.last_device_settings == settings:
+            return
+
+        self.last_device_settings = settings
         self.menu_setup()
 
     async def start(self):
@@ -84,6 +93,28 @@ class QSystrayApp(QBaseDesktopApp):
         self._menu_actions['open_app'] = QAction(I18n.translate('ui', 'open_app'))
         self._menu_actions['open_app'].triggered.connect(self.open_main_window)
         self.menu.addAction(self._menu_actions['open_app'])
+
+        device_settings = self.last_device_settings.get('device', {})
+        settings_config = self.last_device_settings.get('settings_config', {})
+
+        if 'volume_limiter' in settings_config:
+            volume_limiter_config = settings_config['volume_limiter']
+            on_value = volume_limiter_config.get('values', {}).get('on', 1)
+            off_value = volume_limiter_config.get('values', {}).get('off', 0)
+            current_value = device_settings.get('volume_limiter', off_value)
+            is_on = current_value == on_value
+
+            self._menu_actions['volume_limiter'] = QAction(I18n.translate('settings', 'volume_limiter'))
+            self._menu_actions['volume_limiter'].setCheckable(True)
+            self._menu_actions['volume_limiter'].setChecked(is_on)
+
+            def _toggle_volume_limiter(checked, on_val=on_value, off_val=off_value):
+                new_value = on_val if checked else off_val
+                self.last_device_settings.get('device', {})['volume_limiter'] = new_value
+                DbusWrapper.change_setting('volume_limiter', new_value)
+
+            self._menu_actions['volume_limiter'].triggered.connect(_toggle_volume_limiter)
+            self.menu.addAction(self._menu_actions['volume_limiter'])
 
         sections = 0
         for _, status_obj in self.last_device_status.items():

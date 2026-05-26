@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## Added
+- Volume limiter toggle in system tray context menu (shown only for devices that support it)
+- Live settings synchronization via `SettingsChanged` D-Bus signal subscription
+
 ## [2.4.1]
 
 ## Added
