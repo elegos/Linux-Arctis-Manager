@@ -194,17 +194,19 @@ Choose the method that matches your installation method:
 ### Distrobox
 
 1. Stop and disable the service:
+
    ```bash
    systemctl --user disable --now arctis-manager
    rm ~/.config/systemd/user/arctis-manager.service
    ```
 
-2. Remove the container:
+3. Remove the container:
+
    ```bash
    distrobox-rm -f arctis-manager
    ```
 
-3. Remove leftover host files:
+5. Remove leftover host files:
 
    ```bash
    # desktop menu entries
