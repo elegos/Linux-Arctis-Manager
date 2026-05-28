@@ -209,6 +209,8 @@ Choose the method that matches your installation method:
    ```bash
    # desktop menu entries
    rm -f ~/.local/share/applications/ArctisManager.desktop
+   rm -f ~/.local/share/applications/ArctisManagerSystray.desktop
+   rm -f ~/.config/autostart/ArctisManagerSystray.desktop
 
    # udev rules
    sudo rm -f /etc/udev/rules.d/91-steelseries-arctis.rules
