@@ -44,6 +44,7 @@ class CoreEngine:
     device_status_observers: list[Callable[[dict[str, int]], None]]
     device_settings_observers: list[Callable[[DeviceSettings], None]]
     general_settings_observers: list[Callable[[GeneralSettings], None]]
+    settings_observers: list[Callable[[], None]]
     
     def __init__(self) -> None:
         self.media_mix = 100
@@ -51,6 +52,7 @@ class CoreEngine:
         self.device_status_observers = []
         self.device_settings_observers = []
         self.general_settings_observers = []
+        self.settings_observers = []
 
         self.general_settings = GeneralSettings.read_from_file()
 
@@ -260,7 +262,9 @@ class CoreEngine:
         self.pa_audio_manager.sinks_setup(self.device_config.name, self.device_config.vendor_id, self.device_config.product_ids)
 
         self.redirect_to_media_sink()
-    
+
+        self.notify_settings_changed()
+
     def init_device(self):
         self.logger.info("Initializing device...")
         if self.device_config and self.device_config.device_init:
@@ -283,7 +287,15 @@ class CoreEngine:
     def register_status_observer(self, observer: Callable[[dict[str, int]], None]):
         if observer not in self.device_status_observers:
             self.device_status_observers.append(observer)
-    
+
+    def register_settings_observer(self, observer: Callable[[], None]):
+        if observer not in self.settings_observers:
+            self.settings_observers.append(observer)
+
+    def notify_settings_changed(self):
+        for observer in self.settings_observers:
+            observer()
+
     def on_device_status_changed(self, key: str, value: int):
         if self.device_config and self.device_config.online_status and key == self.device_config.online_status.status_variable:
             if self.is_device_online():
@@ -482,3 +494,5 @@ class CoreEngine:
         self.usb_device = None
         self.device_config = None
         self.device_status = None
+
+        self.notify_settings_changed()

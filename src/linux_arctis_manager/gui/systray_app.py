@@ -96,25 +96,34 @@ class QSystrayApp(QBaseDesktopApp):
 
         device_settings = self.last_device_settings.get('device', {})
         settings_config = self.last_device_settings.get('settings_config', {})
+        pinned = self.last_device_settings.get('systray_toggles', [])
 
-        if 'volume_limiter' in settings_config:
-            volume_limiter_config = settings_config['volume_limiter']
-            on_value = volume_limiter_config.get('values', {}).get('on', 1)
-            off_value = volume_limiter_config.get('values', {}).get('off', 0)
-            current_value = device_settings.get('volume_limiter', off_value)
+        for name in pinned:
+            config = settings_config.get(name)
+            if not config or config.get('type') != 'toggle':
+                continue
+
+            values = config.get('values', {})
+            # Device settings are stored as ints; coerce so the values sent over
+            # D-Bus match the int-typed default and aren't rejected as a type mismatch.
+            on_value = int(values.get('on', 1))
+            off_value = int(values.get('off', 0))
+            current_value = device_settings.get(name, off_value)
             is_on = current_value == on_value
 
-            self._menu_actions['volume_limiter'] = QAction(I18n.translate('settings', 'volume_limiter'))
-            self._menu_actions['volume_limiter'].setCheckable(True)
-            self._menu_actions['volume_limiter'].setChecked(is_on)
+            action = QAction(I18n.translate('settings', name))
+            action.setCheckable(True)
+            action.setChecked(is_on)
 
-            def _toggle_volume_limiter(checked, on_val=on_value, off_val=off_value):
+            def _toggle(checked, n=name, on_val=on_value, off_val=off_value):
                 new_value = on_val if checked else off_val
-                self.last_device_settings.get('device', {})['volume_limiter'] = new_value
-                DbusWrapper.change_setting('volume_limiter', new_value)
+                if 'device' in self.last_device_settings:
+                    self.last_device_settings['device'][n] = new_value
+                DbusWrapper.change_setting(n, new_value)
 
-            self._menu_actions['volume_limiter'].triggered.connect(_toggle_volume_limiter)
-            self.menu.addAction(self._menu_actions['volume_limiter'])
+            action.triggered.connect(_toggle)
+            self._menu_actions['toggle_' + name] = action
+            self.menu.addAction(action)
 
         sections = 0
         for _, status_obj in self.last_device_status.items():

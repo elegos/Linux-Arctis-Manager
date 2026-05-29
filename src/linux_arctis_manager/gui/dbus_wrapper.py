@@ -170,4 +170,26 @@ class DbusWrapper(QObject):
             signature='ss',
             body=[name, json.dumps(value)],
         ))
+
+    @staticmethod
+    def set_systray_toggle(name: str, enabled: bool) -> None:
+        request_thread = Thread(target=DbusWrapper.set_systray_toggle_thread, kwargs={'name': name, 'enabled': enabled})
+        request_thread.start()
+
+    @staticmethod
+    def set_systray_toggle_thread(name: str, enabled: bool):
+        asyncio.run(DbusWrapper.set_systray_toggle_async(name, enabled))
+
+    @staticmethod
+    async def set_systray_toggle_async(name: str, enabled: bool):
+        dbus_bus = await MessageBus().connect()
+        await dbus_bus.call(Message(
+            destination=DBUS_BUS_NAME,
+            path=DBUS_SETTINGS_OBJECT_PATH,
+            interface=DBUS_SETTINGS_INTERFACE_NAME,
+            member='SetSystrayToggle',
+            message_type=MessageType.METHOD_CALL,
+            signature='sb',
+            body=[name, enabled],
+        ))
     

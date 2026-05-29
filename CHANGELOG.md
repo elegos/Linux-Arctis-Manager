@@ -8,8 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ## Added
-- Volume limiter toggle in system tray context menu (shown only for devices that support it)
+- Systray toggles: a new "Systray toggles" section in the main window lets you choose, per device, which of the device's toggle settings appear as quick switches in the system tray menu
 - Live settings synchronization via `SettingsChanged` D-Bus signal subscription
+- `SetSystrayToggle` D-Bus method to pin/unpin a device toggle from the system tray (per-device UI preference)
 
 ## [2.4.1]
 

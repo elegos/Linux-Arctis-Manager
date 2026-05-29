@@ -6,7 +6,8 @@ import logging
 from dbus_next.aio.message_bus import MessageBus
 from dbus_next.service import ServiceInterface, method, signal
 
-from linux_arctis_manager.config import DeviceConfiguration, parsed_status
+from linux_arctis_manager.config import (DeviceConfiguration, SettingType,
+                                         parsed_status)
 from linux_arctis_manager.constants import (DBUS_BUS_NAME,
                                             DBUS_CONFIG_INTERFACE_NAME,
                                             DBUS_CONFIG_OBJECT_PATH,
@@ -81,11 +82,28 @@ class ArctisManagerDbusSettingsService(ServiceInterface):
         super().__init__(DBUS_SETTINGS_INTERFACE_NAME)
         self.core_engine = core
         self.logger = logging.getLogger('ArctisManagerDbusSettingsService')
-    
+        self.last_settings = ''
+        self.core_engine.register_settings_observer(self._on_settings_changed)
+
+    def _on_settings_changed(self) -> None:
+        dumped = self.settings_to_json(
+            self.core_engine.general_settings,
+            self.core_engine.device_config,
+            self.core_engine.device_settings,
+        )
+
+        if dumped == self.last_settings:
+            return
+
+        self.last_settings = dumped
+
+        self.signal_settings_changed(dumped)
+
     def settings_to_json(self, general_settings: GeneralSettings, device_config: DeviceConfiguration|None, device_settings: DeviceSettings|None) -> str:
         settings = {
             'general': general_settings.to_dict(),
             'device': {},
+            'systray_toggles': [],
             'settings_config': {
                 config.name: config.to_dict()
                 for config in self.core_engine.general_settings.settings_config
@@ -93,9 +111,8 @@ class ArctisManagerDbusSettingsService(ServiceInterface):
         }
 
         if device_config and device_settings:
-            settings.update({'device': device_settings.settings})
-        if device_config and device_settings:
-            settings.update({'device': device_settings.settings})
+            settings['device'] = dict(device_settings.settings)
+            settings['systray_toggles'] = list(device_settings.systray_toggles)
             settings['settings_config'].update({
                 config.name: config.to_dict()
                 for config in list(itertools.chain.from_iterable(
@@ -161,7 +178,51 @@ class ArctisManagerDbusSettingsService(ServiceInterface):
                 return True
 
         return False
-    
+
+    def set_systray_toggle(self, name: str, enabled: bool) -> bool:
+        if not self.core_engine.device_config or not self.core_engine.device_settings:
+            self.logger.error('SetSystrayToggle: no device connected')
+            return False
+
+        config = next((
+            cfg
+            for section in self.core_engine.device_config.settings.values()
+            for cfg in section
+            if cfg.name == name
+        ), None)
+
+        if not config:
+            self.logger.error(f'SetSystrayToggle: unknown setting "{name}" for the current device')
+            return False
+
+        if config.type != SettingType.TOGGLE:
+            self.logger.error(f'SetSystrayToggle: setting "{name}" is not a toggle')
+            return False
+
+        toggles = self.core_engine.device_settings.systray_toggles
+        mutated = False
+        if enabled and name not in toggles:
+            toggles.append(name)
+            mutated = True
+        elif not enabled and name in toggles:
+            toggles.remove(name)
+            mutated = True
+
+        if mutated:
+            self.core_engine.device_settings.write_to_file()
+            self.last_settings = self.settings_to_json(
+                self.core_engine.general_settings,
+                self.core_engine.device_config,
+                self.core_engine.device_settings,
+            )
+            self.signal_settings_changed(self.last_settings)
+
+        return True
+
+    @method('SetSystrayToggle')
+    def _dbus_set_systray_toggle(self, name: 's', enabled: 'b') -> 'b': # type: ignore
+        return self.set_systray_toggle(name, enabled)
+
     @method('GetListOptions')
     def get_list_options(self, list_name: 's') -> 's': # type: ignore
         result = []
