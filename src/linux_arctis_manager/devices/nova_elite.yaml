@@ -23,8 +23,8 @@ device:
 # Before commiting anything, AI was used for pointing out some minor error ( even when testing, I've missed typo in Bluetooth part as I am not using it ^^' )
   device_init:
     - [0x01, 0x20]                                                # Claude guess : GET_EQ_BANDS ( "doubt")
-    - [0x01, 0x8d, 'settings.sonar_enabled']                      # Init - Sonar
-    - [0x01, 0x49, 'settings.chat_mix_enabled']                   # Init - Chat Mix
+    - [0x01, 0x8d, 0x00]                                          # Init - Sonar ( Maybe too soon in the init phase )
+    - [0x01, 0x49, 0x00]                                          # Init - Chat Mix ( Maybe too soon in the init phase )
     - [0x01, 0x10]                                                # Claude guess : Possibly related to firmware
     - ['status.request']                                          # Obvious
     - [0x01, 0x18]                                                # Claude guess : GET_EQ_NAME custom slot
@@ -67,6 +67,8 @@ device:
     - [0x01, 0xbf, 'settings.mic_led_brightness']                 # Init: mic_led_brightness
     - [0x01, 0x37, 'settings.mic_volume']                         # Init: mic_volume
     - [0x01, 0x89]                                                # Read: station_home_screen_view
+    - [0x01, 0x8d, 'settings.sonar_enabled']                      # Init - Enforcing Sonar
+    - [0x01, 0x49, 'settings.chatmix_enabled']                    # Init - Enforcing Chat Mix
     - ['status.request']                                          # Obvious
 # The device init could/should be rewritten to be simpler
 # ( Everything that is not properly handled like most of guess coming from Claude could be removed IMO )
@@ -115,7 +117,7 @@ device:
       # It's a shame we can't control input mix altogether    
       - starts_with: 0x0745
         media_mix: 0x02
-        chat_mix: 0x03
+        chatmix: 0x03
 
       # No settings for theses as it'll need some code modification
       # I haven't took the proper time to read/assimilate the repo yet
@@ -127,7 +129,7 @@ device:
         line_out_stream_min_volume: 0x05
 
       - starts_with: 0x0749
-        chat_mix_enabled: 0x02
+        chatmix_enabled: 0x02
 
       - starts_with: 0x0783
         station_screen_saver_timeout: 0x02
@@ -206,11 +208,11 @@ device:
       volumes:
         - station_volume
         - media_mix
-        - chat_mix
+        - chatmix
       gamedac:
         - charge_slot_battery_charge
         - line_out
-        - chat_mix_enabled
+        - chatmix_enabled
         - sonar_enabled
         - station_screen_brightness
         - station_screensaver
@@ -384,7 +386,7 @@ device:
           0x01: speaker
           0x02: stream
 
-      chat_mix_enabled:
+      chatmix_enabled:
         type: toggle
         values:
           off: 0x00
@@ -543,12 +545,12 @@ device:
       perc_min: 0
       perc_max: 100
 
-    chat_mix:
+    chatmix:
       type: percentage
       perc_min: 0
       perc_max: 100
 
-    chat_mix_enabled:
+    chatmix_enabled:
       type: on_off
       off: 0x00
       on: 0x01
