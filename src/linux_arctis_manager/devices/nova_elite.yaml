@@ -366,6 +366,7 @@ device:
       #     0x03: high
 
     station:
+      # Inverted, currently too lazy to check the code
       station_volume:
         type: slider
         min: 0x00
