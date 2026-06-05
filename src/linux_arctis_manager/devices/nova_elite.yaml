@@ -23,8 +23,8 @@ device:
 # Before commiting anything, AI was used for pointing out some minor error ( even when testing, I've missed typo in Bluetooth part as I am not using it ^^' )
   device_init:
     - [0x01, 0x20]                                                # Claude guess : GET_EQ_BANDS ( "doubt")
-    - [0x01, 0x8d, 0x00]                                          # Init - Sonar ( Maybe too soon in the init phase )
-    - [0x01, 0x49, 0x00]                                          # Init - Chat Mix ( Maybe too soon in the init phase )
+    - [0x01, 0x8d, 'settings.sonar_enabled']                      # Init - Enforcing Sonar ( See comment on settings part )
+    - [0x01, 0x49, 'settings.chatmix_enabled']                    # Init - Enforcing Chat Mix ( See comment on settings part )
     - [0x01, 0x10]                                                # Claude guess : Possibly related to firmware
     - ['status.request']                                          # Obvious
     - [0x01, 0x18]                                                # Claude guess : GET_EQ_NAME custom slot
@@ -67,8 +67,6 @@ device:
     - [0x01, 0xbf, 'settings.mic_led_brightness']                 # Init: mic_led_brightness
     - [0x01, 0x37, 'settings.mic_volume']                         # Init: mic_volume
     - [0x01, 0x89]                                                # Read: station_home_screen_view
-    - [0x01, 0x8d, 'settings.sonar_enabled']                      # Init - Enforcing Sonar
-    - [0x01, 0x49, 'settings.chatmix_enabled']                    # Init - Enforcing Chat Mix
     - ['status.request']                                          # Obvious
 # The device init could/should be rewritten to be simpler
 # ( Everything that is not properly handled like most of guess coming from Claude could be removed IMO )
@@ -117,7 +115,7 @@ device:
       # It's a shame we can't control input mix altogether    
       - starts_with: 0x0745
         media_mix: 0x02
-        chatmix: 0x03
+        chat_mix: 0x03
 
       # No settings for theses as it'll need some code modification
       # I haven't took the proper time to read/assimilate the repo yet
@@ -208,7 +206,7 @@ device:
       volumes:
         - station_volume
         - media_mix
-        - chatmix
+        - chat_mix
       gamedac:
         - charge_slot_battery_charge
         - line_out
@@ -386,6 +384,9 @@ device:
           0x01: speaker
           0x02: stream
 
+      # Like Sonar, ChatMix is enabled here or during init phase
+      # It does not activate properly when turning on the headset
+      # Station does not seem to "keep" this settings 
       chatmix_enabled:
         type: toggle
         values:
@@ -396,6 +397,9 @@ device:
         default: 0x01
         update_sequence: [0x01, 0x49, 'value']
 
+      # Even is Sonar is enabled here or during init phase
+      # It does not activate properly when turning on the headset
+      # Station does not seem to "keep" this settings 
       sonar_enabled:
         type: toggle
         values:
@@ -545,7 +549,7 @@ device:
       perc_min: 0
       perc_max: 100
 
-    chatmix:
+    chat_mix:
       type: percentage
       perc_min: 0
       perc_max: 100
