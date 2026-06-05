@@ -11,7 +11,7 @@ device:
     filler: 0x00
 
   command_interface_index: [0, 3]
-  listen_interface_indexes: [3, 4]
+  listen_interface_indexes: [3]
 
 # Captured from a (real) Windows ( and streamed each "packet" to a Linux for read/debug )
 # Other people seems have different sequence ?
