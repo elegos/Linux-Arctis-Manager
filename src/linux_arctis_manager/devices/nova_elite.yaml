@@ -1,0 +1,739 @@
+device:
+  name: SteelSeries Arctis Nova Elite
+  vendor_id: 0x1038
+  product_ids:
+    - 0x2244 # SteelSeries Arctis Nova Elite - Input 1
+#    - 0x2246 # SteelSeries Arctis Nova Elite - Input 2 & 3 ( No Control - yet ? - )
+
+  command_padding:
+    length: 64
+    position: end
+    filler: 0x00
+
+  command_interface_index: [0, 3]
+  listen_interface_indexes: [3]
+
+# Captured from a (real) Windows ( and streamed each "packet" to a Linux for read/debug )
+# Other people seems have different sequence ?
+# Need further testing/investigation
+# Replaced known sequence like status.request
+# After 2 days of manual labor and having everything I wanted/needed, I was curious and wanted to further understand this device_init part
+# I used ( local ) Ollama ( Qwen3.6 ) and Claude AI to poke around, found some stuff but unsure what to do with it
+# Appropriate comment added for labelling these "discovery"
+# Before commiting anything, AI was used for pointing out some minor error ( even when testing, I've missed typo in Bluetooth part as I am not using it ^^' )
+  device_init:
+    - [0x01, 0x20]                                                # Claude guess : GET_EQ_BANDS ( "doubt")
+    - [0x01, 0x8d, 'settings.sonar_enabled']                      # Init - Enforcing Sonar ( See comment on settings part )
+    - [0x01, 0x49, 'settings.chatmix_enabled']                    # Init - Enforcing Chat Mix ( See comment on settings part )
+    - [0x01, 0x10]                                                # Claude guess : Possibly related to firmware
+    - ['status.request']                                          # Obvious
+    - [0x01, 0x18]                                                # Claude guess : GET_EQ_NAME custom slot
+    - [0x01, 0x18, 0x02]                                          # Claude guess : GET_EQ_NAME custom slot
+    - [0x01, 0x18, 0x01]                                          # Claude guess : GET_EQ_NAME custom slot
+    - [0x01, 0x18, 0x03]                                          # Claude guess : GET_EQ_NAME custom slot
+    - [0x01, 0x20]                                                # Claude guess : GET_EQ_BANDS ( "doubt")
+    - [0x01, 0x1a]                                                # Claude guess : GET_EQ_NAME presets factory
+    - [0x01, 0x1e]                                                # Claude guess : GET_EQ_NAME presets factory
+    - [0x01, 0x1c]                                                # Claude guess : GET_EQ_NAME presets factory
+    - [0x01, 0x80]                                                # Claude guess : get device state
+    - [0x01, 0x10]                                                # Claude guess : Possibly related to firmware
+    - [0x01, 0x10]                                                # Claude guess : Possibly related to firmware
+    - ['status.request']                                          # Obvious
+    - [0x01, 0x18]                                                # Claude guess : GET_EQ_NAME custom slot
+    - [0x01, 0x85, 'settings.station_screen_brightness']          # Claude nailed it : Station screen light intensity
+    - [0x01, 0x18, 0x02]                                          # Claude guess : GET_EQ_NAME custom slot
+    - [0x01, 0x43, 'settings.line_out']                           # Init: Line out
+    - [0x01, 0x18, 0x01]                                          # Claude guess : GET_EQ_NAME custom slot
+    - [0x01, 0x8a]                                                # Read: station_home_screen_options
+    - [0x01, 0x18, 0x03]                                          # Claude guess : GET_EQ_NAME custom slot
+    - [0x01, 0xb2]                                                # Read: Bluetooth default
+    - [0x01, 0x20]                                                # Claude guess : GET_EQ_BANDS ( "doubt")
+    - [0x01, 0xb3]                                                # Read: Bluetooth automute
+    - [0x01, 0x1a]                                                # Claude guess : GET_EQ_NAME presets factory
+    - [0x01, 0x27, 'settings.gain']                               # Init: gain
+    - [0x01, 0x1e]                                                # Claude guess : GET_EQ_NAME presets factory
+    - [0x01, 0xbd, 'settings.noise_cancelling']                   # Init: noise_cancelling
+    - [0x01, 0x1c]                                                # Claude guess : GET_EQ_NAME presets factory
+    - [0x01, 0x80]                                                # Claude guess : get device state
+    - [0x01, 0x88, 'settings.station_screensaver']                # Init : Screensaver off/dimm
+    - [0x01, 0x3c, 0x11, 0x03, 0x03]                              # Init : Boom & Ear Mic noise cancelling. hardcoding here temporarily - See comment for the corresponding part further below
+    - [0x01, 0xb9, 'settings.transparent_noise_cancelling_level'] # Init: transparent_noise_cancelling_level
+    - [0x01, 0x47, 0x64, 0x64, 0x64]                              # Claude almost nailed it - Init: Line Out Stream Volumes. hardcoding here temporarily
+    - [0x01, 0x83, 'settings.station_screen_saver_timeout']       # Init: station_screen_saver_timeout
+    - [0x01, 0xc1, 'settings.auto_off_time_minutes']              # Init: auto_off_time_minutes
+    - [0x01, 0xb8, 'settings.noise_cancelling_level']             # Init: noise_cancelling_level
+    - [0x01, 0x38, 0x01, 'settings.mic_sidetone_boom']            # Init: mic_sidetone_boom
+    - [0x01, 0x39, 0x01, 'settings.mic_sidetone_ear']             # Init: mic_sidetone_ear
+    - [0x01, 0xbf, 'settings.mic_led_brightness']                 # Init: mic_led_brightness
+    - [0x01, 0x37, 'settings.mic_volume']                         # Init: mic_volume
+    - [0x01, 0x89]                                                # Read: station_home_screen_view
+    - ['status.request']                                          # Obvious
+# The device init could/should be rewritten to be simpler
+# ( Everything that is not properly handled like most of guess coming from Claude could be removed IMO )
+# I'll do it afterward as impact on headset/station behavior still barely known
+
+  status:
+    request: 0x01b0
+    response_mapping:
+
+      # 071b : Related to EQ
+
+      - starts_with: 0x0725
+        station_volume: 0x02
+
+      - starts_with: 0x0727
+        gain: 0x02
+
+      - starts_with: 0x072d
+        equalizer_wireless: 0x02
+
+      - starts_with: 0x072e
+        equalizer_mic: 0x02
+
+      - starts_with: 0x072f
+        equalizer_bluetooth: 0x02
+
+      # 0731 : Equalizer Custom
+
+      - starts_with: 0x0737
+        mic_volume: 0x02
+
+      - starts_with: 0x0738
+        mic_sidetone_boom: 0x03
+
+      - starts_with: 0x0739
+        mic_sidetone_ear: 0x03
+
+      # See comment for the corresponding part further below
+      # - starts_with: 0x073c
+      #   mic_boom_noise_control: 0x02
+      #   mic_ear_noise_control: 0x03
+
+      - starts_with: 0x0743
+        line_out: 0x02
+
+      # It's a shame we can't control input mix altogether    
+      - starts_with: 0x0745
+        media_mix: 0x02
+        chat_mix: 0x03
+
+      # No settings for theses as it'll need some code modification
+      # I haven't took the proper time to read/assimilate the repo yet
+      # My main focus was having the bare minimum with existing part
+      - starts_with: 0x0747
+        line_out_stream_main_left_volume: 0x02
+        line_out_stream_main_right_volume: 0x03
+        line_out_stream_aux_volume: 0x04
+        line_out_stream_min_volume: 0x05
+
+      - starts_with: 0x0749
+        chatmix_enabled: 0x02
+
+      - starts_with: 0x0783
+        station_screen_saver_timeout: 0x02
+
+      - starts_with: 0x0785
+        station_screen_brightness: 0x02
+
+      - starts_with: 0x0788
+        station_screensaver: 0x02
+
+      - starts_with: 0x0789
+        station_home_screen_view: 0x02
+
+      - starts_with: 0x078a
+        station_home_screen_options: 0x02
+
+      - starts_with: 0x078d
+        sonar_enabled: 0x02
+
+      - starts_with: 0x07b2
+        bluetooth_default: 0x02
+
+      - starts_with: 0x07b3
+        bluetooth_auto_mute: 0x02
+
+      - starts_with: 0x07b5
+#        wireless_pairing: 0x02 #  ?
+        bluetooth_connection: 0x03
+        headset_power_status: 0x04
+
+      - starts_with: 0x07b7
+        headset_battery_charge: 0x02
+        charge_slot_battery_charge: 0x03
+        headset_charging_status: 0x04
+
+      - starts_with: 0x07b8
+        noise_cancelling_level: 0x02
+
+      - starts_with: 0x07b9
+        transparent_noise_cancelling_level: 0x02
+
+      - starts_with: 0x07bb
+        mic_status: 0x02
+
+      - starts_with: 0x07bd
+        noise_cancelling: 0x02
+
+      - starts_with: 0x07bf
+        mic_led_brightness: 0x02
+
+      - starts_with: 0x07c1
+        auto_off_time_minutes: 0x02
+
+      - starts_with: 0x07c3
+        wireless_mode: 0x02
+
+    representation:
+      headset:
+        - headset_power_status
+        - headset_battery_charge
+        - gain
+        - noise_cancelling
+        - noise_cancelling_level
+        - transparent_noise_cancelling_level
+        - auto_off_time_minutes
+      equalizer:
+        - equalizer_wireless
+        - equalizer_bluetooth
+      mic:
+        - mic_status
+        - mic_volume
+        - equalizer_mic
+        - mic_sidetone_boom
+        - mic_sidetone_ear
+        - mic_led_brightness
+      volumes:
+        - station_volume
+        - media_mix
+        - chat_mix
+      gamedac:
+        - charge_slot_battery_charge
+        - line_out
+        - chatmix_enabled
+        - sonar_enabled
+        - station_screen_brightness
+        - station_screensaver
+        - station_screen_saver_timeout
+        - station_home_screen_view
+        - station_home_screen_options
+      wireless:
+        - wireless_mode
+      #   - wireless_pairing
+      bluetooth:
+        - bluetooth_default
+        - bluetooth_auto_mute
+        - bluetooth_connection
+
+  online_status:
+    status_variable: headset_power_status
+    online_value: online
+
+  settings:
+    audio:
+      gain:
+        type: toggle
+        values:
+          off: 0x01
+          on: 0x00
+          off_label: Low
+          on_label: High
+        default: 0x00
+        update_sequence: [0x01, 0x27, 'value']
+
+      noise_cancelling:
+        type: discrete_map
+        default: 0x00
+        update_sequence: [0x01, 0xbd, 'value']
+        values_mapping:
+          0x00: off
+          0x01: Transparency
+          0x02: on
+
+      noise_cancelling_level:
+        type: discrete_map
+        default: 0x03
+        update_sequence: [0x01, 0xb8, 'value']
+        values_mapping:
+          0x01: Low
+          0x02: Medium
+          0x03: High
+
+      transparent_noise_cancelling_level:
+        type: slider
+        min: 0x01
+        max: 0x0a
+        step: 1
+        min_label: 10%
+        max_label: 100%
+        default: 0x08
+        update_sequence: [0x01, 0xb9, 'value']
+
+    equalizer:
+      equalizer_wireless:
+        type: discrete_map
+        default: 0x00
+        update_sequence: [0x01, 0x2d, 'value']
+        values_mapping:
+          0x00: Flat
+          0x01: Bass boost
+          0x02: Focus
+          0x03: Smiley
+          0x04: Custom
+
+      equalizer_bluetooth:
+        type: discrete_map
+        default: 0x00
+        update_sequence: [0x01, 0x2f, 'value']
+        values_mapping:
+          0x00: Flat
+          0x01: Bass boost
+          0x02: Focus
+          0x03: Smiley
+          0x04: Custom
+
+    microphone:
+      mic_volume:
+        type: slider
+        min: 0x01
+        max: 0x0a
+        step: 1
+        min_label: mic_muted
+        max_label: perc_100
+        default: 0x0a
+        update_sequence: [0x01, 0x37, 'value']
+
+      equalizer_mic:
+        type: discrete_map
+        default: 0x00
+        update_sequence: [0x01, 0x2e, 'value']
+        values_mapping:
+          0x00: flat
+          0x01: balanced
+          0x02: broadcast high pitch
+          0x03: broadcast low pitch
+          0x04: clarity low pitch
+          0x05: clarity high pitch
+          0x06: deep voice
+          0x07: less nasal
+          0x08: custom
+
+      mic_sidetone_boom:
+        type: slider
+        min: 0x01
+        max: 0x0a
+        step: 1
+        min_label: perc_10
+        max_label: perc_100
+        default: 0x05
+        update_sequence: [0x01, 0x38, 0x01, 'value']
+
+      mic_sidetone_ear:
+        type: slider
+        min: 0x01
+        max: 0x0a
+        step: 1
+        min_label: perc_10
+        max_label: perc_100
+        default: 0x05
+        update_sequence: [0x01, 0x39, 0x01, 'value']
+
+      mic_led_brightness:
+        type: slider
+        min: 0x01
+        max: 0x0a
+        step: 1
+        min_label: perc_10
+        max_label: perc_100
+        default: 0x0a
+        update_sequence: [0x01, 0xbf, 'value']
+
+      # Commenting as there is 3 value to handle
+      # 0x01 0x3c (0-1)(0-1) 0(1-3) 0(1-3)
+      # first bit : 0x00=both off, 0x01=ear only, 0x10=boom only, 0x11=both on
+      # second bit is boom mic cancelling low, medium, high
+      # third bit is ear  mic cancelling low, medium, high
+      # It'll need code modification for this
+      # As stated in line_out part above, my focus was having many thing working with existing code
+      # mic_noise_control:
+      #   type: discrete_map
+      #   default: 0x00
+      #   update_sequence: [0x01, 0x3c, 'value']
+      #   values_mapping:
+      #     0x00: off
+      #     0x01: low
+      #     0x02: medium
+      #     0x03: high
+
+    station:
+      # Inverted, currently too lazy to check the code
+      station_volume:
+        type: slider
+        min: 0x00
+        max: 0x38
+        step: 1
+        min_label: perc_100
+        max_label: perc_0
+        default: 0x1c
+        update_sequence: [0x01, 0x25, 'value']
+
+      line_out:
+        type: discrete_map
+        default: 0x01
+        update_sequence: [0x01, 0x43, 'value']
+        values_mapping:
+          0x01: speaker
+          0x02: stream
+
+      # Like Sonar, ChatMix is enabled here or during init phase
+      # It does not activate properly when turning on the headset
+      # Station does not seem to "keep" this settings 
+      chatmix_enabled:
+        type: toggle
+        values:
+          off: 0x00
+          on: 0x01
+          off_label: off
+          on_label: on
+        default: 0x01
+        update_sequence: [0x01, 0x49, 'value']
+
+      # Even is Sonar is enabled here or during init phase
+      # It does not activate properly when turning on the headset
+      # Station does not seem to "keep" this settings 
+      sonar_enabled:
+        type: toggle
+        values:
+          off: 0x00
+          on: 0x01
+          off_label: off
+          on_label: on
+        default: 0x01
+        update_sequence: [0x01, 0x8d, 'value']
+
+      station_screen_brightness:
+        type: slider
+        min: 0x01
+        max: 0x0a
+        step: 1
+        min_label: perc_10
+        max_label: perc_100
+        default: 0x0a
+        update_sequence: [0x01, 0x85, 'value']
+
+      station_screensaver:
+        type: discrete_map
+        default: 0x01
+        update_sequence: [0x01, 0x88, 'value']
+        values_mapping:
+          0x00: off
+          0x01: dimm
+
+      station_screen_saver_timeout:
+        type: slider
+        min: 0x00
+        max: 0x06
+        step: 1
+        min_label: never
+        max_label: 60_minutes
+        values_mapping:
+          0x00: never
+          0x01: 1_minute
+          0x02: 5_minutes
+          0x03: 10_minutes
+          0x04: 15_minutes
+          0x05: 30_minutes
+          0x06: 60_minutes
+        default: 0x05
+        update_sequence: [0x01, 0x83, 'value']
+
+      station_home_screen_view:
+        type: discrete_map
+        default: 0x00
+        update_sequence: [0x01, 0x89, 'value']
+        values_mapping:
+          0x00: detailed
+          0x01: simple
+
+      station_home_screen_options:
+        type: discrete_map
+        default: 0x00
+        update_sequence: [0x01, 0x8a, 'value']
+        values_mapping:
+          0x00: stereo
+          0x01: preset
+          0x02: meters
+
+    connectivity:
+      wireless_mode:
+        type: toggle
+        values:
+          off: 0x00
+          on: 0x01
+          off_label: speed
+          on_label: range
+        default: 0x00
+        update_sequence: [0x01, 0xc3, 'value']
+
+      bluetooth_default:
+        type: toggle
+        values:
+          off: 0x00
+          on: 0x01
+          off_label: off
+          on_label: on
+        default: 0x01
+        update_sequence: [0x01, 0xb2, 'value']
+
+      bluetooth_auto_mute:
+        type: discrete_map
+        default: 0x00
+        update_sequence: [0x01, 0xb3, 'value']
+        values_mapping:
+          0x00: off
+          0x01: -12db
+          0x02: on
+
+    power:
+      auto_off_time_minutes:
+        type: slider
+        min: 0x00
+        max: 0x06
+        step: 1
+        min_label: never
+        max_label: 60_minutes
+        values_mapping:
+          0x00: never
+          0x01: 1_minute
+          0x02: 5_minutes
+          0x03: 10_minutes
+          0x04: 15_minutes
+          0x05: 30_minutes
+          0x06: 60_minutes
+        default: 0x05
+        update_sequence: [0x01, 0xc1, 'value']
+
+  status_parse:
+    auto_off_time_minutes:
+      type: int_int_mapping
+      values:
+        0x00: 0
+        0x01: 1
+        0x02: 5
+        0x03: 10
+        0x04: 15
+        0x05: 30
+        0x06: 60
+
+    bluetooth_auto_mute:
+      type: int_str_mapping
+      values:
+        0x00: off
+        0x01: -12db
+        0x02: on
+
+    bluetooth_connection:
+      type: int_str_mapping
+      values:
+        0x00: off
+        0x01: connected
+        0x02: disconnected
+        0x04: active
+
+    bluetooth_default:
+      type: on_off
+      off: 0x00
+      on: 0x01
+
+    charge_slot_battery_charge:
+      type: percentage
+      perc_min: 0
+      perc_max: 100
+
+    chat_mix:
+      type: percentage
+      perc_min: 0
+      perc_max: 100
+
+    chatmix_enabled:
+      type: on_off
+      off: 0x00
+      on: 0x01
+
+    equalizer_bluetooth:
+      type: int_str_mapping
+      values:
+        0x00: flat
+        0x01: bass boost
+        0x02: focus
+        0x03: smiley
+        0x04: custom
+
+    gain:
+      type: int_str_mapping
+      values:
+        0x00: high
+        0x01: low
+
+    headset_battery_charge:
+      type: percentage
+      perc_min: 0
+      perc_max: 100
+
+    headset_charging_status:
+      type: int_str_mapping
+      values:
+        0x02: charging
+        0x08: discharging
+
+    headset_power_status:
+      type: int_str_mapping
+      values:
+        0x01: offline
+        0x02: cable_charging
+        0x04: standby
+        0x08: online
+
+    line_out:
+      type: int_str_mapping
+      values:
+        0x01: speaker
+        0x02: stream
+
+    media_mix:
+      type: percentage
+      perc_min: 0
+      perc_max: 100
+
+    equalizer_mic:
+      type: int_str_mapping
+      values:
+        0x00: flat
+        0x01: balanced
+        0x02: broadcast high pitch
+        0x03: broadcast low pitch
+        0x04: clarity low pitch
+        0x05: clarity high pitch
+        0x06: deep voice
+        0x07: less nasal
+        0x08: custom
+
+    mic_led_brightness:
+      type: percentage
+      perc_min: 0
+      perc_max: 10
+
+    # See comment for the corresponding part above
+    # mic_noise_control:
+    #   type: int_str_mapping
+    #   values:
+    #     0x00: off
+    #     0x01: low
+    #     0x02: medium
+    #     0x03: high
+
+    mic_sidetone_boom:
+      type: percentage
+      perc_min: 1
+      perc_max: 10
+
+    mic_sidetone_ear:
+      type: percentage
+      perc_min: 1
+      perc_max: 10
+
+    mic_status:
+      type: int_str_mapping
+      values:
+        0x00: unmuted
+        0x01: muted
+
+    mic_volume:
+      type: percentage
+      perc_min: 1
+      perc_max: 10
+
+    noise_cancelling:
+      type: int_str_mapping
+      values:
+        0x00: off
+        0x01: transparency
+        0x02: on
+
+    noise_cancelling_level:
+      type: int_str_mapping
+      values:
+        0x01: low
+        0x02: medium
+        0x03: high
+
+    sonar_enabled:
+      type: on_off
+      off: 0x00
+      on: 0x01
+
+    station_home_screen_options:
+      type: int_str_mapping
+      values:
+        0x00: stereo
+        0x01: preset
+        0x02: meters
+
+    station_home_screen_view:
+      type: int_str_mapping
+      values:
+        0x00: detailed
+        0x01: simple
+
+    station_screen_brightness:
+      type: percentage
+      perc_min: 1
+      perc_max: 10
+
+    station_screen_saver_timeout:
+      type: int_int_mapping
+      values:
+        0x00: 0
+        0x01: 1
+        0x02: 5
+        0x03: 10
+        0x04: 15
+        0x05: 30
+        0x06: 60
+
+    station_screensaver:
+      type: int_str_mapping
+      values:
+        0x00: off
+        0x01: dimm
+
+    station_volume:
+      type: percentage
+      perc_min: 56
+      perc_max: 0
+
+    transparent_noise_cancelling_level:
+      type: percentage
+      perc_min: 0
+      perc_max: 10
+
+    equalizer_wireless:
+      type: int_str_mapping
+      values:
+        0x00: flat
+        0x01: bass boost
+        0x02: focus
+        0x03: smiley
+        0x04: custom
+
+    wireless_mode:
+      type: int_str_mapping
+      values:
+        0x00: speed
+        0x01: range
+
+    wireless_pairing:
+      type: on_off
+      off: 0x00
+      on: 0x01
+
