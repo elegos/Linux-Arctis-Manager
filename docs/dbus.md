@@ -26,9 +26,10 @@ The response varies depending on the list, but it will always return a list of o
 - **Response format**: JSON
 - **Specs**:
 
-The response has three sections:
+The response has four sections:
 - `general`: for general (cross-device) settings.
 - `device`: for device-specific settings. Will be an empty object if no device is connected.
+- `systray_toggles`: a list of device setting names the user pinned to the system tray menu. Empty if no device is connected.
 - `settings_config`: the definition for each setting, defining type, default_value and other arguments depending on the type. See **YAML's device.settings.[section].[setting] types**.
 
 The clients shouldn't hard-core the settings, but read them and parse them depending on the `settings_config` section.
@@ -45,6 +46,7 @@ The clients shouldn't hard-core the settings, but read them and parse them depen
         "setting_b": 0,
         "setting_c": 10
     },
+    "systray_toggles": ["toggle_setting"],
     "settings_config": {
         "toggle_setting": {
             "type": "toggle",
@@ -89,6 +91,15 @@ The clients shouldn't hard-core the settings, but read them and parse them depen
 Writes the setting. Searches the setting first in the general settings and then, if not found, in the device's.
 
 Returns boolean (true: setting saved, false: setting not found / not saved)
+
+### Method: SetSystrayToggle
+- **Parameters**: name: string, enabled: boolean
+- **Response format**: boolean
+- **Specs**:
+
+Pins (`enabled = true`) or unpins (`enabled = false`) a device toggle setting from the system tray quick-switch menu. This is a UI preference persisted per device; it does **not** send any command to the device.
+
+Returns `false` if no device is connected, the setting name is unknown for the current device, or the setting is not of type `toggle`. On success, emits `SettingsChanged`.
 
 ## name.giacomofurlan.ArctisManager.Next.Status
 

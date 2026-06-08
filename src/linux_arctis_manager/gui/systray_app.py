@@ -51,6 +51,7 @@ class QSystrayApp(QBaseDesktopApp):
         lang_code = lang_code.split('_')[0] if lang_code else 'en'
 
         self.last_device_status = {}
+        self.last_device_settings = {}
 
         self.menu = QMenu()
         self.menu_setup()
@@ -60,6 +61,7 @@ class QSystrayApp(QBaseDesktopApp):
 
         self.dbus_wrapper = DbusWrapper()
         self.dbus_wrapper.sig_status.connect(lambda status: self.new_status.emit(status or {}))
+        self.dbus_wrapper.sig_settings.connect(self.on_new_settings)
 
         self.tray_icon.setContextMenu(self.menu)
     
@@ -68,6 +70,13 @@ class QSystrayApp(QBaseDesktopApp):
             return
 
         self.last_device_status = status
+        self.menu_setup()
+
+    def on_new_settings(self, settings: dict):
+        if self.last_device_settings == settings:
+            return
+
+        self.last_device_settings = settings
         self.menu_setup()
 
     async def start(self):
@@ -84,6 +93,37 @@ class QSystrayApp(QBaseDesktopApp):
         self._menu_actions['open_app'] = QAction(I18n.translate('ui', 'open_app'))
         self._menu_actions['open_app'].triggered.connect(self.open_main_window)
         self.menu.addAction(self._menu_actions['open_app'])
+
+        device_settings = self.last_device_settings.get('device', {})
+        settings_config = self.last_device_settings.get('settings_config', {})
+        pinned = self.last_device_settings.get('systray_toggles', [])
+
+        for name in pinned:
+            config = settings_config.get(name)
+            if not config or config.get('type') != 'toggle':
+                continue
+
+            values = config.get('values', {})
+            # Device settings are stored as ints; coerce so the values sent over
+            # D-Bus match the int-typed default and aren't rejected as a type mismatch.
+            on_value = int(values.get('on', 1))
+            off_value = int(values.get('off', 0))
+            current_value = device_settings.get(name, off_value)
+            is_on = current_value == on_value
+
+            action = QAction(I18n.translate('settings', name))
+            action.setCheckable(True)
+            action.setChecked(is_on)
+
+            def _toggle(checked, n=name, on_val=on_value, off_val=off_value):
+                new_value = on_val if checked else off_val
+                if 'device' in self.last_device_settings:
+                    self.last_device_settings['device'][n] = new_value
+                DbusWrapper.change_setting(n, new_value)
+
+            action.triggered.connect(_toggle)
+            self._menu_actions['toggle_' + name] = action
+            self.menu.addAction(action)
 
         sections = 0
         for _, status_obj in self.last_device_status.items():

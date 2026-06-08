@@ -32,6 +32,9 @@ class DbusWrapper(QObject):
         self._status_signal_loop: asyncio.AbstractEventLoop|None = None
         self._stop_status_signal_future: asyncio.Future|None = None
 
+        self._settings_signal_loop: asyncio.AbstractEventLoop|None = None
+        self._stop_settings_signal_future: asyncio.Future|None = None
+
         self._status_iface: ProxyInterface|None = None
 
     async def status_iface(self):
@@ -58,7 +61,10 @@ class DbusWrapper(QObject):
 
         status_signal_thread = Thread(target=lambda: asyncio.run(self._register_status_dbus_signal()))
         status_signal_thread.start()
-    
+
+        settings_signal_thread = Thread(target=lambda: asyncio.run(self._register_settings_dbus_signal()))
+        settings_signal_thread.start()
+
     async def _register_status_dbus_signal(self):
         def callback(status: str) -> None:
             self.sig_status.emit(json.loads(status) or {})
@@ -69,11 +75,27 @@ class DbusWrapper(QObject):
         self._stop_status_signal_future = self._status_signal_loop.create_future()
         await self._stop_status_signal_future
 
+    async def _register_settings_dbus_signal(self):
+        def callback(settings: str) -> None:
+            self.sig_settings.emit(json.loads(settings) or {})
+
+        bus = await MessageBus().connect()
+        introspection = await bus.introspect(DBUS_BUS_NAME, DBUS_SETTINGS_OBJECT_PATH)
+        obj = bus.get_proxy_object(DBUS_BUS_NAME, DBUS_SETTINGS_OBJECT_PATH, introspection)
+        iface = obj.get_interface(DBUS_SETTINGS_INTERFACE_NAME)
+        iface.on_settings_changed(callback) # type: ignore
+
+        self._settings_signal_loop = asyncio.get_running_loop()
+        self._stop_settings_signal_future = self._settings_signal_loop.create_future()
+        await self._stop_settings_signal_future
+
     def stop(self):
         self.logger.info("Stopping D-Bus wrapper...")
         self._stopping = True
         if self._status_signal_loop and self._stop_status_signal_future:
             self._status_signal_loop.call_soon_threadsafe(self._stop_status_signal_future.set_result, None)
+        if self._settings_signal_loop and self._stop_settings_signal_future:
+            self._settings_signal_loop.call_soon_threadsafe(self._stop_settings_signal_future.set_result, None)
 
     def request_status(self) -> None:
         request_thread = Thread(target=lambda: asyncio.run(self._request_status_async()))
@@ -147,5 +169,27 @@ class DbusWrapper(QObject):
             message_type=MessageType.METHOD_CALL,
             signature='ss',
             body=[name, json.dumps(value)],
+        ))
+
+    @staticmethod
+    def set_systray_toggle(name: str, enabled: bool) -> None:
+        request_thread = Thread(target=DbusWrapper.set_systray_toggle_thread, kwargs={'name': name, 'enabled': enabled})
+        request_thread.start()
+
+    @staticmethod
+    def set_systray_toggle_thread(name: str, enabled: bool):
+        asyncio.run(DbusWrapper.set_systray_toggle_async(name, enabled))
+
+    @staticmethod
+    async def set_systray_toggle_async(name: str, enabled: bool):
+        dbus_bus = await MessageBus().connect()
+        await dbus_bus.call(Message(
+            destination=DBUS_BUS_NAME,
+            path=DBUS_SETTINGS_OBJECT_PATH,
+            interface=DBUS_SETTINGS_INTERFACE_NAME,
+            member='SetSystrayToggle',
+            message_type=MessageType.METHOD_CALL,
+            signature='sb',
+            body=[name, enabled],
         ))
     

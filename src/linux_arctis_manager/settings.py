@@ -13,11 +13,13 @@ class DeviceSettings(JsonSerializable):
     product_id: int
 
     settings: ObservableDict[str, int]
+    systray_toggles: list[str]
 
     def __init__(self, vendor_id: int, product_id: int):
         self.vendor_id = vendor_id
         self.product_id = product_id
         self.settings = ObservableDict()
+        self.systray_toggles = []
 
     def _settings_file(self) -> Path:
         settings_file = SETTINGS_FOLDER / f'{self.vendor_id:04x}_{self.product_id:04x}.yaml'
@@ -33,28 +35,42 @@ class DeviceSettings(JsonSerializable):
         yaml = YAML(typ='safe')
         raw = yaml.load(settings_file) or {}
 
-        for key in raw:
+        # New format is keyed ({settings: {...}, systray_toggles: [...]}); detect it
+        # by the value shapes, not just key presence, so an old flat file that
+        # happens to contain an int-valued key named 'settings' is not mistaken
+        # for the new format. Older files are a flat {name: int} map (else branch).
+        if isinstance(raw.get('settings'), dict) or isinstance(raw.get('systray_toggles'), list):
+            saved_settings = raw.get('settings') or {}
+            self.systray_toggles = list(raw.get('systray_toggles') or [])
+        else:
+            # Backward compatibility: old flat {name: int} format
+            saved_settings = raw
+
+        for key in saved_settings:
             # Clean old / invalid settings
             if key in self.settings:
-                self.settings[key] = int(raw[key])
+                self.settings[key] = int(saved_settings[key])
 
     def __setattr__(self, name: str, value: Any) -> None:
-        if name in ('vendor_id', 'product_id', 'settings'):
+        if name in ('vendor_id', 'product_id', 'settings', 'systray_toggles'):
             super().__setattr__(name, value)
 
             return
 
         self.settings[name] = int(value)
-    
+
     def get(self, name: str, default: int = 0) -> int:
         return self.settings.get(name, default)
 
     def write_to_file(self):
         settings_file = self._settings_file()
         settings_file.parent.mkdir(parents=True, exist_ok=True)
-        
+
         yaml = YAML(typ='safe')
-        yaml.dump(self.settings.to_dict(), settings_file)
+        yaml.dump({
+            'settings': self.settings.to_dict(),
+            'systray_toggles': list(self.systray_toggles),
+        }, settings_file)
 
     def to_dict(self) -> dict:
         return self.__dict__

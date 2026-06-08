@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## Added
+- Systray toggles: a new "Systray toggles" section in the main window lets you choose, per device, which of the device's toggle settings appear as quick switches in the system tray menu
+- Live settings synchronization via `SettingsChanged` D-Bus signal subscription
+- `SetSystrayToggle` D-Bus method to pin/unpin a device toggle from the system tray (per-device UI preference)
+
 ## [2.4.1]
 
 ## Added
