@@ -90,6 +90,12 @@ yay -S linux-arctis-manager
 # using paru: paru -S linux-arctis-manager
 ```
 
+Start the background service automatically on startup:
+
+```bash
+systemctl --user enable arctis-manager
+```
+
 > [!TIP]
 > To launch the system tray app automatically on login:
 >
