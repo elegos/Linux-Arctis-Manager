@@ -22,7 +22,8 @@ def test_config_parse():
 
     assert config.name == "SteelSeries Arctis Nova Pro Wireless"
     assert config.vendor_id == 0x1038
-    assert config.product_ids == [0x12e0, 0x12e5]
+    assert config.product_ids == [0x12e0, 0x12e5, 0x225d]
+    assert config.product_string == "Arctis Nova Pro Wireless"
 
     assert config.command_interface_index == [4, 0]
     assert config.listen_interface_indexes == [4]
@@ -252,6 +253,17 @@ def test_device_configuration_parses_online_status_when_present():
 def test_device_configuration_online_status_none_when_absent():
     config = DeviceConfiguration(_minimal_raw())
     assert config.online_status is None
+
+
+def test_device_configuration_parses_product_string():
+    raw = _minimal_raw({'product_string': 'Arctis Nova Pro Wireless'})
+    config = DeviceConfiguration(raw)
+    assert config.product_string == 'Arctis Nova Pro Wireless'
+
+
+def test_device_configuration_product_string_defaults_to_none():
+    config = DeviceConfiguration(_minimal_raw())
+    assert config.product_string is None
 
 
 def test_device_configuration_parses_status_parse():
