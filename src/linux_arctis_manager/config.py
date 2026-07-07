@@ -116,6 +116,7 @@ class DeviceConfiguration:
     name: str
     vendor_id: int
     product_ids: list[int]
+    product_string: str | None
     command_interface_index: tuple[int, int]
     listen_interface_indexes: list[int]
     command_padding: ConfigPadding
@@ -133,6 +134,7 @@ class DeviceConfiguration:
         self.name = raw_config.get('name', '')
         self.vendor_id = raw_config.get('vendor_id', 0)
         self.product_ids = raw_config.get('product_ids', [])
+        self.product_string = raw_config.get('product_string', None)
         self.command_interface_index = raw_config.get('command_interface_index', (-1, -1))
         self.listen_interface_indexes = raw_config.get('listen_interface_indexes', [])
         
@@ -214,7 +216,8 @@ def load_device_configurations() -> list[DeviceConfiguration]:
             config_yaml = yaml.load(file)
             config = DeviceConfiguration(config_yaml)
 
-            logger.info(f'Found: {config.name} (0x{config.vendor_id:04x}, {[f"0x{pid:04x}" for pid in config.product_ids]}) from {file}')
+            product_str_info = f', product_string="{config.product_string}"' if config.product_string else ''
+            logger.info(f'Found: {config.name} (0x{config.vendor_id:04x}, {[f"0x{pid:04x}" for pid in config.product_ids]}{product_str_info}) from {file}')
 
             result.append(config)
 

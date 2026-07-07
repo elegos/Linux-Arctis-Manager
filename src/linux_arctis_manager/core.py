@@ -170,16 +170,92 @@ class CoreEngine:
                     self.logger.error("Device did not recover after USB I/O error (errno %d), exiting for systemd restart", e.errno)
                     sys.exit(1)
 
+    def _find_usb_device_for_config(self, config: DeviceConfiguration) -> usb.core.Device | None:
+        if config.product_string is not None:
+            try:
+                candidates = usb.core.find(idVendor=config.vendor_id, find_all=True)
+            except usb.core.USBError as e:
+                self.logger.warning(f"USB error scanning for vendor 0x{config.vendor_id:04x}: {e}")
+                return None
+
+            if candidates is None:
+                return None
+
+            matched: list[usb.core.Device] = []
+            for dev in candidates:
+                try:
+                    prod = dev.product
+                except (ValueError, NotImplementedError, usb.core.USBError):
+                    continue
+                if prod == config.product_string:
+                    matched.append(dev)
+
+            if len(matched) == 0:
+                return None
+            if len(matched) == 1:
+                return matched[0]
+            # Multiple physical devices with same product string: tiebreak by known PID
+            for dev in matched:
+                if dev.idProduct in config.product_ids:
+                    return dev
+            return matched[0]
+        else:
+            for product_id in config.product_ids:
+                usb_device = usb.core.find(idVendor=config.vendor_id, idProduct=product_id)
+                if usb_device is not None:
+                    return usb_device
+            return None
+
     def on_device_connected(self, vendor_id: int, product_id: int) -> None:
-        for device_config in self.device_configurations:
-            if device_config.vendor_id == vendor_id and product_id in device_config.product_ids:
+        for config in self.device_configurations:
+            if config.vendor_id != vendor_id:
+                continue
+
+            if product_id in config.product_ids:
                 self.configure_virtual_sinks()
-                break
-    
+                return
+
+            if config.product_string is not None:
+                connected_product_string: str | None = None
+                try:
+                    dev = usb.core.find(idVendor=vendor_id, idProduct=product_id)
+                    if dev is not None:
+                        try:
+                            connected_product_string = dev.product
+                        except (ValueError, NotImplementedError, usb.core.USBError):
+                            pass
+                except usb.core.USBError as e:
+                    self.logger.warning(f"USB error probing device 0x{vendor_id:04x}:0x{product_id:04x}: {e}")
+
+                if connected_product_string == config.product_string:
+                    self.configure_virtual_sinks()
+                    if product_id not in config.product_ids:
+                        self.logger.warning(
+                            f"Device matched by product string '{config.product_string}' "
+                            f"but PID 0x{product_id:04x} is not in the known list for '{config.name}'. "
+                            f"udev rules may need updating to include this PID."
+                        )
+                    return
+
     def on_device_disconnected(self, vendor_id: int, product_id: int) -> None:
-        # vendor_id and product_id are not available. Check if the current device is still plugged in.
+        # vendor_id and product_id are not reliable on remove events.
 
         if self.usb_device is None or self.device_config is None:
+            return
+
+        if self.device_config.product_string is not None:
+            try:
+                candidates = usb.core.find(idVendor=self.device_config.vendor_id, find_all=True)
+                if candidates is not None:
+                    for dev in candidates:
+                        try:
+                            if dev.product == self.device_config.product_string:
+                                return  # still connected
+                        except (ValueError, NotImplementedError, usb.core.USBError):
+                            pass
+            except usb.core.USBError as e:
+                self.logger.warning(f"USB error checking for device '{self.device_config.product_string}': {e}")
+            self.teardown()
             return
 
         current_usb_device: Device|None = None
@@ -198,23 +274,35 @@ class CoreEngine:
 
         if current_usb_device is None:
             self.teardown()
-    
+
     def reload_device_configurations(self) -> None:
         self.device_configurations = load_device_configurations()
         self.configure_virtual_sinks()
-    
+
     def configure_virtual_sinks(self) -> None:
         usb_device: Device | Any | None = None
         device_config: DeviceConfiguration | None = None
 
-        for device_config in self.device_configurations:
-            for product_id in device_config.product_ids:
-                usb_device = usb.core.find(idVendor=device_config.vendor_id,
-                                           idProduct=product_id)
-                if usb_device is not None:
-                    break
-            if usb_device is not None:
+        # Prefer the first config where the matched device's PID is known.
+        # If none has a known PID, fall back to the first name-matched config.
+        fallback_usb_device: Device | Any | None = None
+        fallback_device_config: DeviceConfiguration | None = None
+
+        for config in self.device_configurations:
+            found = self._find_usb_device_for_config(config)
+            if found is None:
+                continue
+            if found.idProduct in config.product_ids:
+                usb_device = found
+                device_config = config
                 break
+            elif fallback_usb_device is None:
+                fallback_usb_device = found
+                fallback_device_config = config
+
+        if usb_device is None and fallback_usb_device is not None:
+            usb_device = fallback_usb_device
+            device_config = fallback_device_config
 
         if not device_config or not usb_device:
             self.logger.warning("No supported device connected, skipping virtual sink setup")
