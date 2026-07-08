@@ -40,6 +40,7 @@ class CoreEngine:
 
     media_mix: int
     chat_mix: int
+    eq_manager: Any | None = None
 
     device_status_observers: list[Callable[[dict[str, int]], None]]
     device_settings_observers: list[Callable[[DeviceSettings], None]]
@@ -345,7 +346,32 @@ class CoreEngine:
             return
 
         self.pa_audio_manager.wait_for_physical_device(self.usb_device.idVendor, self.usb_device.idProduct)
-        self.pa_audio_manager.sinks_setup(self.device_config.name, self.device_config.vendor_id, self.device_config.product_ids)
+
+        # Set up software EQ (non-fatal: if mbeq_1197 is unavailable we log and continue)
+        from linux_arctis_manager.eq_manager import EQManager
+        from linux_arctis_manager.settings import EQSettings
+
+        eq_settings = EQSettings.load()
+        eq_config = eq_settings.to_eq_config()
+
+        if self.eq_manager is None:
+            self.eq_manager = EQManager()
+
+        physical_name = self.pa_audio_manager.get_physical_sink_name(
+            self.usb_device.idVendor, self.usb_device.idProduct
+        )
+        eq_targets: dict[str, str] = {}
+        if physical_name:
+            eq_targets = self.eq_manager.setup(physical_name, eq_config)
+
+        self.pa_audio_manager.sinks_setup(
+            self.device_config.name,
+            self.device_config.vendor_id,
+            self.device_config.product_ids,
+            media_output=eq_targets.get('media'),
+            chat_output=eq_targets.get('chat'),
+        )
+        self.eq_manager.start_stream_monitor()
 
         self.redirect_to_media_sink()
     
@@ -546,6 +572,9 @@ class CoreEngine:
         self.send_command([self.device_config.status.request], endpoint, self.device_config.command_interface_index[1])
 
     def teardown(self) -> None:
+        if self.eq_manager:
+            self.eq_manager.teardown()
+            self.eq_manager = None
         self.pa_audio_manager.sinks_teardown()
         if self.usb_device:
             try:

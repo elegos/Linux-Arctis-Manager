@@ -151,15 +151,21 @@ class PulseAudioManager:
         if chat:
             self.pulse.volume_set_all_chans(chat, chat_mix / 100)
 
-    def sinks_setup(self, device_name: str, vendor_id: int, product_id: int|list[int]|None):
+    def get_physical_sink_name(self, vendor_id: int, product_id: int|list[int]|None) -> str | None:
+        real_sink = self.get_arctis_sinks(ONLY_PHYSICAL, vendor_id=vendor_id, product_id=product_id)
+        return real_sink[0].name if real_sink else None
+
+    def sinks_setup(self, device_name: str, vendor_id: int, product_id: int|list[int]|None,
+                    *, media_output: str | None = None, chat_output: str | None = None):
         real_sink = self.get_arctis_sinks(ONLY_PHYSICAL, vendor_id=vendor_id, product_id=product_id)
 
         if not real_sink:
             self.logger.warning('No SteelSeries Arctis sink found.')
             return
-        
-        self.create_virtual_sink(PULSE_MEDIA_NODE_NAME, f'{device_name} Media', real_sink[0].name)
-        self.create_virtual_sink(PULSE_CHAT_NODE_NAME, f'{device_name} Chat', real_sink[0].name)
+
+        physical_name = real_sink[0].name
+        self.create_virtual_sink(PULSE_MEDIA_NODE_NAME, f'{device_name} Media', media_output or physical_name)
+        self.create_virtual_sink(PULSE_CHAT_NODE_NAME, f'{device_name} Chat', chat_output or physical_name)
 
     def sinks_teardown(self):
         self.logger.info('Removing virtual sinks...')

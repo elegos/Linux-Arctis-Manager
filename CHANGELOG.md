@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## Added
+
+- Software EQ via PulseAudio LADSPA (`mbeq_1197` from `swh-plugins`): per-channel (media and chat) equaliser with simple (10-band) and advanced (15-band) modes. EQ is non-fatal — if the plugin is unavailable, the application logs a warning and continues without EQ.
+- Per-application EQ overrides: route a specific stream, executable, or Steam game to a custom EQ preset on a chosen channel. Steam library detection reads `libraryfolders.vdf` via the optional `vdf` dependency.
+- EQ presets saved as YAML in `~/.config/arctis_manager/eq_presets/`. EQ settings (enabled, mode, preset, per-app rules) saved in `~/.config/arctis_manager/eq_settings.yaml`.
+- New dependency: `vdf>=3.4` (optional at runtime — Steam game matching is skipped gracefully if not installed).
+
 ## Changed
 
 - Device detection now uses the USB iProduct string (e.g. `Arctis Nova Pro Wireless`) as the primary identifier, scoped to the SteelSeries vendor ID. Product IDs remain as a tiebreaker when multiple configurations share the same product name (e.g. Nova 7 Wireless discrete vs. percentage battery variants), and as the sole matching method for configurations that do not declare a `product_string`. This allows firmware updates that change the product ID to still be recognised automatically; unknown PIDs that match by name log a warning suggesting udev rules may need updating.

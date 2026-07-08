@@ -29,6 +29,7 @@ SETTINGS_FOLDER = Path.home() / '.config' / 'arctis_manager' / 'settings'
 HOME_LANG_FOLDER = Path.home() / '.config' / 'arctis_manager' / 'lang'
 
 HOME_CONFIG_FOLDER = Path.home() / '.config' / 'arctis_manager' / 'devices'
+EQ_PRESETS_FOLDER: Path = Path.home() / '.config' / 'arctis_manager' / 'eq_presets'
 SRC_CONFIG_FOLDER = Path(__file__).parent / 'devices'
 
 DEVICES_CONFIG_FOLDER: list[Path] = [HOME_CONFIG_FOLDER, SRC_CONFIG_FOLDER]

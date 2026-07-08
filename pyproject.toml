@@ -11,6 +11,7 @@ dependencies = [
     "pyudev>=0.24.4",
     "pyusb>=1.3.1",
     "ruamel-yaml>=0.19.1",
+    "vdf>=3.4",
 ]
 
 [project.scripts]
