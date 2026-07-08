@@ -10,6 +10,8 @@ from linux_arctis_manager.config import DeviceConfiguration, parsed_status
 from linux_arctis_manager.constants import (DBUS_BUS_NAME,
                                             DBUS_CONFIG_INTERFACE_NAME,
                                             DBUS_CONFIG_OBJECT_PATH,
+                                            DBUS_EQ_INTERFACE_NAME,
+                                            DBUS_EQ_OBJECT_PATH,
                                             DBUS_SETTINGS_INTERFACE_NAME,
                                             DBUS_SETTINGS_OBJECT_PATH,
                                             DBUS_STATUS_INTERFACE_NAME,
@@ -176,6 +178,109 @@ class ArctisManagerDbusSettingsService(ServiceInterface):
 
         return json.dumps(result)
 
+class ArctisManagerDbusEQService(ServiceInterface):
+    def __init__(self, core: CoreEngine):
+        super().__init__(DBUS_EQ_INTERFACE_NAME)
+        self.core_engine = core
+        self.logger = logging.getLogger('ArctisManagerDbusEQService')
+
+    @signal('EQSettingsChanged')
+    def signal_eq_settings_changed(self, settings_json: 's') -> 's': # type: ignore
+        return settings_json
+
+    @method('GetEQSettings')
+    def get_eq_settings(self) -> 's': # type: ignore
+        from linux_arctis_manager.settings import EQSettings
+        s = EQSettings.load()
+        return json.dumps({
+            'media': {'enabled': s.media.enabled, 'mode': s.media.mode, 'preset_name': s.media.preset_name},
+            'chat': {'enabled': s.chat.enabled, 'mode': s.chat.mode, 'preset_name': s.chat.preset_name},
+            'app_overrides': [
+                {'matcher_type': o.matcher_type, 'value': o.value, 'steam_app_id': o.steam_app_id,
+                 'steam_game_name': o.steam_game_name, 'preset_name': o.preset_name, 'channel': o.channel}
+                for o in s.app_overrides
+            ],
+        })
+
+    @method('SetEQSettings')
+    def set_eq_settings(self, settings_json: 's') -> 'b': # type: ignore
+        try:
+            from linux_arctis_manager.settings import EQSettings, ChannelEQSettings, EQAppOverride
+            data = json.loads(settings_json)
+            new_settings = EQSettings()
+            for ch in ('media', 'chat'):
+                cd = data.get(ch, {})
+                setattr(new_settings, ch, ChannelEQSettings(
+                    enabled=cd.get('enabled', False),
+                    mode=cd.get('mode', 'simple'),
+                    preset_name=cd.get('preset_name'),
+                ))
+            for o in data.get('app_overrides', []):
+                new_settings.app_overrides.append(EQAppOverride(
+                    matcher_type=o.get('matcher_type', 'stream'),
+                    value=o.get('value', ''),
+                    steam_app_id=o.get('steam_app_id'),
+                    steam_game_name=o.get('steam_game_name', ''),
+                    preset_name=o.get('preset_name', 'flat'),
+                    channel=o.get('channel', 'media'),
+                ))
+            new_settings.save()
+            self.core_engine.reapply_eq()
+            self.signal_eq_settings_changed(self.get_eq_settings())
+            return True
+        except Exception as e:
+            self.logger.error(f'SetEQSettings: {e}')
+            return False
+
+    @method('GetPresets')
+    def get_presets(self) -> 's': # type: ignore
+        from linux_arctis_manager.eq_preset import list_presets
+        return json.dumps([
+            {'name': p.name, 'mode': p.mode, 'description': p.description,
+             'bands': [{'frequency': b.frequency, 'gain': b.gain} for b in p.bands]}
+            for p in list_presets()
+        ])
+
+    @method('SavePreset')
+    def save_preset(self, preset_json: 's') -> 'b': # type: ignore
+        try:
+            from linux_arctis_manager.eq_preset import EQPreset, EQBand
+            data = json.loads(preset_json)
+            bands = [EQBand(frequency=b['frequency'], gain=float(b['gain'])) for b in data.get('bands', [])]
+            EQPreset(
+                name=data['name'],
+                mode=data.get('mode', 'simple'),
+                description=data.get('description', ''),
+                bands=bands,
+            ).save()
+            return True
+        except Exception as e:
+            self.logger.error(f'SavePreset: {e}')
+            return False
+
+    @method('DeletePreset')
+    def delete_preset(self, name: 's') -> 'b': # type: ignore
+        try:
+            from linux_arctis_manager.constants import EQ_PRESETS_FOLDER
+            slug = name.lower().replace(' ', '_')
+            path = EQ_PRESETS_FOLDER / f'{slug}.yaml'
+            if path.exists():
+                path.unlink()
+            return True
+        except Exception as e:
+            self.logger.error(f'DeletePreset: {e}')
+            return False
+
+    @method('GetSteamGames')
+    def get_steam_games(self) -> 's': # type: ignore
+        try:
+            from linux_arctis_manager.steam_library import list_installed_games
+            return json.dumps([{'app_id': g.app_id, 'name': g.name} for g in list_installed_games()])
+        except Exception as e:
+            self.logger.warning(f'GetSteamGames: {e}')
+            return json.dumps([])
+
+
 class DbusManager:
     _instance: 'DbusManager|None' = None
 
@@ -201,7 +306,8 @@ class DbusManager:
         for tpl in [
             (ArctisManagerDbusConfigService, DBUS_CONFIG_OBJECT_PATH),
             (ArctisManagerDbusSettingsService, DBUS_SETTINGS_OBJECT_PATH),
-            (ArctisManagerDbusStatusService, DBUS_STATUS_OBJECT_PATH)
+            (ArctisManagerDbusStatusService, DBUS_STATUS_OBJECT_PATH),
+            (ArctisManagerDbusEQService, DBUS_EQ_OBJECT_PATH),
         ]:
             interface = tpl[0](self.core_engine)
             bus.export(tpl[1], interface)
