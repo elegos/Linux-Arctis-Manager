@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -95,6 +98,139 @@ class GeneralSettings(JsonSerializable):
     def write_to_file(self):
         settings_file = SETTINGS_FOLDER / 'general_settings.yaml'
         settings_file.parent.mkdir(parents=True, exist_ok=True)
-        
+
         yaml = YAML(typ='safe')
         yaml.dump(self.__dict__, settings_file)
+
+
+# ---------------------------------------------------------------------------
+# EQ Settings
+# ---------------------------------------------------------------------------
+
+EQ_SETTINGS_FILE = Path.home() / '.config' / 'arctis_manager' / 'eq_settings.yaml'
+
+
+@dataclass
+class ChannelEQSettings:
+    enabled: bool = False
+    mode: str = 'simple'               # 'simple' | 'advanced'
+    preset_name: str | None = None     # None = flat (all zeros)
+
+
+@dataclass
+class EQAppOverride:
+    matcher_type: str                  # 'stream' | 'executable' | 'steam'
+    value: str = ''
+    steam_app_id: int | None = None
+    steam_game_name: str = ''
+    preset_name: str = 'flat'
+    channel: str = 'media'
+
+
+class EQSettings:
+    media: ChannelEQSettings
+    chat: ChannelEQSettings
+    app_overrides: list[EQAppOverride]
+
+    def __init__(self) -> None:
+        self.media = ChannelEQSettings()
+        self.chat = ChannelEQSettings()
+        self.app_overrides = []
+
+    def save(self) -> None:
+        EQ_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        yaml = YAML()
+        data = {
+            'media': {
+                'enabled': self.media.enabled,
+                'mode': self.media.mode,
+                'preset_name': self.media.preset_name,
+            },
+            'chat': {
+                'enabled': self.chat.enabled,
+                'mode': self.chat.mode,
+                'preset_name': self.chat.preset_name,
+            },
+            'app_overrides': [
+                {
+                    'matcher_type': o.matcher_type,
+                    'value': o.value,
+                    'steam_app_id': o.steam_app_id,
+                    'steam_game_name': o.steam_game_name,
+                    'preset_name': o.preset_name,
+                    'channel': o.channel,
+                }
+                for o in self.app_overrides
+            ],
+        }
+        with open(EQ_SETTINGS_FILE, 'w') as f:
+            yaml.dump(data, f)
+
+    @classmethod
+    def load(cls) -> EQSettings:
+        instance = cls()
+        if not EQ_SETTINGS_FILE.exists():
+            return instance
+        try:
+            yaml = YAML(typ='safe')
+            data = yaml.load(EQ_SETTINGS_FILE)
+            if not data:
+                return instance
+            for channel in ('media', 'chat'):
+                ch = data.get(channel, {})
+                cfg = ChannelEQSettings(
+                    enabled=ch.get('enabled', False),
+                    mode=ch.get('mode', 'simple'),
+                    preset_name=ch.get('preset_name'),
+                )
+                setattr(instance, channel, cfg)
+            for o in data.get('app_overrides', []):
+                instance.app_overrides.append(EQAppOverride(
+                    matcher_type=o.get('matcher_type', 'stream'),
+                    value=o.get('value', ''),
+                    steam_app_id=o.get('steam_app_id'),
+                    steam_game_name=o.get('steam_game_name', ''),
+                    preset_name=o.get('preset_name', 'flat'),
+                    channel=o.get('channel', 'media'),
+                ))
+        except Exception:
+            pass
+        return instance
+
+    def to_eq_config(self) -> EQConfig:
+        from linux_arctis_manager.eq_manager import ChannelEQConfig, EQConfig
+        from linux_arctis_manager.eq_preset import EQPreset, list_presets
+        from linux_arctis_manager.app_matcher import AppEQOverride, AppMatcher
+
+        presets_by_name = {p.name: p for p in list_presets()}
+
+        def resolve_preset(ch: ChannelEQSettings) -> EQPreset | None:
+            if not ch.enabled:
+                return None
+            if ch.preset_name and ch.preset_name in presets_by_name:
+                return presets_by_name[ch.preset_name]
+            return EQPreset.flat(mode=ch.mode)  # type: ignore[arg-type]
+
+        media_cfg = ChannelEQConfig(
+            enabled=self.media.enabled,
+            mode=self.media.mode,  # type: ignore[arg-type]
+            preset=resolve_preset(self.media),
+        )
+        chat_cfg = ChannelEQConfig(
+            enabled=self.chat.enabled,
+            mode=self.chat.mode,  # type: ignore[arg-type]
+            preset=resolve_preset(self.chat),
+        )
+
+        overrides = []
+        for o in self.app_overrides:
+            matcher = AppMatcher(
+                type=o.matcher_type,  # type: ignore[arg-type]
+                value=o.value,
+                app_id=o.steam_app_id,
+                name=o.steam_game_name,
+            )
+            preset = presets_by_name.get(o.preset_name) or EQPreset.flat()
+            overrides.append(AppEQOverride(matcher=matcher, preset_name=preset.name, channel=o.channel))
+
+        return EQConfig(media=media_cfg, chat=chat_cfg, app_overrides=overrides)
