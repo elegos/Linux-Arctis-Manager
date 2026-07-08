@@ -11,6 +11,8 @@ from dbus_next.message import Message
 from PySide6.QtCore import QObject, Signal, SignalInstance
 
 from linux_arctis_manager.constants import (DBUS_BUS_NAME,
+                                            DBUS_EQ_INTERFACE_NAME,
+                                            DBUS_EQ_OBJECT_PATH,
                                             DBUS_SETTINGS_INTERFACE_NAME,
                                             DBUS_SETTINGS_OBJECT_PATH,
                                             DBUS_STATUS_INTERFACE_NAME,
@@ -126,6 +128,50 @@ class DbusWrapper(QObject):
         else:
             obj = {'name': list_name, 'list': json.loads(reply.body[0]) or []}
             qt_signal.emit(obj)
+
+    @staticmethod
+    def request_eq_settings(qt_signal: SignalInstance) -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_eq_async('GetEQSettings', '', [], qt_signal, is_json=True))).start()
+
+    @staticmethod
+    def request_eq_presets(qt_signal: SignalInstance) -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_eq_async('GetPresets', '', [], qt_signal, is_json=True))).start()
+
+    @staticmethod
+    def request_steam_games(qt_signal: SignalInstance) -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_eq_async('GetSteamGames', '', [], qt_signal, is_json=True))).start()
+
+    @staticmethod
+    def set_eq_settings(settings: dict) -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_eq_async('SetEQSettings', 's', [json.dumps(settings)]))).start()
+
+    @staticmethod
+    def save_eq_preset(preset: dict) -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_eq_async('SavePreset', 's', [json.dumps(preset)]))).start()
+
+    @staticmethod
+    def delete_eq_preset(name: str) -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_eq_async('DeletePreset', 's', [name]))).start()
+
+    @staticmethod
+    async def _call_eq_async(member: str, signature: str, body: list,
+                             qt_signal: SignalInstance | None = None, is_json: bool = False) -> None:
+        try:
+            bus = await MessageBus().connect()
+            reply = await bus.call(Message(
+                destination=DBUS_BUS_NAME,
+                path=DBUS_EQ_OBJECT_PATH,
+                interface=DBUS_EQ_INTERFACE_NAME,
+                member=member,
+                message_type=MessageType.METHOD_CALL,
+                signature=signature,
+                body=body,
+            ))
+            if qt_signal is not None and reply is not None and reply.message_type != MessageType.ERROR:
+                result = json.loads(reply.body[0]) if is_json else reply.body[0]
+                qt_signal.emit(result)
+        except Exception as e:
+            DbusWrapper.logger.warning(f'EQ DBus call {member} failed: {e}')
 
     @staticmethod
     def change_setting(name: str, value: int|bool|str) -> None:
