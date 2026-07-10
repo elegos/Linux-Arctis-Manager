@@ -108,8 +108,14 @@ class DbusWrapper(QObject):
                 ))
                 if reply is not None and reply.message_type != MessageType.ERROR:
                     qt_signal.emit(reply.body[0])
+                else:
+                    # Method not found on older service — emit empty string so
+                    # the handler knows to restart the service.
+                    DbusWrapper.logger.warning('GetVersion not available on service (old version)')
+                    qt_signal.emit('')
             except Exception as e:
                 DbusWrapper.logger.warning('GetVersion failed: %s', e)
+                qt_signal.emit('')
         Thread(target=lambda: asyncio.run(_call())).start()
 
     def request_settings(self) -> None:

@@ -6,7 +6,7 @@ from typing import Any, Callable, ClassVar, Generic, TypeVar
 
 def project_version() -> str:
     try:
-        return version("linux-arctis-manager")  # metti il nome del package
+        return version("linux-arctis-manager")
     except PackageNotFoundError:
         return "dev"
 
@@ -14,31 +14,24 @@ def project_version() -> str:
 def compare_versions(a: str, b: str) -> int:
     """Return -1 if a < b, 0 if a == b, 1 if a > b.
 
-    Follows SemVer precedence: pre-release (dev/beta/rc/…) is older than the
-    bare release with the same numeric parts.
+    Uses packaging.version.Version so that PEP 440 equivalent strings such as
+    "2.5.1-dev" and "2.5.1.dev0" compare as equal.
     """
-    import re
-
-    def _parse(v: str) -> tuple:
-        m = re.match(r'^(\d+)\.(\d+)\.(\d+)(?:[.\-](.+))?$', v.strip())
-        if not m:
-            return (0, 0, 0, v)
-        return (int(m.group(1)), int(m.group(2)), int(m.group(3)), m.group(4) or '')
-
-    pa, pb = _parse(a), _parse(b)
-    if pa[:3] < pb[:3]:
-        return -1
-    if pa[:3] > pb[:3]:
-        return 1
-    # Same numeric version — pre-release < release
-    a_pre, b_pre = pa[3], pb[3]
-    if a_pre == b_pre:
+    try:
+        from packaging.version import Version
+        va, vb = Version(a), Version(b)
+        if va < vb:
+            return -1
+        if va > vb:
+            return 1
         return 0
-    if not a_pre:   # a is release, b is pre-release → a is newer
-        return 1
-    if not b_pre:   # b is release, a is pre-release → a is older
-        return -1
-    return (-1 if a_pre < b_pre else 1)
+    except Exception:
+        # Last-resort string comparison if packaging is somehow unavailable.
+        if a < b:
+            return -1
+        if a > b:
+            return 1
+        return 0
 
 
 class JsonSerializable(ABC):
