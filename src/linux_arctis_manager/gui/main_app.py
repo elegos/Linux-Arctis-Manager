@@ -1,11 +1,15 @@
 import logging
+import subprocess
+import threading
 from typing import Literal
 
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QListWidget,
-                               QListWidgetItem, QVBoxLayout, QWidget)
+                               QListWidgetItem, QMessageBox, QVBoxLayout,
+                               QWidget)
 
+from linux_arctis_manager.constants import SYSTEMD_SERVICE_NAME
 from linux_arctis_manager.gui.base_app import QBaseDesktopApp
 from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
 from linux_arctis_manager.gui.eq_widget import QEQWidget
@@ -14,6 +18,7 @@ from linux_arctis_manager.gui.settings_widget import QSettingsWidget
 from linux_arctis_manager.gui.status_widget import QStatusWidget
 from linux_arctis_manager.gui.ui_utils import get_icon_pixmap
 from linux_arctis_manager.i18n import I18n
+from linux_arctis_manager.utils import compare_versions, project_version
 
 
 class QMainApp(QBaseDesktopApp):
@@ -23,7 +28,9 @@ class QMainApp(QBaseDesktopApp):
     side_panel: QListWidget
     main_panel: QWidget
     status_widget: QStatusWidget
- 
+
+    sig_service_version = Signal(str)
+
     def __init__(self, app: QApplication, log_level: int):
         super().__init__(parent=app)
 
@@ -62,8 +69,13 @@ class QMainApp(QBaseDesktopApp):
         self.dbus_wrapper.sig_settings.connect(self.general_settings_widget.update_settings)
         self.dbus_wrapper.sig_settings.connect(self.device_settings_widget.update_settings)
 
+        self.sig_service_version.connect(self._on_service_version)
+
         self.switch_panel('status')
         self.dbus_wrapper.start()
+        self._ui_version = project_version()
+        self._service_restart_attempted = False
+        DbusWrapper.request_service_version(self.sig_service_version)
 
         self.destroyed.connect(self.sig_stop)
     
@@ -120,6 +132,17 @@ class QMainApp(QBaseDesktopApp):
 
         main_layout.addWidget(self.main_panel)
 
+        # FOOTER
+        footer = QHBoxLayout()
+        footer.setContentsMargins(4, 0, 4, 2)
+        footer.addStretch()
+        self._version_label = QLabel(
+            I18n.translate('ui', 'version_footer').format(version=project_version())
+        )
+        self._version_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        footer.addWidget(self._version_label)
+        window_layout.addLayout(footer)
+
         return window
     
     def switch_panel(self, panel: Literal['status', 'general', 'device', 'eq']) -> None:
@@ -132,6 +155,58 @@ class QMainApp(QBaseDesktopApp):
             else:
                 widget.hide()
     
+    @Slot(str)
+    def _on_service_version(self, service_version: str) -> None:
+        ui = self._ui_version
+        svc = service_version
+        cmp = compare_versions(ui, svc)
+
+        # Update footer: show both versions when they differ.
+        if cmp == 0:
+            self._version_label.setText(
+                I18n.translate('ui', 'version_footer').format(version=ui)
+            )
+        else:
+            self._version_label.setText(f'UI: v{ui}  |  Service: v{svc}')
+
+        if cmp > 0 and not self._service_restart_attempted:
+            # UI is newer than service → restart service once.
+            self._service_restart_attempted = True
+            self.logger.info('Service v%s < UI v%s — restarting service', svc, ui)
+            self._version_label.setText(
+                I18n.translate('ui', 'version_mismatch_service_restarting').format(
+                    service=svc, ui=ui)
+            )
+            threading.Thread(target=self._restart_service_and_recheck, daemon=True).start()
+
+        elif cmp < 0:
+            # UI is behind the service — ask user to restart the app.
+            QMessageBox.warning(
+                self.main_window,
+                I18n.translate('ui', 'version_mismatch_ui_behind_title'),
+                I18n.translate('ui', 'version_mismatch_ui_behind_message').format(
+                    service=svc, ui=ui),
+            )
+
+    def _restart_service_and_recheck(self) -> None:
+        from linux_arctis_manager.scripts.gui import _wait_for_dbus_service
+        try:
+            subprocess.run(
+                ['systemctl', '--user', 'restart', SYSTEMD_SERVICE_NAME],
+                check=True, timeout=15,
+            )
+        except Exception as e:
+            self.logger.warning('Service restart failed: %s', e)
+            self._version_label.setText(
+                I18n.translate('ui', 'version_mismatch_service_restart_failed_message').format(
+                    command=f'systemctl --user restart {SYSTEMD_SERVICE_NAME}')
+            )
+            return
+        if _wait_for_dbus_service():
+            DbusWrapper.request_service_version(self.sig_service_version)
+        else:
+            self.logger.warning('Service did not come back after restart')
+
     def start_sync(self):
         self.logger.info('Starting Main Window app.')
         self.main_window.show()
