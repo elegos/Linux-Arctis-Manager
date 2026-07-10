@@ -1,5 +1,4 @@
 import logging
-import subprocess
 import threading
 from typing import Literal
 
@@ -29,7 +28,10 @@ class QMainApp(QBaseDesktopApp):
     main_panel: QWidget
     status_widget: QStatusWidget
 
-    sig_service_version = Signal(str)
+    sig_service_version  = Signal(str)
+    # Used by the background restart thread to update the UI safely.
+    _sig_set_label       = Signal(str)
+    _sig_show_error      = Signal(str, str)   # (title, message)
 
     def __init__(self, app: QApplication, log_level: int):
         super().__init__(parent=app)
@@ -70,11 +72,14 @@ class QMainApp(QBaseDesktopApp):
         self.dbus_wrapper.sig_settings.connect(self.device_settings_widget.update_settings)
 
         self.sig_service_version.connect(self._on_service_version)
+        self._sig_set_label.connect(self._version_label.setText)
+        self._sig_show_error.connect(self._show_error_dialog)
+
+        self._ui_version = project_version()
+        self._service_restart_attempted = False
 
         self.switch_panel('status')
         self.dbus_wrapper.start()
-        self._ui_version = project_version()
-        self._service_restart_attempted = False
         DbusWrapper.request_service_version(self.sig_service_version)
 
         self.destroyed.connect(self.sig_stop)
@@ -157,30 +162,27 @@ class QMainApp(QBaseDesktopApp):
     
     @Slot(str)
     def _on_service_version(self, service_version: str) -> None:
-        ui = self._ui_version
+        ui = getattr(self, '_ui_version', project_version())
         svc = service_version
-        cmp = compare_versions(ui, svc)
+        # Empty string means the service doesn't expose GetVersion (old version) — treat as behind.
+        cmp = 1 if not svc else compare_versions(ui, svc)
 
-        # Update footer: show both versions when they differ.
         if cmp == 0:
             self._version_label.setText(
                 I18n.translate('ui', 'version_footer').format(version=ui)
             )
         else:
-            self._version_label.setText(f'UI: v{ui}  |  Service: v{svc}')
+            self._version_label.setText(f'UI: v{ui}  |  Service: v{svc or "?"}')
 
-        if cmp > 0 and not self._service_restart_attempted:
-            # UI is newer than service → restart service once.
+        if cmp > 0 and not getattr(self, '_service_restart_attempted', False):
             self._service_restart_attempted = True
-            self.logger.info('Service v%s < UI v%s — restarting service', svc, ui)
             self._version_label.setText(
                 I18n.translate('ui', 'version_mismatch_service_restarting').format(
-                    service=svc, ui=ui)
+                    service=svc or '?', ui=ui)
             )
             threading.Thread(target=self._restart_service_and_recheck, daemon=True).start()
 
         elif cmp < 0:
-            # UI is behind the service — ask user to restart the app.
             QMessageBox.warning(
                 self.main_window,
                 I18n.translate('ui', 'version_mismatch_ui_behind_title'),
@@ -189,23 +191,34 @@ class QMainApp(QBaseDesktopApp):
             )
 
     def _restart_service_and_recheck(self) -> None:
+        """Background thread — must only touch Qt via signals."""
         from linux_arctis_manager.scripts.gui import _wait_for_dbus_service
+        from linux_arctis_manager.systemd import ensure_systemd_unit
         try:
-            subprocess.run(
-                ['systemctl', '--user', 'restart', SYSTEMD_SERVICE_NAME],
-                check=True, timeout=15,
-            )
+            # ensure_systemd_unit rewrites the service file with the current
+            # binary path before restarting, so the new version is actually used.
+            ensure_systemd_unit(enable=True, restart=True)
         except Exception as e:
             self.logger.warning('Service restart failed: %s', e)
-            self._version_label.setText(
+            self._sig_show_error.emit(
+                I18n.translate('ui', 'version_mismatch_service_restart_failed_title'),
                 I18n.translate('ui', 'version_mismatch_service_restart_failed_message').format(
-                    command=f'systemctl --user restart {SYSTEMD_SERVICE_NAME}')
+                    command=f'systemctl --user restart {SYSTEMD_SERVICE_NAME}'),
             )
             return
         if _wait_for_dbus_service():
             DbusWrapper.request_service_version(self.sig_service_version)
         else:
             self.logger.warning('Service did not come back after restart')
+            self._sig_show_error.emit(
+                I18n.translate('ui', 'version_mismatch_service_restart_failed_title'),
+                I18n.translate('ui', 'version_mismatch_service_restart_failed_message').format(
+                    command=f'systemctl --user restart {SYSTEMD_SERVICE_NAME}'),
+            )
+
+    @Slot(str, str)
+    def _show_error_dialog(self, title: str, message: str) -> None:
+        QMessageBox.warning(self.main_window, title, message)
 
     def start_sync(self):
         self.logger.info('Starting Main Window app.')

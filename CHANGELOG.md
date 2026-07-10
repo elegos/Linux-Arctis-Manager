@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - LADSPA plugin availability check: if `mbeq_1197` is not installed, the EQ panel shows a warning banner with per-distro install instructions and a Retry button; all EQ controls are disabled until the plugin is detected.
 - GUI daemon availability check on startup: if the background service is not running and `--no-enforce-systemd` is not set, the GUI silently enables and starts the systemd unit before opening; if `--no-enforce-systemd` is set and the daemon is offline, an error dialog is shown and the application exits cleanly.
 - New dependency: `vdf>=3.4` (optional at runtime — Steam game matching is skipped gracefully if not installed).
+- Daemon exposes a `GetVersion` D-Bus method returning the installed package version via `importlib.metadata`.
+- UI footer (bottom-right) shows the running UI version. On a version mismatch the footer shows `UI: vX | Service: vY` while the issue is resolved.
+- Automatic service upgrade: if the service version is older than the UI, or if the service does not expose `GetVersion` (pre-feature version), the GUI restarts the service once via systemd, re-writing the unit file so the current binary is used. After restart, the version is re-checked.
+- If the UI is older than the service, a warning dialog prompts the user to restart the application instead.
 
 ## Fixed
 
