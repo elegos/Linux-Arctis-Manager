@@ -167,6 +167,50 @@ class PulseAudioManager:
         self.create_virtual_sink(PULSE_MEDIA_NODE_NAME, f'{device_name} Media', media_output or physical_name)
         self.create_virtual_sink(PULSE_CHAT_NODE_NAME, f'{device_name} Chat', chat_output or physical_name)
 
+    def update_virtual_sink_loopback(self, sink_name: str, new_output: str) -> None:
+        """Redirect the loopback output to new_output via sink_input_move.
+
+        The loopback module is never unloaded, so the null-sink monitor always
+        has a consumer.  If PipeWire suspends a null-sink (no consumers) it
+        evicts connected apps — this keeps that from happening.
+        """
+        modules = self.pulse.module_list()
+        loopback = next(
+            (m for m in modules
+             if m.name == 'module-loopback'
+             and m.argument
+             and f'source={sink_name}.monitor' in m.argument),
+            None,
+        )
+
+        if loopback is None:
+            self.logger.warning('No loopback for %s.monitor — creating', sink_name)
+            self.pulse.module_load(
+                'module-loopback',
+                f'source={sink_name}.monitor sink={new_output} latency_msec=0',
+            )
+            return
+
+        sinks = self.pulse.sink_list()
+        target = next((s for s in sinks if s.name == new_output), None)
+        if target is None:
+            self.logger.error('update_virtual_sink_loopback: sink %r not found', new_output)
+            return
+
+        inputs = self.pulse.sink_input_list()
+        for inp in inputs:
+            if inp.owner_module == loopback.index:
+                self.pulse.sink_input_move(inp.index, target.index)
+                return
+
+        # Loopback module exists but its sink input is gone (rare edge case).
+        self.logger.warning('No sink input for loopback %d — reloading', loopback.index)
+        self.pulse.module_unload(loopback.index)
+        self.pulse.module_load(
+            'module-loopback',
+            f'source={sink_name}.monitor sink={new_output} latency_msec=0',
+        )
+
     def sinks_teardown(self):
         self.logger.info('Removing virtual sinks...')
 

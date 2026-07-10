@@ -188,8 +188,7 @@ class ArctisManagerDbusEQService(ServiceInterface):
     def signal_eq_settings_changed(self, settings_json: 's') -> 's': # type: ignore
         return settings_json
 
-    @method('GetEQSettings')
-    def get_eq_settings(self) -> 's': # type: ignore
+    def _eq_settings_json(self) -> str:
         from linux_arctis_manager.settings import EQSettings
         s = EQSettings.load()
         return json.dumps({
@@ -202,11 +201,20 @@ class ArctisManagerDbusEQService(ServiceInterface):
             ],
         })
 
+    @method('GetEQSettings')
+    def get_eq_settings(self) -> 's': # type: ignore
+        return self._eq_settings_json()
+
     @method('SetEQSettings')
     def set_eq_settings(self, settings_json: 's') -> 'b': # type: ignore
         try:
             from linux_arctis_manager.settings import EQSettings, ChannelEQSettings, EQAppOverride
             data = json.loads(settings_json)
+            self.logger.info(
+                'SetEQSettings: media(enabled=%s, preset=%r)  chat(enabled=%s, preset=%r)',
+                data.get('media', {}).get('enabled'), data.get('media', {}).get('preset_name'),
+                data.get('chat', {}).get('enabled'),  data.get('chat', {}).get('preset_name'),
+            )
             new_settings = EQSettings()
             for ch in ('media', 'chat'):
                 cd = data.get(ch, {})
@@ -226,10 +234,10 @@ class ArctisManagerDbusEQService(ServiceInterface):
                 ))
             new_settings.save()
             self.core_engine.reapply_eq()
-            self.signal_eq_settings_changed(self.get_eq_settings())
+            self.signal_eq_settings_changed(self._eq_settings_json())
             return True
         except Exception as e:
-            self.logger.error(f'SetEQSettings: {e}')
+            self.logger.error('SetEQSettings: %s', e)
             return False
 
     @method('GetPresets')
@@ -237,6 +245,7 @@ class ArctisManagerDbusEQService(ServiceInterface):
         from linux_arctis_manager.eq_preset import list_presets
         return json.dumps([
             {'name': p.name, 'mode': p.mode, 'description': p.description,
+             'builtin': p.builtin,
              'bands': [{'frequency': b.frequency, 'gain': b.gain} for b in p.bands]}
             for p in list_presets()
         ])
@@ -271,6 +280,17 @@ class ArctisManagerDbusEQService(ServiceInterface):
             self.logger.error(f'DeletePreset: {e}')
             return False
 
+    @method('GetEQCapabilities')
+    def get_eq_capabilities(self) -> 's': # type: ignore
+        from linux_arctis_manager.eq_manager import ladspa_plugin_available, LADSPA_PLUGIN
+        available = ladspa_plugin_available()
+        if not available:
+            self.logger.warning('GetEQCapabilities: LADSPA plugin %r not found — EQ unavailable', LADSPA_PLUGIN)
+        return json.dumps({
+            'ladspa_available': available,
+            'ladspa_plugin': LADSPA_PLUGIN,
+        })
+
     @method('GetSteamGames')
     def get_steam_games(self) -> 's': # type: ignore
         try:
@@ -278,6 +298,43 @@ class ArctisManagerDbusEQService(ServiceInterface):
             return json.dumps([{'app_id': g.app_id, 'name': g.name} for g in list_installed_games()])
         except Exception as e:
             self.logger.warning(f'GetSteamGames: {e}')
+            return json.dumps([])
+
+    @method('GetRunningStreams')
+    def get_running_streams(self) -> 's': # type: ignore
+        import pulsectl
+        # System-level binaries/names that are never user media apps.
+        _EXCLUDED_BINARIES = frozenset({
+            'wireplumber', 'kwin_wayland', 'plasmashell', 'kded6',
+            'xdg-desktop-portal', 'kdeconnectd', 'uresourced',
+        })
+        _EXCLUDED_NAMES = frozenset({
+            'linux-arctis-manager', 'arctis-manager-stream-query',
+            'arctis-eq-manager', 'arctis-eq-stream-monitor',
+            'WirePlumber', 'WirePlumber [export]', 'KWin',
+        })
+        try:
+            seen_lower: set[str] = set()
+            result: list[str] = []
+
+            def _add(name: str) -> None:
+                if name and name.lower() not in seen_lower and name not in _EXCLUDED_NAMES:
+                    seen_lower.add(name.lower())
+                    result.append(name)
+
+            with pulsectl.Pulse('arctis-manager-stream-query') as pulse:
+                # Currently playing streams (most reliable source of application.name).
+                for inp in pulse.sink_input_list():
+                    _add(inp.proplist.get('application.name', ''))
+                # Registered clients — covers paused apps that released their stream.
+                for client in pulse.client_list():
+                    binary = client.proplist.get('application.process.binary', '')
+                    if binary not in _EXCLUDED_BINARIES:
+                        _add(client.proplist.get('application.name', ''))
+
+            return json.dumps(sorted(result))
+        except Exception as e:
+            self.logger.warning('GetRunningStreams: %s', e)
             return json.dumps([])
 
 

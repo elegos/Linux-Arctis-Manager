@@ -62,14 +62,17 @@ class DbusWrapper(QObject):
         status_signal_thread.start()
     
     async def _register_status_dbus_signal(self):
-        def callback(status: str) -> None:
-            self.sig_status.emit(json.loads(status) or {})
+        try:
+            def callback(status: str) -> None:
+                self.sig_status.emit(json.loads(status) or {})
 
-        (await self.status_iface()).on_status_changed(callback) # type: ignore
+            (await self.status_iface()).on_status_changed(callback) # type: ignore
 
-        self._status_signal_loop = asyncio.get_running_loop()
-        self._stop_status_signal_future = self._status_signal_loop.create_future()
-        await self._stop_status_signal_future
+            self._status_signal_loop = asyncio.get_running_loop()
+            self._stop_status_signal_future = self._status_signal_loop.create_future()
+            await self._stop_status_signal_future
+        except Exception as e:
+            self.logger.warning('status signal registration failed: %s', e)
 
     def stop(self):
         self.logger.info("Stopping D-Bus wrapper...")
@@ -82,20 +85,24 @@ class DbusWrapper(QObject):
         request_thread.start()
 
     async def _request_status_async(self):
-        iface = await self.status_iface()
-        result = await iface.call_get_status() # type: ignore
-
-        self.sig_status.emit(json.loads(result) or {})
+        try:
+            iface = await self.status_iface()
+            result = await iface.call_get_status() # type: ignore
+            self.sig_status.emit(json.loads(result) or {})
+        except Exception as e:
+            self.logger.warning('request_status failed: %s', e)
 
     def request_settings(self) -> None:
         request_thread = Thread(target=lambda: asyncio.run(self._request_settings_async()))
         request_thread.start()
-    
-    async def _request_settings_async(self):
-        iface = await self.settings_iface()
-        result = await iface.call_get_settings() # type: ignore
 
-        self.sig_settings.emit(json.loads(result) or {})
+    async def _request_settings_async(self):
+        try:
+            iface = await self.settings_iface()
+            result = await iface.call_get_settings() # type: ignore
+            self.sig_settings.emit(json.loads(result) or {})
+        except Exception as e:
+            self.logger.warning('request_settings failed: %s', e)
     
     @staticmethod
     def request_list_options(list_name: str, qt_signal: SignalInstance):
@@ -130,6 +137,10 @@ class DbusWrapper(QObject):
             qt_signal.emit(obj)
 
     @staticmethod
+    def request_eq_capabilities(qt_signal: SignalInstance) -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_eq_async('GetEQCapabilities', '', [], qt_signal, is_json=True))).start()
+
+    @staticmethod
     def request_eq_settings(qt_signal: SignalInstance) -> None:
         Thread(target=lambda: asyncio.run(DbusWrapper._call_eq_async('GetEQSettings', '', [], qt_signal, is_json=True))).start()
 
@@ -140,6 +151,10 @@ class DbusWrapper(QObject):
     @staticmethod
     def request_steam_games(qt_signal: SignalInstance) -> None:
         Thread(target=lambda: asyncio.run(DbusWrapper._call_eq_async('GetSteamGames', '', [], qt_signal, is_json=True))).start()
+
+    @staticmethod
+    def request_running_streams(qt_signal: SignalInstance) -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_eq_async('GetRunningStreams', '', [], qt_signal, is_json=True))).start()
 
     @staticmethod
     def set_eq_settings(settings: dict) -> None:

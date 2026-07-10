@@ -277,30 +277,32 @@ class CoreEngine:
             self.teardown()
 
     def reapply_eq(self) -> None:
+        """Reload EQ without tearing down virtual sinks so running apps (Spotify etc.) survive."""
         if not self.usb_device or not self.device_config:
+            self.logger.warning('reapply_eq: no USB device or device config — aborting')
             return
-        if self.eq_manager:
-            self.eq_manager.teardown()
-            self.eq_manager = None
-        self.pa_audio_manager.sinks_teardown()
+        from linux_arctis_manager.constants import PULSE_CHAT_NODE_NAME, PULSE_MEDIA_NODE_NAME
         from linux_arctis_manager.eq_manager import EQManager
         from linux_arctis_manager.settings import EQSettings
         eq_settings = EQSettings.load()
         eq_config = eq_settings.to_eq_config()
-        self.eq_manager = EQManager()
         physical_name = self.pa_audio_manager.get_physical_sink_name(
             self.usb_device.idVendor, self.usb_device.idProduct)
-        eq_targets: dict[str, str] = {}
-        if physical_name:
-            eq_targets = self.eq_manager.setup(physical_name, eq_config)
-        self.pa_audio_manager.sinks_setup(
-            self.device_config.name,
-            self.device_config.vendor_id,
-            self.device_config.product_ids,
-            media_output=eq_targets.get('media'),
-            chat_output=eq_targets.get('chat'),
-        )
-        self.eq_manager.start_stream_monitor()
+        if not physical_name:
+            self.logger.error('reapply_eq: physical sink not found')
+            return
+        if self.eq_manager is None:
+            self.eq_manager = EQManager()
+        # Load new LADSPA module (unique name); old modules stay idle — see EQManager.reapply().
+        new_targets = self.eq_manager.reapply(physical_name, eq_config)
+        for null_sink, output in (
+            (PULSE_MEDIA_NODE_NAME, new_targets.get('media', physical_name)),
+            (PULSE_CHAT_NODE_NAME,  new_targets.get('chat',  physical_name)),
+        ):
+            try:
+                self.pa_audio_manager.update_virtual_sink_loopback(null_sink, output)
+            except Exception as e:
+                self.logger.warning('reapply_eq: redirect loopback for %s: %s', null_sink, e)
 
     def reload_device_configurations(self) -> None:
         self.device_configurations = load_device_configurations()
