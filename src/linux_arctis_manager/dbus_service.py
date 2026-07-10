@@ -111,6 +111,11 @@ class ArctisManagerDbusSettingsService(ServiceInterface):
     def signal_settings_changed(self, settings_json_str: 's') -> 's': # type: ignore
         return settings_json_str
 
+    @method('GetVersion')
+    def get_version(self) -> 's': # type: ignore
+        from linux_arctis_manager.utils import project_version
+        return project_version()
+
     @method('GetSettings')
     def get_settings(self) -> 's': # type: ignore
         return self.settings_to_json(self.core_engine.general_settings, self.core_engine.device_config, self.core_engine.device_settings)

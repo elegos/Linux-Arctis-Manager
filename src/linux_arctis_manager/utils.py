@@ -11,6 +11,36 @@ def project_version() -> str:
         return "dev"
 
 
+def compare_versions(a: str, b: str) -> int:
+    """Return -1 if a < b, 0 if a == b, 1 if a > b.
+
+    Follows SemVer precedence: pre-release (dev/beta/rc/…) is older than the
+    bare release with the same numeric parts.
+    """
+    import re
+
+    def _parse(v: str) -> tuple:
+        m = re.match(r'^(\d+)\.(\d+)\.(\d+)(?:[.\-](.+))?$', v.strip())
+        if not m:
+            return (0, 0, 0, v)
+        return (int(m.group(1)), int(m.group(2)), int(m.group(3)), m.group(4) or '')
+
+    pa, pb = _parse(a), _parse(b)
+    if pa[:3] < pb[:3]:
+        return -1
+    if pa[:3] > pb[:3]:
+        return 1
+    # Same numeric version — pre-release < release
+    a_pre, b_pre = pa[3], pb[3]
+    if a_pre == b_pre:
+        return 0
+    if not a_pre:   # a is release, b is pre-release → a is newer
+        return 1
+    if not b_pre:   # b is release, a is pre-release → a is older
+        return -1
+    return (-1 if a_pre < b_pre else 1)
+
+
 class JsonSerializable(ABC):
     _js_exclude_fields: ClassVar[list[str]] = []
 

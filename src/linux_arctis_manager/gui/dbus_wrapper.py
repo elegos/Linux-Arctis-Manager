@@ -92,6 +92,26 @@ class DbusWrapper(QObject):
         except Exception as e:
             self.logger.warning('request_status failed: %s', e)
 
+    @staticmethod
+    def request_service_version(qt_signal: SignalInstance) -> None:
+        async def _call():
+            try:
+                bus = await MessageBus().connect()
+                reply = await bus.call(Message(
+                    destination=DBUS_BUS_NAME,
+                    path=DBUS_SETTINGS_OBJECT_PATH,
+                    interface=DBUS_SETTINGS_INTERFACE_NAME,
+                    member='GetVersion',
+                    message_type=MessageType.METHOD_CALL,
+                    signature='',
+                    body=[],
+                ))
+                if reply is not None and reply.message_type != MessageType.ERROR:
+                    qt_signal.emit(reply.body[0])
+            except Exception as e:
+                DbusWrapper.logger.warning('GetVersion failed: %s', e)
+        Thread(target=lambda: asyncio.run(_call())).start()
+
     def request_settings(self) -> None:
         request_thread = Thread(target=lambda: asyncio.run(self._request_settings_async()))
         request_thread.start()
