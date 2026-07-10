@@ -27,6 +27,7 @@ class EQPreset:
     mode: EQMode = 'simple'
     description: str = ''
     bands: list[EQBand] = field(default_factory=list)
+    builtin: bool = field(default=False, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         if not self.bands:
@@ -79,13 +80,30 @@ class EQPreset:
         return cls(name=name, mode=mode)
 
 
+def _b(name: str, gains: list[float], description: str = '') -> EQPreset:
+    """Shorthand for defining a builtin simple-mode preset."""
+    bands = [EQBand(frequency=f, gain=g) for f, g in zip(SIMPLE_BAND_FREQUENCIES, gains)]
+    return EQPreset(name=name, mode='simple', description=description, bands=bands, builtin=True)
+
+
+BUILTIN_PRESETS: list[EQPreset] = [
+    _b('Rock',         [4.0,  3.0,  2.0,  1.0, -1.0, -1.0,  0.0,  2.0,  3.0,  4.0]),
+    _b('Pop',          [2.0,  2.5,  1.5,  0.5,  0.0,  0.5,  2.0,  2.5,  2.0,  1.5]),
+    _b('Classical',    [0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  2.0,  3.5]),
+    _b('Jazz',         [2.0,  3.0,  2.0,  1.0,  0.0,  0.5,  1.0,  1.5,  2.0,  1.0]),
+    _b('Bass Boost',   [7.0,  6.0,  5.0,  3.0,  1.0,  0.0,  0.0,  0.0,  0.0,  0.0]),
+    _b('Treble Boost', [0.0,  0.0,  0.0,  0.0,  0.0,  1.0,  2.5,  4.0,  5.5,  6.0]),
+    _b('Vocal Boost',  [-2.0, -1.5, -0.5,  1.0,  2.5,  3.5,  3.5,  2.5,  1.0,  0.0]),
+    _b('Gaming',       [-2.0, -1.5,  0.0,  1.5,  2.0,  2.5,  2.5,  2.0,  1.0,  0.0]),
+]
+
+
 def list_presets() -> list[EQPreset]:
-    if not EQ_PRESETS_FOLDER.exists():
-        return []
-    presets = []
-    for f in sorted(EQ_PRESETS_FOLDER.glob('*.yaml')):
-        try:
-            presets.append(EQPreset.load(f))
-        except Exception:
-            pass
-    return presets
+    result: list[EQPreset] = list(BUILTIN_PRESETS)
+    if EQ_PRESETS_FOLDER.exists():
+        for f in sorted(EQ_PRESETS_FOLDER.glob('*.yaml')):
+            try:
+                result.append(EQPreset.load(f))
+            except Exception:
+                pass
+    return result

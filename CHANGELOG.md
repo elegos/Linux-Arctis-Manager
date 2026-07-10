@@ -9,10 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Added
 
-- Software EQ via PulseAudio LADSPA (`mbeq_1197` from `swh-plugins`): per-channel (media and chat) equaliser with simple (10-band) and advanced (15-band) modes. EQ is non-fatal — if the plugin is unavailable, the application logs a warning and continues without EQ.
-- Per-application EQ overrides: route a specific stream, executable, or Steam game to a custom EQ preset on a chosen channel. Steam library detection reads `libraryfolders.vdf` via the optional `vdf` dependency.
+- Software EQ via PulseAudio LADSPA (`mbeq_1197` from `swh-plugins`): per-channel (media and chat) equaliser with simple (10-band) and advanced (15-band) modes, ±12 dB gain range per band.
 - EQ presets saved as YAML in `~/.config/arctis_manager/eq_presets/`. EQ settings (enabled, mode, preset, per-app rules) saved in `~/.config/arctis_manager/eq_settings.yaml`.
+- Per-application EQ overrides: route a specific running application, executable, or Steam game to a custom EQ preset on a chosen channel. The "Add override" dialog shows currently registered audio clients (including paused apps) for stream matching, a file browser for executable selection, and deduplicates Steam games that appear across multiple library folders.
+- EQ curve widget: double-clicking a band dot resets its gain to 0 dB (editable presets only).
+- LADSPA plugin availability check: if `mbeq_1197` is not installed, the EQ panel shows a warning banner with per-distro install instructions and a Retry button; all EQ controls are disabled until the plugin is detected.
+- GUI daemon availability check on startup: if the background service is not running and `--no-enforce-systemd` is not set, the GUI silently enables and starts the systemd unit before opening; if `--no-enforce-systemd` is set and the daemon is offline, an error dialog is shown and the application exits cleanly.
 - New dependency: `vdf>=3.4` (optional at runtime — Steam game matching is skipped gracefully if not installed).
+
+## Fixed
+
+- Switching EQ presets no longer interrupts audio playback in apps such as Spotify. Previously, unloading the LADSPA module broadcast a PipeWire sink-removal event to all clients, causing them to reset their streams. LADSPA modules are now accumulated and kept idle for the session lifetime, cleaned up only on headset disconnect.
 
 ## Changed
 

@@ -127,6 +127,10 @@ class EQAppOverride:
     channel: str = 'media'
 
 
+import logging as _logging
+_eq_log = _logging.getLogger('EQSettings')
+
+
 class EQSettings:
     media: ChannelEQSettings
     chat: ChannelEQSettings
@@ -170,11 +174,13 @@ class EQSettings:
     def load(cls) -> EQSettings:
         instance = cls()
         if not EQ_SETTINGS_FILE.exists():
+            _eq_log.debug('EQ settings file not found (%s) — using defaults', EQ_SETTINGS_FILE)
             return instance
         try:
             yaml = YAML(typ='safe')
             data = yaml.load(EQ_SETTINGS_FILE)
             if not data:
+                _eq_log.warning('EQ settings file is empty')
                 return instance
             for channel in ('media', 'chat'):
                 ch = data.get(channel, {})
@@ -184,7 +190,12 @@ class EQSettings:
                     preset_name=ch.get('preset_name'),
                 )
                 setattr(instance, channel, cfg)
-            for o in data.get('app_overrides', []):
+                _eq_log.debug(
+                    'Loaded EQ [%s]: enabled=%s  mode=%s  preset=%r',
+                    channel, cfg.enabled, cfg.mode, cfg.preset_name,
+                )
+            overrides = data.get('app_overrides', [])
+            for o in overrides:
                 instance.app_overrides.append(EQAppOverride(
                     matcher_type=o.get('matcher_type', 'stream'),
                     value=o.get('value', ''),
@@ -193,8 +204,9 @@ class EQSettings:
                     preset_name=o.get('preset_name', 'flat'),
                     channel=o.get('channel', 'media'),
                 ))
-        except Exception:
-            pass
+            _eq_log.debug('Loaded %d app override(s)', len(overrides))
+        except Exception as exc:
+            _eq_log.error('Failed to parse EQ settings: %s', exc)
         return instance
 
     def to_eq_config(self) -> EQConfig:
@@ -203,23 +215,36 @@ class EQSettings:
         from linux_arctis_manager.app_matcher import AppEQOverride, AppMatcher
 
         presets_by_name = {p.name: p for p in list_presets()}
+        _eq_log.debug('Available presets: %s', list(presets_by_name.keys()))
 
-        def resolve_preset(ch: ChannelEQSettings) -> EQPreset | None:
+        def resolve_preset(ch: ChannelEQSettings, channel: str) -> EQPreset | None:
             if not ch.enabled:
+                _eq_log.debug('to_eq_config [%s]: EQ disabled', channel)
                 return None
             if ch.preset_name and ch.preset_name in presets_by_name:
-                return presets_by_name[ch.preset_name]
+                preset = presets_by_name[ch.preset_name]
+                controls = preset.to_ladspa_controls()
+                _eq_log.info(
+                    'Applying EQ [%s]: preset=%r  mode=%s  gains=%s',
+                    channel, preset.name, preset.mode,
+                    ' '.join(f'{v:+.1f}' for v in controls),
+                )
+                return preset
+            _eq_log.warning(
+                'EQ [%s]: preset_name=%r not found — falling back to flat',
+                channel, ch.preset_name,
+            )
             return EQPreset.flat(mode=ch.mode)  # type: ignore[arg-type]
 
         media_cfg = ChannelEQConfig(
             enabled=self.media.enabled,
             mode=self.media.mode,  # type: ignore[arg-type]
-            preset=resolve_preset(self.media),
+            preset=resolve_preset(self.media, 'media'),
         )
         chat_cfg = ChannelEQConfig(
             enabled=self.chat.enabled,
             mode=self.chat.mode,  # type: ignore[arg-type]
-            preset=resolve_preset(self.chat),
+            preset=resolve_preset(self.chat, 'chat'),
         )
 
         overrides = []
