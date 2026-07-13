@@ -2,11 +2,11 @@ import logging
 import threading
 from typing import Literal
 
-from PySide6.QtCore import Qt, Signal, Slot
+from PySide6.QtCore import Qt, QSize, Signal, Slot
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QListWidget,
-                               QListWidgetItem, QMessageBox, QVBoxLayout,
-                               QWidget)
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QHBoxLayout, QLabel,
+                               QMessageBox, QSizePolicy, QToolButton,
+                               QVBoxLayout, QWidget)
 
 from linux_arctis_manager.constants import SYSTEMD_SERVICE_NAME
 from linux_arctis_manager.gui.base_app import QBaseDesktopApp
@@ -25,7 +25,8 @@ class QMainApp(QBaseDesktopApp):
     app: QApplication
     main_window: QMainAppProtoWidget
 
-    side_panel: QListWidget
+    side_panel: QWidget
+    _nav_buttons: dict[str, QToolButton]
     main_panel: QWidget
     status_widget: QStatusWidget
 
@@ -117,21 +118,58 @@ class QMainApp(QBaseDesktopApp):
         window.resize(min(960, available_geometry.width()), min(600, available_geometry.height()))
 
         # SIDE PANEL
-        self.side_panel = QListWidget()
-        self.side_panel_items = [
-            ('status',  I18n.get_instance().translate('ui', 'status')),
-            ('general', I18n.get_instance().translate('ui', 'general')),
-            ('device',  I18n.get_instance().translate('ui', 'device')),
-            ('eq',      I18n.get_instance().translate('ui', 'eq')),
-            ('nc',      I18n.get_instance().translate('ui', 'nc')),
+        self.side_panel = QWidget()
+        side_layout = QVBoxLayout()
+        side_layout.setContentsMargins(4, 4, 4, 4)
+        side_layout.setSpacing(2)
+        self.side_panel.setLayout(side_layout)
+
+        self._nav_buttons: dict[str, QToolButton] = {}
+        btn_group = QButtonGroup(self.side_panel)
+        btn_group.setExclusive(True)
+
+        # (key, label, primary icon, fallback icon)
+        nav_items = [
+            ('status',  I18n.get_instance().translate('ui', 'status'),  'audio-headset',          'computer'),
+            ('general', I18n.get_instance().translate('ui', 'general'), 'preferences-system',     'configure'),
+            ('device',  I18n.get_instance().translate('ui', 'device'),  'input-gaming',           'audio-headset'),
+            ('eq',      I18n.get_instance().translate('ui', 'eq'),      'multimedia-equalizer',   'audio-card'),
+            ('nc',      I18n.get_instance().translate('ui', 'nc'),      'audio-input-microphone', 'microphone'),
         ]
 
-        for value, text in self.side_panel_items:
-            item = QListWidgetItem(text)
-            item.setData(Qt.ItemDataRole.UserRole, value)
-            self.side_panel.addItem(item)
-        self.side_panel.setFixedWidth(max(self.side_panel.sizeHintForColumn(0), 200))
-        self.side_panel.itemClicked.connect(lambda item: self.switch_panel(item.data(Qt.ItemDataRole.UserRole)))
+        for key, label, icon_primary, icon_fallback in nav_items:
+            btn = QToolButton()
+            btn.setText(label)
+            btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+            btn.setIconSize(QSize(36, 36))
+            btn.setCheckable(True)
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            btn.setStyleSheet("""
+                QToolButton {
+                    border: none;
+                    border-radius: 8px;
+                    padding: 10px 4px 6px 4px;
+                    font-size: 11px;
+                }
+                QToolButton:checked {
+                    background-color: palette(highlight);
+                    color: palette(highlighted-text);
+                }
+                QToolButton:hover:!checked {
+                    background-color: palette(midlight);
+                }
+            """)
+            icon = QIcon.fromTheme(icon_primary)
+            if icon.isNull():
+                icon = QIcon.fromTheme(icon_fallback)
+            btn.setIcon(icon)
+            btn.clicked.connect(lambda checked, k=key: self.switch_panel(k))
+            btn_group.addButton(btn)
+            side_layout.addWidget(btn)
+            self._nav_buttons[key] = btn
+
+        side_layout.addStretch()
+        self.side_panel.setFixedWidth(110)
         main_layout.addWidget(self.side_panel)
 
         # MAIN PANEL
@@ -163,6 +201,9 @@ class QMainApp(QBaseDesktopApp):
                 widget.show()
             else:
                 widget.hide()
+
+        if panel in self._nav_buttons:
+            self._nav_buttons[panel].setChecked(True)
     
     @Slot(str)
     def _on_service_version(self, service_version: str) -> None:
