@@ -42,6 +42,7 @@ class CoreEngine:
     chat_mix: int
     eq_manager: Any | None = None
     nc_manager: Any | None = None
+    vc_manager: Any | None = None
 
     device_status_observers: list[Callable[[dict[str, int]], None]]
     device_settings_observers: list[Callable[[DeviceSettings], None]]
@@ -313,6 +314,13 @@ class CoreEngine:
         if self.nc_manager is None:
             self.nc_manager = NCManager()
         self.nc_manager.apply(nc_config)
+
+    def reapply_vc(self) -> None:
+        from linux_arctis_manager.voice_changer.manager import VoiceChangerManager
+        from linux_arctis_manager.voice_changer.settings import VCSettings
+        if self.vc_manager is None:
+            self.vc_manager = VoiceChangerManager()
+        self.vc_manager.apply(VCSettings.load())
 
     def reload_device_configurations(self) -> None:
         self.device_configurations = load_device_configurations()
@@ -613,6 +621,9 @@ class CoreEngine:
         self.send_command([self.device_config.status.request], endpoint, self.device_config.command_interface_index[1])
 
     def teardown(self) -> None:
+        if self.vc_manager:
+            self.vc_manager.teardown()
+            self.vc_manager = None
         if self.nc_manager:
             self.nc_manager.teardown()
             self.nc_manager = None

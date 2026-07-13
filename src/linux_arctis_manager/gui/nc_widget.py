@@ -63,7 +63,7 @@ class QNCWidget(QWidget):
     sig_nc_settings      = Signal(object)
     _sig_sources_loaded  = Signal(object)   # internal: fired from background thread
 
-    def __init__(self, parent: QWidget) -> None:
+    def __init__(self, parent: QWidget, show_title: bool = True) -> None:
         super().__init__(parent)
 
         self._sources: list[dict] = []
@@ -85,13 +85,13 @@ class QNCWidget(QWidget):
         outer.setContentsMargins(0, 0, 0, 4)
         self.setLayout(outer)
 
-        # Title
-        title = QLabel(I18n.translate('ui', 'nc_title'))
-        font = title.font()
-        font.setBold(True)
-        font.setPointSize(16)
-        title.setFont(font)
-        outer.addWidget(title)
+        if show_title:
+            title = QLabel(I18n.translate('ui', 'nc_title'))
+            font = title.font()
+            font.setBold(True)
+            font.setPointSize(16)
+            title.setFont(font)
+            outer.addWidget(title)
 
         # ── RNNoise unavailable banner ─────────────────────────────────
         self._rnnoise_frame = QFrame()
