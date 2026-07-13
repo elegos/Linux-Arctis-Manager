@@ -301,6 +301,8 @@ _SLIDER_AREA_HEIGHT = 150   # height of the band-column area (px)
 
 
 class QEQBandsView(QWidget):
+    band_changed = Signal()   # any band gain changed (slider or curve drag)
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._columns: list[QBandColumn] = []
@@ -340,6 +342,7 @@ class QEQBandsView(QWidget):
             col._slider.setValue(int(round(gain_db * 10)))
             col._val_label.setText(_fmt_gain(int(round(gain_db * 10))) + ' dB')
             col._slider.blockSignals(False)
+            self.band_changed.emit()
 
     def set_bands(self, bands: list[dict], disabled: bool = False) -> None:
         # Clear old columns
@@ -352,6 +355,7 @@ class QEQBandsView(QWidget):
         for band in bands:
             col = QBandColumn(int(band['frequency']), float(band.get('gain', 0.0)), disabled)
             col.gain_changed.connect(self._refresh_curve)
+            col.gain_changed.connect(self.band_changed)
             self._cols_layout.addWidget(col)
             self._columns.append(col)
 
@@ -545,14 +549,15 @@ class QChannelSection(QGroupBox):
         self._new_btn.clicked.connect(self._new_preset)
         pr.addWidget(self._new_btn)
 
-        self._save_btn = QPushButton(I18n.translate('ui', 'eq_save_preset'))
-        self._save_btn.clicked.connect(self._save_preset)
-        pr.addWidget(self._save_btn)
-
         self._delete_btn = QPushButton(I18n.translate('ui', 'eq_delete_preset'))
         self._delete_btn.clicked.connect(self._delete_preset)
         pr.addWidget(self._delete_btn)
         layout.addLayout(pr)
+
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setSingleShot(True)
+        self._autosave_timer.setInterval(500)
+        self._autosave_timer.timeout.connect(self._save_preset)
 
         # Read-only hint label (shown for builtin presets)
         self._builtin_hint = QLabel(I18n.translate('ui', 'eq_builtin_hint'))
@@ -561,6 +566,7 @@ class QChannelSection(QGroupBox):
 
         # Band view (curve + vertical sliders)
         self._bands_view = QEQBandsView()
+        self._bands_view.band_changed.connect(self._on_band_changed)
         layout.addWidget(self._bands_view)
 
         # Seed combo with just "Flat"
@@ -641,26 +647,90 @@ class QChannelSection(QGroupBox):
 
         self._load_bands_for_current_preset()
 
+    def _set_mode_silently(self, mode: str) -> None:
+        target_val = 1 if mode == 'advanced' else 0
+        for btn in self._mode_group.buttons:
+            btn.blockSignals(True)
+            btn.setChecked(btn.property('value') == target_val)
+            btn.blockSignals(False)
+
     def _load_bands_for_current_preset(self) -> None:
+        from linux_arctis_manager.eq_preset import EQBand, elevate_bands
         name = self._current_preset_name()
-        if name is not None and name in self._presets:
-            preset = self._presets[name]
-            bands   = preset.get('bands', [])
-            builtin = preset.get('builtin', False)
-            self._bands_view.set_bands(bands, disabled=builtin)
-            self._save_btn.setEnabled(not builtin)
-            self._delete_btn.setEnabled(not builtin)
-            self._builtin_hint.setVisible(builtin)
-        else:
+        if name is None or name not in self._presets:
             self._bands_view.set_bands([])
-            self._save_btn.setEnabled(False)
             self._delete_btn.setEnabled(False)
             self._builtin_hint.setVisible(False)
+            return
+
+        preset  = self._presets[name]
+        bands   = preset.get('bands', [])
+        builtin = preset.get('builtin', False)
+        stored_mode = preset.get('mode', 'simple')
+        ui_mode = self._current_mode()
+
+        # For builtin presets: derive 15-band view from stored 10-band data when advanced is selected
+        if builtin and stored_mode == 'simple' and ui_mode == 'advanced':
+            bands_obj = [EQBand(frequency=b['frequency'], gain=b['gain']) for b in bands]
+            derived = [{'frequency': b.frequency, 'gain': b.gain} for b in elevate_bands(bands_obj)]
+            self._bands_view.set_bands(derived, disabled=True)
+        else:
+            self._bands_view.set_bands(bands, disabled=builtin)
+
+        self._delete_btn.setEnabled(not builtin)
+        self._builtin_hint.setVisible(builtin)
+
+    def _on_band_changed(self) -> None:
+        if self._current_preset_is_builtin() or self._current_preset_name() is None:
+            return
+        self._autosave_timer.start()
 
     def _on_mode_changed(self, _: int) -> None:
-        self._load_bands_for_current_preset()
+        from linux_arctis_manager.eq_preset import EQBand, elevate_bands, downsample_bands
+        selected_mode = self._current_mode()
+        name = self._current_preset_name()
+
+        if name is None or name not in self._presets:
+            self._load_bands_for_current_preset()
+            return
+
+        preset      = self._presets[name]
+        stored_mode = preset.get('mode', 'simple')
+        builtin     = preset.get('builtin', False)
+
+        # Builtin: purely a view change, no conversion needed
+        if builtin or selected_mode == stored_mode:
+            self._load_bands_for_current_preset()
+            return
+
+        bands_raw = preset.get('bands', [])
+        bands_obj = [EQBand(frequency=b['frequency'], gain=b['gain']) for b in bands_raw]
+
+        if selected_mode == 'advanced':
+            # Elevate simple → advanced by interpolating the 5 missing bands
+            new_bands = elevate_bands(bands_obj)
+            self.preset_saved.emit({
+                'name': name,
+                'mode': 'advanced',
+                'description': preset.get('description', ''),
+                'bands': [{'frequency': b.frequency, 'gain': b.gain} for b in new_bands],
+            })
+        else:
+            # Downscale advanced → simple: redistribute extra band gains to neighbors
+            new_bands = downsample_bands(bands_obj)
+            self.preset_saved.emit({
+                'name': name,
+                'mode': 'simple',
+                'description': preset.get('description', ''),
+                'bands': [{'frequency': b.frequency, 'gain': b.gain} for b in new_bands],
+            })
 
     def _on_preset_changed(self, _: int) -> None:
+        # Sync mode toggle to the preset's stored mode
+        name = self._current_preset_name()
+        if name is not None and name in self._presets:
+            stored_mode = self._presets[name].get('mode', 'simple')
+            self._set_mode_silently(stored_mode)
         self._load_bands_for_current_preset()
         # Auto-enable when a real preset is chosen; auto-disable for Flat
         has_preset = self._current_preset_name() is not None
