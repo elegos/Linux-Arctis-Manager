@@ -41,6 +41,7 @@ class CoreEngine:
     media_mix: int
     chat_mix: int
     eq_manager: Any | None = None
+    nc_manager: Any | None = None
 
     device_status_observers: list[Callable[[dict[str, int]], None]]
     device_settings_observers: list[Callable[[DeviceSettings], None]]
@@ -304,6 +305,15 @@ class CoreEngine:
             except Exception as e:
                 self.logger.warning('reapply_eq: redirect loopback for %s: %s', null_sink, e)
 
+    def reapply_nc(self) -> None:
+        from linux_arctis_manager.nc_manager import NCManager
+        from linux_arctis_manager.settings import NCSettings
+        nc_settings = NCSettings.load()
+        nc_config = nc_settings.to_nc_config()
+        if self.nc_manager is None:
+            self.nc_manager = NCManager()
+        self.nc_manager.apply(nc_config)
+
     def reload_device_configurations(self) -> None:
         self.device_configurations = load_device_configurations()
         self.configure_virtual_sinks()
@@ -400,6 +410,9 @@ class CoreEngine:
             chat_output=eq_targets.get('chat'),
         )
         self.eq_manager.start_stream_monitor()
+
+        # Set up software NC (non-fatal: if rnnoise is unavailable we log and continue)
+        self.reapply_nc()
 
         self.redirect_to_media_sink()
     
@@ -600,6 +613,9 @@ class CoreEngine:
         self.send_command([self.device_config.status.request], endpoint, self.device_config.command_interface_index[1])
 
     def teardown(self) -> None:
+        if self.nc_manager:
+            self.nc_manager.teardown()
+            self.nc_manager = None
         if self.eq_manager:
             self.eq_manager.teardown()
             self.eq_manager = None

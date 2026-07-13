@@ -5,9 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [Unreleased] — noise-cancellation
 
-## Added
+### Added
+
+- Noise Cancellation panel (side-menu entry): software microphone noise suppression via a LADSPA plugin chain.
+- Five presets: **Off**, **Light** (HPF + RNNoise), **Standard** (+ noise gate), **Studio** (+ compressor), **Custom** (full manual control). Default: Standard.
+- **Custom** mode exposes gate parameters (threshold, reduction, attack, release) and compressor parameters (threshold, ratio, makeup gain), each with a per-section reset-to-defaults button.
+- Input device selector, defaulting to the detected Arctis microphone source.
+- Runtime plugin detection: missing `ladspa-rnnoise-plugin` disables the whole panel with a banner and per-distro install instructions; missing `swh-plugins` disables only HPF/gate/compressor stages with a separate inline banner. Both banners include a Retry button.
+- D-Bus NC interface stub (`GetNCCapabilities`, `GetNCSettings`, `SetNCSettings`) on `/NC` object path — daemon-side implementation is a separate task.
+
+## [Unreleased] — eq-improvements
+
+### Added
 
 - Software EQ via PulseAudio LADSPA (`mbeq_1197` from `swh-plugins`): per-channel (media and chat) equaliser with simple (10-band) and advanced (15-band) modes, ±12 dB gain range per band.
 - EQ presets saved as YAML in `~/.config/arctis_manager/eq_presets/`. EQ settings (enabled, mode, preset, per-app rules) saved in `~/.config/arctis_manager/eq_settings.yaml`.

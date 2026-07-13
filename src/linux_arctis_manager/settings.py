@@ -259,3 +259,116 @@ class EQSettings:
             overrides.append(AppEQOverride(matcher=matcher, preset_name=preset.name, channel=o.channel))
 
         return EQConfig(media=media_cfg, chat=chat_cfg, app_overrides=overrides)
+
+
+# ── Noise Cancellation settings ────────────────────────────────────────────
+
+NC_SETTINGS_FILE = Path.home() / '.config' / 'arctis_manager' / 'nc_settings.yaml'
+
+import logging as _nc_logging
+_nc_log = _nc_logging.getLogger('NCSettings')
+
+
+class NCSettings:
+    preset:      str
+    source_id:   str
+    hpf_enabled: bool
+    gate_enabled:   bool
+    gate_threshold: int
+    gate_reduction: int
+    gate_attack:    int
+    gate_release:   int
+    comp_enabled:   bool
+    comp_threshold: int
+    comp_ratio:     int   # stored as 10× (1.8 → 18)
+    comp_makeup:    int
+
+    def __init__(self) -> None:
+        self.preset      = 'off'
+        self.source_id   = ''
+        self.hpf_enabled = False
+        self.gate_enabled   = False
+        self.gate_threshold = -42
+        self.gate_reduction = -72
+        self.gate_attack    = 2
+        self.gate_release   = 450
+        self.comp_enabled   = False
+        self.comp_threshold = -18
+        self.comp_ratio     = 18
+        self.comp_makeup    = 4
+
+    def save(self) -> None:
+        NC_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        yaml = YAML()
+        yaml.dump(self._to_dict(), NC_SETTINGS_FILE.open('w'))
+
+    def _to_dict(self) -> dict:
+        return {
+            'preset':    self.preset,
+            'source_id': self.source_id,
+            'hpf_enabled': self.hpf_enabled,
+            'gate': {
+                'enabled':   self.gate_enabled,
+                'threshold': self.gate_threshold,
+                'reduction': self.gate_reduction,
+                'attack':    self.gate_attack,
+                'release':   self.gate_release,
+            },
+            'compressor': {
+                'enabled':   self.comp_enabled,
+                'threshold': self.comp_threshold,
+                'ratio':     self.comp_ratio,
+                'makeup':    self.comp_makeup,
+            },
+        }
+
+    @classmethod
+    def load(cls) -> 'NCSettings':
+        instance = cls()
+        if not NC_SETTINGS_FILE.exists():
+            _nc_log.debug('NC settings file not found — using defaults')
+            return instance
+        try:
+            yaml = YAML(typ='safe')
+            data = yaml.load(NC_SETTINGS_FILE)
+            if not data:
+                return instance
+            instance.preset    = data.get('preset', 'off')
+            instance.source_id = data.get('source_id', '')
+            instance.hpf_enabled = bool(data.get('hpf_enabled', False))
+            g = data.get('gate', {})
+            instance.gate_enabled   = bool(g.get('enabled', False))
+            instance.gate_threshold = int(g.get('threshold', -42))
+            instance.gate_reduction = int(g.get('reduction', -72))
+            instance.gate_attack    = int(g.get('attack', 2))
+            instance.gate_release   = int(g.get('release', 450))
+            c = data.get('compressor', {})
+            instance.comp_enabled   = bool(c.get('enabled', False))
+            instance.comp_threshold = int(c.get('threshold', -18))
+            instance.comp_ratio     = int(c.get('ratio', 18))
+            instance.comp_makeup    = int(c.get('makeup', 4))
+            _nc_log.debug('Loaded NC settings: %s', instance._to_dict())
+        except Exception as exc:
+            _nc_log.error('Failed to parse NC settings: %s', exc)
+        return instance
+
+    def to_nc_config(self) -> 'NCConfig':
+        from linux_arctis_manager.nc_manager import NCConfig, GateConfig, CompressorConfig
+        return NCConfig(
+            preset=self.preset,
+            source_id=self.source_id,
+            hpf_enabled=self.hpf_enabled,
+            gate=GateConfig(
+                enabled=self.gate_enabled,
+                threshold=self.gate_threshold,
+                reduction=self.gate_reduction,
+                attack=self.gate_attack,
+                release=self.gate_release,
+            ),
+            compressor=CompressorConfig(
+                enabled=self.comp_enabled,
+                threshold=self.comp_threshold,
+                ratio=self.comp_ratio,
+                makeup=self.comp_makeup,
+            ),
+        )

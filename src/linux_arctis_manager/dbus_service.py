@@ -12,6 +12,8 @@ from linux_arctis_manager.constants import (DBUS_BUS_NAME,
                                             DBUS_CONFIG_OBJECT_PATH,
                                             DBUS_EQ_INTERFACE_NAME,
                                             DBUS_EQ_OBJECT_PATH,
+                                            DBUS_NC_INTERFACE_NAME,
+                                            DBUS_NC_OBJECT_PATH,
                                             DBUS_SETTINGS_INTERFACE_NAME,
                                             DBUS_SETTINGS_OBJECT_PATH,
                                             DBUS_STATUS_INTERFACE_NAME,
@@ -343,6 +345,72 @@ class ArctisManagerDbusEQService(ServiceInterface):
             return json.dumps([])
 
 
+class ArctisManagerDbusNCService(ServiceInterface):
+    def __init__(self, core: CoreEngine):
+        super().__init__(DBUS_NC_INTERFACE_NAME)
+        self.core_engine = core
+        self.logger = logging.getLogger('ArctisManagerDbusNCService')
+
+    @method('GetNCCapabilities')
+    def get_nc_capabilities(self) -> 's':  # type: ignore
+        from linux_arctis_manager.nc_manager import rnnoise_available, swh_available
+        import pulsectl
+        rnnoise_ok = rnnoise_available()
+        swh_ok = swh_available()
+        if not rnnoise_ok:
+            self.logger.warning('GetNCCapabilities: RNNoise LADSPA plugin not found')
+        if not swh_ok:
+            self.logger.warning('GetNCCapabilities: swh-plugins not found (HPF/gate/compressor unavailable)')
+        try:
+            with pulsectl.Pulse('arctis-nc-caps') as pulse:
+                sources = [
+                    {'id': s.name, 'name': s.description}
+                    for s in pulse.source_list()
+                    if not s.name.endswith('.monitor')
+                ]
+        except Exception as e:
+            self.logger.error('GetNCCapabilities: failed to list sources: %s', e)
+            sources = []
+        return json.dumps({
+            'rnnoise_available': rnnoise_ok,
+            'swh_available': swh_ok,
+            'sources': sources,
+        })
+
+    @method('GetNCSettings')
+    def get_nc_settings(self) -> 's':  # type: ignore
+        from linux_arctis_manager.settings import NCSettings
+        s = NCSettings.load()
+        return json.dumps(s._to_dict())
+
+    @method('SetNCSettings')
+    def set_nc_settings(self, settings_json: 's') -> 'b':  # type: ignore
+        try:
+            from linux_arctis_manager.settings import NCSettings
+            data = json.loads(settings_json)
+            s = NCSettings()
+            s.preset    = data.get('preset', 'off')
+            s.source_id = data.get('source_id', '')
+            s.hpf_enabled = bool(data.get('hpf_enabled', False))
+            g = data.get('gate', {})
+            s.gate_enabled   = bool(g.get('enabled', False))
+            s.gate_threshold = int(g.get('threshold', -42))
+            s.gate_reduction = int(g.get('reduction', -72))
+            s.gate_attack    = int(g.get('attack', 2))
+            s.gate_release   = int(g.get('release', 450))
+            c = data.get('compressor', {})
+            s.comp_enabled   = bool(c.get('enabled', False))
+            s.comp_threshold = int(c.get('threshold', -18))
+            s.comp_ratio     = int(c.get('ratio', 18))
+            s.comp_makeup    = int(c.get('makeup', 4))
+            s.save()
+            self.core_engine.reapply_nc()
+            return True
+        except Exception as e:
+            self.logger.error('SetNCSettings failed: %s', e)
+            return False
+
+
 class DbusManager:
     _instance: 'DbusManager|None' = None
 
@@ -366,10 +434,11 @@ class DbusManager:
 
         bus = await MessageBus().connect()
         for tpl in [
-            (ArctisManagerDbusConfigService, DBUS_CONFIG_OBJECT_PATH),
+            (ArctisManagerDbusConfigService,  DBUS_CONFIG_OBJECT_PATH),
             (ArctisManagerDbusSettingsService, DBUS_SETTINGS_OBJECT_PATH),
-            (ArctisManagerDbusStatusService, DBUS_STATUS_OBJECT_PATH),
-            (ArctisManagerDbusEQService, DBUS_EQ_OBJECT_PATH),
+            (ArctisManagerDbusStatusService,  DBUS_STATUS_OBJECT_PATH),
+            (ArctisManagerDbusEQService,      DBUS_EQ_OBJECT_PATH),
+            (ArctisManagerDbusNCService,      DBUS_NC_OBJECT_PATH),
         ]:
             interface = tpl[0](self.core_engine)
             bus.export(tpl[1], interface)

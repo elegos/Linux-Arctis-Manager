@@ -12,6 +12,7 @@ from linux_arctis_manager.constants import SYSTEMD_SERVICE_NAME
 from linux_arctis_manager.gui.base_app import QBaseDesktopApp
 from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
 from linux_arctis_manager.gui.eq_widget import QEQWidget
+from linux_arctis_manager.gui.nc_widget import QNCWidget
 from linux_arctis_manager.gui.main_app_proto_widget import QMainAppProtoWidget
 from linux_arctis_manager.gui.settings_widget import QSettingsWidget
 from linux_arctis_manager.gui.status_widget import QStatusWidget
@@ -55,12 +56,14 @@ class QMainApp(QBaseDesktopApp):
         self.general_settings_widget = QSettingsWidget(self.main_panel, 'general', 'general')
         self.device_settings_widget = QSettingsWidget(self.main_panel, 'device', 'device')
         self.eq_widget = QEQWidget(self.main_panel)
+        self.nc_widget = QNCWidget(self.main_panel)
 
         self.main_panel_widgets: dict[str, QWidget] = {
             'status': self.status_widget,
             'general': self.general_settings_widget,
             'device': self.device_settings_widget,
             'eq': self.eq_widget,
+            'nc': self.nc_widget,
         }
 
         for widget in self.main_panel_widgets.values():
@@ -116,10 +119,11 @@ class QMainApp(QBaseDesktopApp):
         # SIDE PANEL
         self.side_panel = QListWidget()
         self.side_panel_items = [
-            ('status', I18n.get_instance().translate('ui', 'status')),
+            ('status',  I18n.get_instance().translate('ui', 'status')),
             ('general', I18n.get_instance().translate('ui', 'general')),
-            ('device', I18n.get_instance().translate('ui', 'device')),
-            ('eq', I18n.get_instance().translate('ui', 'eq')),
+            ('device',  I18n.get_instance().translate('ui', 'device')),
+            ('eq',      I18n.get_instance().translate('ui', 'eq')),
+            ('nc',      I18n.get_instance().translate('ui', 'nc')),
         ]
 
         for value, text in self.side_panel_items:
@@ -150,7 +154,7 @@ class QMainApp(QBaseDesktopApp):
 
         return window
     
-    def switch_panel(self, panel: Literal['status', 'general', 'device', 'eq']) -> None:
+    def switch_panel(self, panel: Literal['status', 'general', 'device', 'eq', 'nc']) -> None:
         if not self.main_panel_widgets[panel].isHidden():
             return
 
