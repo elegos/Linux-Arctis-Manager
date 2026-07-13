@@ -2,7 +2,7 @@ import logging
 import threading
 from typing import Literal
 
-from PySide6.QtCore import Qt, QSize, Signal, Slot
+from PySide6.QtCore import QSize, Qt, Signal, Slot
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QHBoxLayout, QLabel,
                                QMessageBox, QSizePolicy, QToolButton,
@@ -12,8 +12,8 @@ from linux_arctis_manager.constants import SYSTEMD_SERVICE_NAME
 from linux_arctis_manager.gui.base_app import QBaseDesktopApp
 from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
 from linux_arctis_manager.gui.eq_widget import QEQWidget
-from linux_arctis_manager.gui.nc_widget import QNCWidget
 from linux_arctis_manager.gui.main_app_proto_widget import QMainAppProtoWidget
+from linux_arctis_manager.gui.nc_widget import QNCWidget
 from linux_arctis_manager.gui.settings_widget import QSettingsWidget
 from linux_arctis_manager.gui.status_widget import QStatusWidget
 from linux_arctis_manager.gui.ui_utils import get_icon_pixmap
@@ -128,16 +128,23 @@ class QMainApp(QBaseDesktopApp):
         btn_group = QButtonGroup(self.side_panel)
         btn_group.setExclusive(True)
 
-        # (key, label, primary icon, fallback icon)
+        # (key, label, icon candidates in priority order)
         nav_items = [
-            ('status',  I18n.get_instance().translate('ui', 'status'),  'audio-headset',          'computer'),
-            ('general', I18n.get_instance().translate('ui', 'general'), 'preferences-system',     'configure'),
-            ('device',  I18n.get_instance().translate('ui', 'device'),  'input-gaming',           'audio-headset'),
-            ('eq',      I18n.get_instance().translate('ui', 'eq'),      'multimedia-equalizer',   'audio-card'),
-            ('nc',      I18n.get_instance().translate('ui', 'nc'),      'audio-input-microphone', 'microphone'),
+            ('status',  I18n.get_instance().translate('ui', 'status'),  ['dialog-information-symbolic', 'audio-headset', 'computer']),
+            ('general', I18n.get_instance().translate('ui', 'general'), ['itmages-settings', 'preferences-system',     'configure']),
+            ('device',  I18n.get_instance().translate('ui', 'device'),  ['audio-headset-symbolic',  'input-gaming', 'audio-headset']),
+            ('eq',      I18n.get_instance().translate('ui', 'eq'),      ['adjustrgb', 'multimedia-equalizer', 'audio-card']),
+            ('nc',      I18n.get_instance().translate('ui', 'nc'),      ['audio-input-microphone-medium-symbolic', 'audio-input-microphone', 'microphone']),
         ]
 
-        for key, label, icon_primary, icon_fallback in nav_items:
+        def _first_icon(names: list[str]) -> QIcon:
+            for name in names:
+                icon = QIcon.fromTheme(name)
+                if not icon.isNull():
+                    return icon
+            return QIcon()
+
+        for key, label, icon_names in nav_items:
             btn = QToolButton()
             btn.setText(label)
             btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
@@ -159,10 +166,7 @@ class QMainApp(QBaseDesktopApp):
                     background-color: palette(midlight);
                 }
             """)
-            icon = QIcon.fromTheme(icon_primary)
-            if icon.isNull():
-                icon = QIcon.fromTheme(icon_fallback)
-            btn.setIcon(icon)
+            btn.setIcon(_first_icon(icon_names))
             btn.clicked.connect(lambda checked, k=key: self.switch_panel(k))
             btn_group.addButton(btn)
             side_layout.addWidget(btn)
