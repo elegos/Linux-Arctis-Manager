@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Input device selector, defaulting to the detected Arctis microphone source.
 - Runtime plugin detection: missing `ladspa-rnnoise-plugin` disables the whole panel with a banner and per-distro install instructions; missing `swh-plugins` disables only HPF/gate/compressor stages with a separate inline banner. Both banners include a Retry button.
 - D-Bus NC interface stub (`GetNCCapabilities`, `GetNCSettings`, `SetNCSettings`) on `/NC` object path — daemon-side implementation is a separate task.
+- Side navigation replaced with icon buttons (36 px system-theme icons, label underneath) using `QToolButton` with palette-aware highlight on selection and hover.
 
 ## Fixed
 
