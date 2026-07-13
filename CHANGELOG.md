@@ -5,18 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — noise-cancellation
-
-### Added
-
-- Noise Cancellation panel (side-menu entry): software microphone noise suppression via a LADSPA plugin chain.
-- Five presets: **Off**, **Light** (HPF + RNNoise), **Standard** (+ noise gate), **Studio** (+ compressor), **Custom** (full manual control). Default: Standard.
-- **Custom** mode exposes gate parameters (threshold, reduction, attack, release) and compressor parameters (threshold, ratio, makeup gain), each with a per-section reset-to-defaults button.
-- Input device selector, defaulting to the detected Arctis microphone source.
-- Runtime plugin detection: missing `ladspa-rnnoise-plugin` disables the whole panel with a banner and per-distro install instructions; missing `swh-plugins` disables only HPF/gate/compressor stages with a separate inline banner. Both banners include a Retry button.
-- D-Bus NC interface stub (`GetNCCapabilities`, `GetNCSettings`, `SetNCSettings`) on `/NC` object path — daemon-side implementation is a separate task.
-
-## [Unreleased] — eq-improvements
+## [Unreleased]
 
 ### Added
 
@@ -31,6 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - UI footer (bottom-right) shows the running UI version. On a version mismatch the footer shows `UI: vX | Service: vY` while the issue is resolved.
 - Automatic service upgrade: if the service version is older than the UI, or if the service does not expose `GetVersion` (pre-feature version), the GUI restarts the service once via systemd, re-writing the unit file so the current binary is used. After restart, the version is re-checked.
 - If the UI is older than the service, a warning dialog prompts the user to restart the application instead.
+- Noise Cancellation panel (side-menu entry): software microphone noise suppression via a LADSPA plugin chain.
+- Five presets: **Off**, **Light** (HPF + RNNoise), **Standard** (+ noise gate), **Studio** (+ compressor), **Custom** (full manual control). Default: Standard.
+- **Custom** mode exposes gate parameters (threshold, reduction, attack, release) and compressor parameters (threshold, ratio, makeup gain), each with a per-section reset-to-defaults button.
+- Input device selector, defaulting to the detected Arctis microphone source.
+- Runtime plugin detection: missing `ladspa-rnnoise-plugin` disables the whole panel with a banner and per-distro install instructions; missing `swh-plugins` disables only HPF/gate/compressor stages with a separate inline banner. Both banners include a Retry button.
+- D-Bus NC interface stub (`GetNCCapabilities`, `GetNCSettings`, `SetNCSettings`) on `/NC` object path — daemon-side implementation is a separate task.
 
 ## Fixed
 
