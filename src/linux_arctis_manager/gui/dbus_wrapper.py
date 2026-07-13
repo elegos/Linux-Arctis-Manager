@@ -18,7 +18,9 @@ from linux_arctis_manager.constants import (DBUS_BUS_NAME,
                                             DBUS_SETTINGS_INTERFACE_NAME,
                                             DBUS_SETTINGS_OBJECT_PATH,
                                             DBUS_STATUS_INTERFACE_NAME,
-                                            DBUS_STATUS_OBJECT_PATH)
+                                            DBUS_STATUS_OBJECT_PATH,
+                                            DBUS_VC_INTERFACE_NAME,
+                                            DBUS_VC_OBJECT_PATH)
 
 
 class DbusWrapper(QObject):
@@ -247,6 +249,42 @@ class DbusWrapper(QObject):
                 qt_signal.emit(result)
         except Exception as e:
             DbusWrapper.logger.warning(f'NC DBus call {member} failed: {e}')
+
+    @staticmethod
+    def request_vc_capabilities(qt_signal: SignalInstance) -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async('GetVCCapabilities', '', [], qt_signal, is_json=True))).start()
+
+    @staticmethod
+    def request_vc_settings(qt_signal: SignalInstance) -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async('GetVCSettings', '', [], qt_signal, is_json=True))).start()
+
+    @staticmethod
+    def set_vc_settings(settings: dict) -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async('SetVCSettings', 's', [json.dumps(settings)]))).start()
+
+    @staticmethod
+    def request_rvc_models(qt_signal: SignalInstance) -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async('GetRVCModels', '', [], qt_signal, is_json=True))).start()
+
+    @staticmethod
+    async def _call_vc_async(member: str, signature: str, body: list,
+                             qt_signal: SignalInstance | None = None, is_json: bool = False) -> None:
+        try:
+            bus = await MessageBus().connect()
+            reply = await bus.call(Message(
+                destination=DBUS_BUS_NAME,
+                path=DBUS_VC_OBJECT_PATH,
+                interface=DBUS_VC_INTERFACE_NAME,
+                member=member,
+                message_type=MessageType.METHOD_CALL,
+                signature=signature,
+                body=body,
+            ))
+            if qt_signal is not None and reply is not None and reply.message_type != MessageType.ERROR:
+                result = json.loads(reply.body[0]) if is_json else reply.body[0]
+                qt_signal.emit(result)
+        except Exception as e:
+            DbusWrapper.logger.warning(f'VC DBus call {member} failed: {e}')
 
     @staticmethod
     def change_setting(name: str, value: int|bool|str) -> None:

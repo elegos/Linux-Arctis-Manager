@@ -13,7 +13,7 @@ from linux_arctis_manager.gui.base_app import QBaseDesktopApp
 from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
 from linux_arctis_manager.gui.eq_widget import QEQWidget
 from linux_arctis_manager.gui.main_app_proto_widget import QMainAppProtoWidget
-from linux_arctis_manager.gui.nc_widget import QNCWidget
+from linux_arctis_manager.gui.mic_widget import QMicWidget
 from linux_arctis_manager.gui.settings_widget import QSettingsWidget
 from linux_arctis_manager.gui.status_widget import QStatusWidget
 from linux_arctis_manager.gui.ui_utils import get_icon_pixmap
@@ -57,14 +57,14 @@ class QMainApp(QBaseDesktopApp):
         self.general_settings_widget = QSettingsWidget(self.main_panel, 'general', 'general')
         self.device_settings_widget = QSettingsWidget(self.main_panel, 'device', 'device')
         self.eq_widget = QEQWidget(self.main_panel)
-        self.nc_widget = QNCWidget(self.main_panel)
+        self.mic_widget = QMicWidget(self.main_panel)
 
         self.main_panel_widgets: dict[str, QWidget] = {
             'status': self.status_widget,
             'general': self.general_settings_widget,
             'device': self.device_settings_widget,
             'eq': self.eq_widget,
-            'nc': self.nc_widget,
+            'mic': self.mic_widget,
         }
 
         for widget in self.main_panel_widgets.values():
@@ -134,7 +134,7 @@ class QMainApp(QBaseDesktopApp):
             ('general', I18n.get_instance().translate('ui', 'general'), ['itmages-settings', 'preferences-system',     'configure']),
             ('device',  I18n.get_instance().translate('ui', 'device'),  ['audio-headset-symbolic',  'input-gaming', 'audio-headset']),
             ('eq',      I18n.get_instance().translate('ui', 'eq'),      ['adjustrgb', 'multimedia-equalizer', 'audio-card']),
-            ('nc',      I18n.get_instance().translate('ui', 'nc'),      ['audio-input-microphone-medium-symbolic', 'audio-input-microphone', 'microphone']),
+            ('mic',     I18n.get_instance().translate('ui', 'mic'),     ['audio-input-microphone-medium-symbolic', 'audio-input-microphone', 'microphone']),
         ]
 
         def _first_icon(names: list[str]) -> QIcon:
@@ -196,7 +196,7 @@ class QMainApp(QBaseDesktopApp):
 
         return window
     
-    def switch_panel(self, panel: Literal['status', 'general', 'device', 'eq', 'nc']) -> None:
+    def switch_panel(self, panel: Literal['status', 'general', 'device', 'eq', 'mic']) -> None:
         if not self.main_panel_widgets[panel].isHidden():
             return
 

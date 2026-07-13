@@ -17,7 +17,9 @@ from linux_arctis_manager.constants import (DBUS_BUS_NAME,
                                             DBUS_SETTINGS_INTERFACE_NAME,
                                             DBUS_SETTINGS_OBJECT_PATH,
                                             DBUS_STATUS_INTERFACE_NAME,
-                                            DBUS_STATUS_OBJECT_PATH)
+                                            DBUS_STATUS_OBJECT_PATH,
+                                            DBUS_VC_INTERFACE_NAME,
+                                            DBUS_VC_OBJECT_PATH)
 from linux_arctis_manager.core import CoreEngine
 from linux_arctis_manager.pactl import TypedPulseSinkInfo
 from linux_arctis_manager.settings import DeviceSettings, GeneralSettings
@@ -411,6 +413,113 @@ class ArctisManagerDbusNCService(ServiceInterface):
             return False
 
 
+class ArctisManagerDbusVCService(ServiceInterface):
+    def __init__(self, core: CoreEngine):
+        super().__init__(DBUS_VC_INTERFACE_NAME)
+        self.core_engine = core
+        self.logger = logging.getLogger('ArctisManagerDbusVCService')
+
+    @method('GetVCCapabilities')
+    def get_vc_capabilities(self) -> 's':  # type: ignore
+        import pulsectl
+        from linux_arctis_manager.voice_changer.ladspa.effects import capabilities as ladspa_caps
+        from linux_arctis_manager.voice_changer.rvc.registry import BackendRegistry
+        from linux_arctis_manager.voice_changer.rvc.model_manager import RVCModelManager
+
+        ladspa = ladspa_caps()
+        rvc_backends = BackendRegistry.available_backends()
+        rvc_models = [
+            {'name': m.name, 'path': str(m.path)}
+            for m in RVCModelManager.list_models()
+        ]
+
+        try:
+            with pulsectl.Pulse('arctis-vc-caps') as pulse:
+                sources = [
+                    {'id': s.name, 'name': s.description}
+                    for s in pulse.source_list()
+                    if not s.name.endswith('.monitor')
+                ]
+        except Exception as e:
+            self.logger.error('GetVCCapabilities: failed to list sources: %s', e)
+            sources = []
+
+        return json.dumps({
+            'sources': sources,
+            'ladspa': ladspa,
+            'rvc': {
+                'available': bool(rvc_backends),
+                'backends':  rvc_backends,
+                'models':    rvc_models,
+                'models_folder': str(RVCModelManager.models_folder()),
+            },
+        })
+
+    @method('GetVCSettings')
+    def get_vc_settings(self) -> 's':  # type: ignore
+        from linux_arctis_manager.voice_changer.settings import VCSettings
+        return json.dumps(VCSettings.load()._to_dict())
+
+    @method('SetVCSettings')
+    def set_vc_settings(self, settings_json: 's') -> 'b':  # type: ignore
+        try:
+            from linux_arctis_manager.voice_changer.settings import VCSettings
+            data = json.loads(settings_json)
+            s = VCSettings()
+            s.enabled   = bool(data.get('enabled', False))
+            s.mode      = str(data.get('mode', 'ladspa'))
+            s.source_id = str(data.get('source_id', ''))
+
+            p = data.get('pitch', {})
+            s.pitch_enabled   = bool(p.get('enabled', False))
+            s.pitch_semitones = float(p.get('semitones', 0.0))
+
+            c = data.get('chorus', {})
+            s.chorus_enabled    = bool(c.get('enabled', False))
+            s.chorus_voices     = int(c.get('voices', 3))
+            s.chorus_delay_ms   = float(c.get('delay_ms', 20.0))
+            s.chorus_sep_ms     = float(c.get('sep_ms', 0.5))
+            s.chorus_detune_pct = float(c.get('detune_pct', 1.0))
+            s.chorus_lfo_hz     = float(c.get('lfo_hz', 4.0))
+            s.chorus_atten_db   = float(c.get('atten_db', -3.0))
+
+            d = data.get('delay', {})
+            s.delay_enabled = bool(d.get('enabled', False))
+            s.delay_s       = float(d.get('delay_s', 0.3))
+
+            dist = data.get('distortion', {})
+            s.distortion_enabled   = bool(dist.get('enabled', False))
+            s.distortion_level     = float(dist.get('level', 0.3))
+            s.distortion_character = float(dist.get('character', 0.5))
+
+            r = data.get('reverb', {})
+            s.reverb_enabled    = bool(r.get('enabled', False))
+            s.reverb_roomsize_m = float(r.get('roomsize_m', 30.0))
+            s.reverb_time_s     = float(r.get('time_s', 2.0))
+            s.reverb_damping    = float(r.get('damping', 0.5))
+            s.reverb_bandwidth  = float(r.get('bandwidth', 0.75))
+            s.reverb_dry_db     = float(r.get('dry_db', -3.0))
+            s.reverb_early_db   = float(r.get('early_db', -9.0))
+            s.reverb_tail_db    = float(r.get('tail_db', -12.0))
+
+            rv = data.get('rvc', {})
+            s.rvc_model        = str(rv.get('model', ''))
+            s.rvc_pitch_offset = float(rv.get('pitch_offset', 0.0))
+
+            s.save()
+            self.core_engine.reapply_vc()
+            return True
+        except Exception as e:
+            self.logger.error('SetVCSettings: %s', e)
+            return False
+
+    @method('GetRVCModels')
+    def get_rvc_models(self) -> 's':  # type: ignore
+        from linux_arctis_manager.voice_changer.rvc.model_manager import RVCModelManager
+        models = [{'name': m.name, 'path': str(m.path)} for m in RVCModelManager.list_models()]
+        return json.dumps(models)
+
+
 class DbusManager:
     _instance: 'DbusManager|None' = None
 
@@ -439,6 +548,7 @@ class DbusManager:
             (ArctisManagerDbusStatusService,  DBUS_STATUS_OBJECT_PATH),
             (ArctisManagerDbusEQService,      DBUS_EQ_OBJECT_PATH),
             (ArctisManagerDbusNCService,      DBUS_NC_OBJECT_PATH),
+            (ArctisManagerDbusVCService,      DBUS_VC_OBJECT_PATH),
         ]:
             interface = tpl[0](self.core_engine)
             bus.export(tpl[1], interface)
