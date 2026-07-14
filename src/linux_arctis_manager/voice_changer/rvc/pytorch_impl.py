@@ -9,16 +9,10 @@ logger = logging.getLogger('PyTorchRVCBackend')
 
 
 class PyTorchRVCBackend(RVCBackend):
-    """
-    RVC inference using PyTorch.
-
-    Supports NVIDIA (CUDA) and AMD (ROCm) GPUs via torch.cuda.
-    Requires: pip install torch  (with appropriate CUDA/ROCm index URL)
-    """
+    """RVC inference using PyTorch (CUDA/ROCm GPU required)."""
 
     def __init__(self) -> None:
-        self._model = None
-        self._device = None
+        self._pipeline = None
 
     def name(self) -> str:
         if not self.is_available():
@@ -33,44 +27,26 @@ class PyTorchRVCBackend(RVCBackend):
 
     def is_available(self) -> bool:
         try:
+            import numpy  # noqa: F401
             import torch
             return torch.cuda.is_available()
         except ImportError:
             return False
 
-    def load_model(self, path: Path) -> None:
+    def load_model(self, path: Path, hubert_model: str = 'torchaudio',
+                   vtln_alpha: float = 1.0) -> None:
         import torch
-        self._device = torch.device('cuda')
-        checkpoint = torch.load(path, map_location=self._device)
-        # RVC .pth checkpoints embed the generator config in checkpoint['config']
-        # and the weights in checkpoint['weight'] or as a state_dict directly.
-        # The exact loading depends on the RVC model variant (v1/v2).
-        # We store the raw checkpoint here; subclasses or a model factory should
-        # build the nn.Module from the checkpoint config.
-        self._model = checkpoint
-        logger.info('Loaded RVC model from %s on %s', path, self._device)
+        from linux_arctis_manager.voice_changer.rvc.pipeline import RVCPipeline
+        self._pipeline = RVCPipeline()
+        self._pipeline.load(path, torch.device('cuda'),
+                            hubert_model=hubert_model, vtln_alpha=vtln_alpha)
 
     def unload_model(self) -> None:
-        self._model = None
-        try:
-            import torch
-            torch.cuda.empty_cache()
-        except Exception:
-            pass
-        logger.info('RVC model unloaded')
+        if self._pipeline is not None:
+            self._pipeline.unload()
+            self._pipeline = None
 
     def convert(self, audio: 'np.ndarray', sr: int, pitch_offset: float) -> 'np.ndarray':
-        import numpy as np
-        if self._model is None:
+        if self._pipeline is None:
             return audio
-        # Full RVC inference pipeline:
-        #   1. Resample to 16 kHz if needed
-        #   2. Extract HuBERT content features
-        #   3. Extract F0 pitch with RMVPE / crepe
-        #   4. Shift F0 by pitch_offset semitones
-        #   5. Run VITS/SoVITS generator
-        #   6. Resample back to sr
-        # This requires the HuBERT and RMVPE models to be loaded separately.
-        # Returning passthrough until full RVC models are available.
-        logger.debug('RVC convert: passthrough (full model integration pending)')
-        return audio
+        return self._pipeline.convert(audio, sr, pitch_offset)

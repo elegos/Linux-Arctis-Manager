@@ -132,9 +132,9 @@ class NCManager:
     def __init__(self) -> None:
         self._pulse: pulsectl.Pulse | None = None
         self._chain_modules: list[int] = []     # LADSPA source modules
-        self._loopback_module: int | None = None
-        self._null_sink_module: int | None = None
+        self._virtual_source_module: int | None = None
         self._counter = 0
+        self.output_source: str | None = None   # name of the final chain source; None when inactive
 
     def _pulse_conn(self) -> pulsectl.Pulse:
         if self._pulse is None:
@@ -237,22 +237,16 @@ class NCManager:
                 else:
                     logger.error('NC: compressor stage failed — continuing without it')
 
-        # Null sink + loopback for a stable, fixed virtual source name
-        null_sink_ok = self._ensure_null_sink(pulse)
-        if not null_sink_ok:
-            logger.error('NC apply failed: could not create null sink %r', ARCTIS_NC_SINK)
-            self._teardown_chain()
-            return False
-
-        loopback_ok = self._load_loopback(pulse, current)
-        if not loopback_ok:
-            logger.error('NC apply failed: could not create loopback from %r to %r', current, ARCTIS_NC_SINK)
+        # Wrap the final LADSPA stage in a stable virtual source so apps don't
+        # need to change their mic selection when NC chain settings change.
+        if not self._load_virtual_source(pulse, current):
+            logger.error('NC apply failed: could not create virtual source %r', ARCTIS_NC_MIC)
             self._teardown_chain()
             return False
 
         chain_str = ' → '.join(stages_loaded + [ARCTIS_NC_MIC])
         logger.info('NC chain active: %s', chain_str)
-        logger.info('NC virtual source ready: apps should select "%s"', ARCTIS_NC_MIC)
+        self.output_source = ARCTIS_NC_MIC
         return True
 
     def teardown(self) -> None:
@@ -284,48 +278,39 @@ class NCManager:
             logger.error('Failed to load NC LADSPA source %r [%s/%s]: %s', name, plugin, label, e)
             return False
 
-    def _ensure_null_sink(self, pulse: pulsectl.Pulse) -> bool:
-        try:
-            sinks = pulse.sink_list()
-            existing = next(
-                (s for s in sinks if s.proplist.get('node.name', '') == ARCTIS_NC_SINK
-                 or s.name == ARCTIS_NC_SINK),
-                None,
-            )
-            if existing:
-                logger.debug('NC null sink %r already exists', ARCTIS_NC_SINK)
+    def _load_virtual_source(self, pulse: pulsectl.Pulse, master: str) -> bool:
+        for mod_name in ('module-remap-source', 'module-virtual-source'):
+            try:
+                idx = pulse.module_load(
+                    mod_name,
+                    f'source_name={ARCTIS_NC_MIC} '
+                    f'master={master} '
+                    f'source_properties=node.description="{ARCTIS_NC_MIC_DESC}"',
+                )
+                self._virtual_source_module = idx
+                logger.info('NC source %r via %s master=%r (module %d)',
+                            ARCTIS_NC_MIC, mod_name, master, idx)
                 return True
-            idx = pulse.module_load(
-                'module-null-sink',
-                f'sink_name={ARCTIS_NC_SINK} '
-                f'sink_properties=node.description="Arctis NC Output" '
-                f'source_name={ARCTIS_NC_MIC} '
-                f'source_properties=node.description="{ARCTIS_NC_MIC_DESC}"',
-            )
-            self._null_sink_module = idx
-            logger.info('NC null sink %r created (module %d)', ARCTIS_NC_SINK, idx)
-            return True
-        except Exception as e:
-            logger.error('Failed to create NC null sink: %s', e)
-            return False
-
-    def _load_loopback(self, pulse: pulsectl.Pulse, source_name: str) -> bool:
-        try:
-            idx = pulse.module_load(
-                'module-loopback',
-                f'source={source_name} sink={ARCTIS_NC_SINK} latency_msec=1',
-            )
-            self._loopback_module = idx
-            logger.info('NC loopback %r → %r loaded (module %d)', source_name, ARCTIS_NC_SINK, idx)
-            return True
-        except Exception as e:
-            logger.error('Failed to load NC loopback: %s', e)
-            return False
+            except Exception as e:
+                logger.warning('NC %s failed: %s', mod_name, e)
+        logger.error('Failed to create NC virtual source (tried remap-source and virtual-source)')
+        return False
 
     def _teardown_chain(self) -> None:
-        if not self._chain_modules and self._loopback_module is None and self._null_sink_module is None:
+        self.output_source = None
+        if not self._chain_modules and self._virtual_source_module is None:
             return
         pulse = self._pulse_conn()
+
+        if self._virtual_source_module is not None:
+            try:
+                pulse.module_unload(self._virtual_source_module)
+                logger.debug('NC: unloaded virtual source (module %d)', self._virtual_source_module)
+            except Exception as e:
+                logger.warning('NC: failed to unload virtual source %d: %s',
+                               self._virtual_source_module, e)
+            self._virtual_source_module = None
+
         for mod_id in list(reversed(self._chain_modules)):
             try:
                 pulse.module_unload(mod_id)
@@ -333,16 +318,3 @@ class NCManager:
             except Exception as e:
                 logger.warning('NC: failed to unload module %d: %s', mod_id, e)
         self._chain_modules.clear()
-
-        for mod_id, label in [
-            (self._loopback_module, 'loopback'),
-            (self._null_sink_module, 'null sink'),
-        ]:
-            if mod_id is not None:
-                try:
-                    pulse.module_unload(mod_id)
-                    logger.debug('NC: unloaded %s (module %d)', label, mod_id)
-                except Exception as e:
-                    logger.warning('NC: failed to unload %s %d: %s', label, mod_id, e)
-        self._loopback_module = None
-        self._null_sink_module = None

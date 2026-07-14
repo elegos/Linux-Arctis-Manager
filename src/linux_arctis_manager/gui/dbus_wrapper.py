@@ -26,6 +26,10 @@ from linux_arctis_manager.constants import (DBUS_BUS_NAME,
 class DbusWrapper(QObject):
     sig_status = Signal(object)
     sig_settings = Signal(object)
+    sig_ai_progress = Signal(str)
+    sig_ai_complete = Signal(bool, str)
+    sig_download_progress = Signal(str)
+    sig_download_complete = Signal(bool, str, str)  # (success, message, model_name)
 
     logger = logging.getLogger('DbusWrapper')
 
@@ -37,6 +41,9 @@ class DbusWrapper(QObject):
 
         self._status_signal_loop: asyncio.AbstractEventLoop|None = None
         self._stop_status_signal_future: asyncio.Future|None = None
+
+        self._vc_signal_loop: asyncio.AbstractEventLoop|None = None
+        self._stop_vc_signal_future: asyncio.Future|None = None
 
         self._status_iface: ProxyInterface|None = None
 
@@ -64,6 +71,9 @@ class DbusWrapper(QObject):
 
         status_signal_thread = Thread(target=lambda: asyncio.run(self._register_status_dbus_signal()))
         status_signal_thread.start()
+
+        vc_signal_thread = Thread(target=lambda: asyncio.run(self._register_vc_signals()), daemon=True)
+        vc_signal_thread.start()
     
     async def _register_status_dbus_signal(self):
         try:
@@ -78,11 +88,55 @@ class DbusWrapper(QObject):
         except Exception as e:
             self.logger.warning('status signal registration failed: %s', e)
 
+    async def _register_vc_signals(self):
+        try:
+            bus = await MessageBus().connect()
+            introspection = await bus.introspect(DBUS_BUS_NAME, DBUS_VC_OBJECT_PATH)
+            obj = bus.get_proxy_object(DBUS_BUS_NAME, DBUS_VC_OBJECT_PATH, introspection)
+            iface = obj.get_interface(DBUS_VC_INTERFACE_NAME)
+
+            def on_progress(message: str) -> None:
+                self.sig_ai_progress.emit(message)
+
+            def on_complete(result_json: str) -> None:
+                try:
+                    data = json.loads(result_json)
+                    self.sig_ai_complete.emit(data.get('success', False), data.get('message', ''))
+                except Exception:
+                    self.sig_ai_complete.emit(False, result_json)
+
+            def on_dl_progress(message: str) -> None:
+                self.sig_download_progress.emit(message)
+
+            def on_dl_complete(result_json: str) -> None:
+                try:
+                    data = json.loads(result_json)
+                    self.sig_download_complete.emit(
+                        data.get('success', False),
+                        data.get('message', ''),
+                        data.get('name', ''),
+                    )
+                except Exception:
+                    self.sig_download_complete.emit(False, result_json, '')
+
+            iface.on_install_progress(on_progress)    # type: ignore
+            iface.on_install_complete(on_complete)     # type: ignore
+            iface.on_download_progress(on_dl_progress) # type: ignore
+            iface.on_download_complete(on_dl_complete)  # type: ignore
+
+            self._vc_signal_loop = asyncio.get_running_loop()
+            self._stop_vc_signal_future = self._vc_signal_loop.create_future()
+            await self._stop_vc_signal_future
+        except Exception as e:
+            self.logger.warning('VC signal registration failed: %s', e)
+
     def stop(self):
         self.logger.info("Stopping D-Bus wrapper...")
         self._stopping = True
         if self._status_signal_loop and self._stop_status_signal_future:
             self._status_signal_loop.call_soon_threadsafe(self._stop_status_signal_future.set_result, None)
+        if self._vc_signal_loop and self._stop_vc_signal_future:
+            self._vc_signal_loop.call_soon_threadsafe(self._stop_vc_signal_future.set_result, None)
 
     def request_status(self) -> None:
         request_thread = Thread(target=lambda: asyncio.run(self._request_status_async()))
@@ -265,6 +319,44 @@ class DbusWrapper(QObject):
     @staticmethod
     def request_rvc_models(qt_signal: SignalInstance) -> None:
         Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async('GetRVCModels', '', [], qt_signal, is_json=True))).start()
+
+    @staticmethod
+    def detect_gpu(qt_signal: SignalInstance) -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async('DetectGPU', '', [], qt_signal, is_json=True))).start()
+
+    @staticmethod
+    def install_ai_deps(backend: str) -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async('InstallAIDeps', 's', [backend]))).start()
+
+    @staticmethod
+    def search_hf_models(query: str, sort_by: str, qt_signal: SignalInstance) -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async(
+            'SearchHFModels', 'ss', [query, sort_by], qt_signal, is_json=True))).start()
+
+    @staticmethod
+    def list_repo_model_files(repo_id: str, qt_signal: SignalInstance) -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async(
+            'ListRepoFiles', 's', [repo_id], qt_signal, is_json=True))).start()
+
+    @staticmethod
+    def download_hf_model(repo_id: str, filename: str) -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async(
+            'DownloadHFModel', 'ss', [repo_id, filename]))).start()
+
+    @staticmethod
+    def delete_rvc_model(name: str, qt_signal: SignalInstance) -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async(
+            'DeleteRVCModel', 's', [name], qt_signal, is_json=False))).start()
+
+    @staticmethod
+    def get_hf_token(qt_signal: SignalInstance) -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async(
+            'GetHFToken', '', [], qt_signal, is_json=False))).start()
+
+    @staticmethod
+    def set_hf_token(token: str, qt_signal: SignalInstance) -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async(
+            'SetHFToken', 's', [token], qt_signal, is_json=False))).start()
 
     @staticmethod
     async def _call_vc_async(member: str, signature: str, body: list,

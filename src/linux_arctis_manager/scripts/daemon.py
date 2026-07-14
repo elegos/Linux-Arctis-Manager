@@ -88,6 +88,10 @@ async def main_async():
     logger.info(f'-{"v " + project_version():>27}  -')
     logger.info('-------------------------------')
 
+    from linux_arctis_manager.ai_deps import activate_ai_env
+    if activate_ai_env():
+        logger.info('AI environment activated.')
+
     dbus_manager = DbusManager.getInstance()
     core_engine = CoreEngine()
     await dbus_manager.start(core_engine)

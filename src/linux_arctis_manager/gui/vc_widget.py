@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import logging
-import math
 import threading
 
 import pulsectl
+import subprocess
+
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFrame,
-                               QGroupBox, QHBoxLayout, QLabel, QPushButton,
-                               QScrollArea, QSizePolicy, QSlider, QSpinBox,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QGroupBox,
+                               QHBoxLayout, QLabel, QLineEdit, QListWidget,
+                               QListWidgetItem, QMessageBox, QPushButton,
+                               QScrollArea, QSizePolicy, QSlider,
                                QStackedWidget, QVBoxLayout, QWidget)
 
 from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
@@ -71,10 +73,16 @@ def _fval(sl: QSlider, minimum: float, maximum: float) -> float:
 
 
 class QVCWidget(QWidget):
-    sig_vc_capabilities = Signal(object)
-    sig_vc_settings     = Signal(object)
-    sig_rvc_models      = Signal(object)
-    _sig_sources_loaded = Signal(object)
+    sig_vc_capabilities  = Signal(object)
+    sig_vc_settings      = Signal(object)
+    sig_rvc_models       = Signal(object)
+    sig_gpu_detected     = Signal(object)
+    sig_hf_results       = Signal(object)
+    sig_hf_repo_files    = Signal(object)
+    sig_delete_result    = Signal(object)
+    sig_hf_token         = Signal(object)
+    sig_hf_token_saved   = Signal(object)
+    _sig_sources_loaded  = Signal(object)
 
     def __init__(self, parent: QWidget, show_title: bool = True) -> None:
         super().__init__(parent)
@@ -83,10 +91,18 @@ class QVCWidget(QWidget):
         self._loading   = False
         self._ladspa_caps: dict[str, bool] = {}
         self._rvc_caps:    dict = {}
+        self._pending_model_select: str | None = None
+        self._hf_results: list[dict] = []
 
         self.sig_vc_capabilities.connect(self._on_vc_capabilities)
         self.sig_vc_settings.connect(self._on_vc_settings)
         self.sig_rvc_models.connect(self._on_rvc_models)
+        self.sig_gpu_detected.connect(self._on_gpu_detected)
+        self.sig_hf_results.connect(self._on_hf_results)
+        self.sig_hf_repo_files.connect(self._on_hf_repo_files)
+        self.sig_delete_result.connect(self._on_delete_result)
+        self.sig_hf_token.connect(self._on_hf_token_loaded)
+        self.sig_hf_token_saved.connect(self._on_hf_token_saved)
         self._sig_sources_loaded.connect(self._on_sources_loaded)
 
         self._apply_timer = QTimer(self)
@@ -434,42 +450,144 @@ class QVCWidget(QWidget):
         self._rvc_backend_lbl.setWordWrap(True)
         cl.addWidget(self._rvc_backend_lbl)
 
-        # No-backend warning
+        # No-backend warning + install controls
         self._rvc_no_backend_frame = QFrame()
         self._rvc_no_backend_frame.setFrameShape(QFrame.Shape.StyledPanel)
         nb = QVBoxLayout()
         nb.setContentsMargins(10, 8, 10, 8)
+        nb.setSpacing(8)
         self._rvc_no_backend_frame.setLayout(nb)
-        nb.addWidget(QLabel(_T('ui', 'vc_rvc_no_backend')))
+        self._rvc_no_backend_lbl = QLabel(_T('ui', 'vc_rvc_no_backend'))
+        self._rvc_no_backend_lbl.setWordWrap(True)
+        nb.addWidget(self._rvc_no_backend_lbl)
+
+        gpu_row = QHBoxLayout()
+        self._rvc_gpu_lbl = QLabel(_T('ui', 'vc_rvc_gpu_none'))
+        self._rvc_gpu_lbl.setWordWrap(True)
+        gpu_row.addWidget(self._rvc_gpu_lbl, 1)
+        detect_btn = QPushButton(_T('ui', 'vc_rvc_detect_gpu'))
+        detect_btn.clicked.connect(self._detect_gpu)
+        gpu_row.addWidget(detect_btn)
+        nb.addLayout(gpu_row)
+
+        install_row = QHBoxLayout()
+        inst_lbl = QLabel(_T('ui', 'vc_rvc_select_backend'))
+        inst_lbl.setFixedWidth(110)
+        install_row.addWidget(inst_lbl)
+        self._rvc_install_combo = QComboBox()
+        for _key, _i18n in [
+            ('auto',   'vc_rvc_backend_auto'),
+            ('nvidia', 'vc_rvc_backend_nvidia'),
+            ('amd',    'vc_rvc_backend_amd'),
+            ('intel',  'vc_rvc_backend_intel'),
+            ('cpu',    'vc_rvc_backend_cpu'),
+        ]:
+            self._rvc_install_combo.addItem(_T('ui', _i18n), _key)
+        install_row.addWidget(self._rvc_install_combo, 1)
+        self._rvc_install_btn = QPushButton(_T('ui', 'vc_rvc_install_ai'))
+        self._rvc_install_btn.clicked.connect(self._install_ai_deps)
+        install_row.addWidget(self._rvc_install_btn)
+        nb.addLayout(install_row)
+
         self._rvc_no_backend_frame.setVisible(False)
         cl.addWidget(self._rvc_no_backend_frame)
 
-        # Model selector
+        # ── HuBERT encoder ─────────────────────────────────────────────
+        hubert_sep = QLabel('HuBERT encoder')
+        hubert_sep.setStyleSheet('font-weight: bold; margin-top: 6px;')
+        cl.addWidget(hubert_sep)
+
+        hubert_row = QHBoxLayout()
+        hubert_lbl = QLabel('Encoder model')
+        hubert_lbl.setFixedWidth(110)
+        hubert_row.addWidget(hubert_lbl)
+        self._rvc_hubert_combo = QComboBox()
+        self._rvc_hubert_combo.addItem('HuBERT Base (torchaudio)', 'torchaudio')
+        self._rvc_hubert_combo.addItem('ContentVec 500 (speaker-independent)', 'contentvec')
+        self._rvc_hubert_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._rvc_hubert_combo.currentIndexChanged.connect(lambda _: self._apply())
+        hubert_row.addWidget(self._rvc_hubert_combo)
+        cl.addLayout(hubert_row)
+
+        hubert_hint = QLabel(
+            'Try ContentVec if words sound garbled — some models were trained with it.'
+        )
+        hubert_hint.setStyleSheet('font-size: 10px; color: gray;')
+        hubert_hint.setWordWrap(True)
+        cl.addWidget(hubert_hint)
+
+        # ── VTLN (vocal tract length normalization) ────────────────────
+        vtln_sep = QLabel('Vocal tract length normalization (VTLN)')
+        vtln_sep.setStyleSheet('font-weight: bold; margin-top: 6px;')
+        cl.addWidget(vtln_sep)
+
+        vtln_row = QHBoxLayout()
+        vtln_alpha_lbl = QLabel('Warp α')
+        vtln_alpha_lbl.setFixedWidth(50)
+        vtln_alpha_lbl.setToolTip(
+            'Shifts formant frequencies in the HuBERT input so the model\n'
+            'hears your voice as if from a shorter vocal tract (higher formants).\n'
+            'Use when your voice is male and the model was trained on female audio.\n'
+            'Pitch is unaffected — only the model\'s content features change.\n'
+            '1.00 = disabled (no shift).'
+        )
+        vtln_row.addWidget(vtln_alpha_lbl)
+        self._rvc_vtln_sl = QSlider(Qt.Orientation.Horizontal)
+        self._rvc_vtln_sl.setMinimum(65)   # 0.65 (strong upshift)
+        self._rvc_vtln_sl.setMaximum(100)  # 1.00 (no change)
+        self._rvc_vtln_sl.setValue(100)    # default 1.00 = off
+        self._rvc_vtln_sl.setFixedWidth(120)
+        self._rvc_vtln_lbl = QLabel('1.00')
+        self._rvc_vtln_lbl.setFixedWidth(32)
+        self._rvc_vtln_sl.valueChanged.connect(
+            lambda v: (self._rvc_vtln_lbl.setText(f'{v/100:.2f}'),
+                       self._apply_timer.start()))
+        vtln_row.addWidget(self._rvc_vtln_sl)
+        vtln_row.addWidget(self._rvc_vtln_lbl)
+        vtln_row.addStretch()
+        cl.addLayout(vtln_row)
+
+        vtln_hint = QLabel(
+            'α < 1.0 = formants shift up (male→female). '
+            'Try 0.80 as a starting point; lower values = stronger shift. '
+            '1.00 = off.'
+        )
+        vtln_hint.setStyleSheet('font-size: 10px; color: gray;')
+        vtln_hint.setWordWrap(True)
+        cl.addWidget(vtln_hint)
+
+        # ── Local models ───────────────────────────────────────────────
+        local_sep = QLabel(_T('ui', 'vc_rvc_local_models'))
+        local_sep.setStyleSheet('font-weight: bold; margin-top: 6px;')
+        cl.addWidget(local_sep)
+
         model_row = QHBoxLayout()
         model_lbl = QLabel(_T('ui', 'vc_rvc_model'))
-        model_lbl.setFixedWidth(110)
+        model_lbl.setFixedWidth(80)
         model_row.addWidget(model_lbl)
         self._rvc_model_combo = QComboBox()
         self._rvc_model_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._rvc_model_combo.currentIndexChanged.connect(lambda _: self._apply())
         model_row.addWidget(self._rvc_model_combo)
         refresh_btn = QPushButton('↻')
-        refresh_btn.setFixedWidth(30)
-        refresh_btn.setToolTip('Refresh model list')
-        refresh_btn.clicked.connect(lambda: DbusWrapper.request_rvc_models(self.sig_rvc_models))
+        refresh_btn.setFixedWidth(28)
+        refresh_btn.setToolTip(_T('ui', 'vc_rvc_refresh_models'))
+        refresh_btn.clicked.connect(self.refresh_models)
         model_row.addWidget(refresh_btn)
+        self._rvc_delete_btn = QPushButton(_T('ui', 'vc_rvc_delete_model'))
+        self._rvc_delete_btn.setEnabled(False)
+        self._rvc_delete_btn.clicked.connect(self._delete_model)
+        model_row.addWidget(self._rvc_delete_btn)
         cl.addLayout(model_row)
 
-        # No-models hint
         self._rvc_no_models_lbl = QLabel()
         self._rvc_no_models_lbl.setWordWrap(True)
-        font = self._rvc_no_models_lbl.font()
-        font.setItalic(True)
-        self._rvc_no_models_lbl.setFont(font)
+        _italic_font = self._rvc_no_models_lbl.font()
+        _italic_font.setItalic(True)
+        self._rvc_no_models_lbl.setFont(_italic_font)
         self._rvc_no_models_lbl.setVisible(False)
         cl.addWidget(self._rvc_no_models_lbl)
 
-        # Pitch offset
         row, self._rvc_pitch_sl, self._rvc_pitch_lbl = _slider_row(
             _T('ui', 'vc_rvc_pitch'), -12, 12, 0,
             lambda v: f'{v:+d} st' if v != 0 else '0 st')
@@ -477,6 +595,77 @@ class QVCWidget(QWidget):
             lambda v: (self._rvc_pitch_lbl.setText(f'{v:+d} st' if v != 0 else '0 st'),
                        self._apply_timer.start()))
         cl.addLayout(row)
+
+        open_folder_btn = QPushButton(_T('ui', 'vc_rvc_open_folder'))
+        open_folder_btn.clicked.connect(self._open_models_folder)
+        cl.addWidget(open_folder_btn)
+
+        # ── HuggingFace search ─────────────────────────────────────────
+        hf_sep = QLabel(_T('ui', 'vc_rvc_hf_title'))
+        hf_sep.setStyleSheet('font-weight: bold; margin-top: 10px;')
+        cl.addWidget(hf_sep)
+
+        search_row = QHBoxLayout()
+        self._hf_search_input = QLineEdit()
+        self._hf_search_input.setPlaceholderText(_T('ui', 'vc_rvc_hf_search_placeholder'))
+        self._hf_search_input.returnPressed.connect(self._hf_search)
+        search_row.addWidget(self._hf_search_input, 1)
+        self._hf_sort_combo = QComboBox()
+        self._hf_sort_combo.addItem(_T('ui', 'vc_rvc_hf_sort_trending'), 'trendingScore')
+        self._hf_sort_combo.addItem(_T('ui', 'vc_rvc_hf_sort_downloads'), 'downloads')
+        self._hf_sort_combo.addItem(_T('ui', 'vc_rvc_hf_sort_likes'), 'likes')
+        search_row.addWidget(self._hf_sort_combo)
+        self._hf_search_btn = QPushButton(_T('ui', 'vc_rvc_hf_search_btn'))
+        self._hf_search_btn.clicked.connect(self._hf_search)
+        search_row.addWidget(self._hf_search_btn)
+        cl.addLayout(search_row)
+
+        self._hf_status_lbl = QLabel()
+        self._hf_status_lbl.setVisible(False)
+        cl.addWidget(self._hf_status_lbl)
+
+        self._hf_results_list = QListWidget()
+        self._hf_results_list.setMaximumHeight(160)
+        self._hf_results_list.setVisible(False)
+        self._hf_results_list.currentRowChanged.connect(self._on_hf_result_selected)
+        cl.addWidget(self._hf_results_list)
+
+        dl_row = QHBoxLayout()
+        dl_lbl = QLabel(_T('ui', 'vc_rvc_hf_file'))
+        dl_lbl.setFixedWidth(80)
+        dl_row.addWidget(dl_lbl)
+        self._hf_file_combo = QComboBox()
+        self._hf_file_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._hf_file_combo.setEnabled(False)
+        dl_row.addWidget(self._hf_file_combo, 1)
+        self._hf_download_btn = QPushButton(_T('ui', 'vc_rvc_hf_download'))
+        self._hf_download_btn.setEnabled(False)
+        self._hf_download_btn.clicked.connect(self._hf_download)
+        dl_row.addWidget(self._hf_download_btn)
+        self._dl_row_widget = QWidget()
+        self._dl_row_widget.setLayout(dl_row)
+        self._dl_row_widget.setVisible(False)
+        cl.addWidget(self._dl_row_widget)
+
+        # ── HuggingFace token ──────────────────────────────────────────
+        tok_sep = QLabel(_T('ui', 'vc_rvc_hf_token_section'))
+        tok_sep.setStyleSheet('font-weight: bold; margin-top: 8px;')
+        cl.addWidget(tok_sep)
+
+        tok_row = QHBoxLayout()
+        self._hf_token_input = QLineEdit()
+        self._hf_token_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self._hf_token_input.setPlaceholderText(_T('ui', 'vc_rvc_hf_token_placeholder'))
+        tok_row.addWidget(self._hf_token_input, 1)
+        self._hf_token_save_btn = QPushButton(_T('ui', 'vc_rvc_hf_token_save'))
+        self._hf_token_save_btn.clicked.connect(self._save_hf_token)
+        tok_row.addWidget(self._hf_token_save_btn)
+        cl.addLayout(tok_row)
+
+        self._hf_token_hint = QLabel(_T('ui', 'vc_rvc_hf_token_hint'))
+        self._hf_token_hint.setStyleSheet('font-size: 10px; color: gray;')
+        self._hf_token_hint.setOpenExternalLinks(True)
+        cl.addWidget(self._hf_token_hint)
 
         cl.addStretch()
         return scroll
@@ -491,6 +680,7 @@ class QVCWidget(QWidget):
         threading.Thread(target=self._load_sources_thread, daemon=True).start()
         DbusWrapper.request_vc_capabilities(self.sig_vc_capabilities)
         DbusWrapper.request_vc_settings(self.sig_vc_settings)
+        DbusWrapper.get_hf_token(self.sig_hf_token)
 
     # ── Source loading ─────────────────────────────────────────────────
 
@@ -545,9 +735,18 @@ class QVCWidget(QWidget):
         self._reverb_box.setEnabled(self._ladspa_caps.get('reverb', False))
 
         # RVC panel
-        rvc_avail = bool(self._rvc_caps.get('available', False))
-        backends  = self._rvc_caps.get('backends', [])
+        rvc_avail      = bool(self._rvc_caps.get('available', False))
+        ai_env_exists  = bool(self._rvc_caps.get('ai_env_exists', False))
+        backends       = self._rvc_caps.get('backends', [])
         self._rvc_no_backend_frame.setVisible(not rvc_avail)
+        if not rvc_avail:
+            self._rvc_install_btn.setEnabled(True)
+            if ai_env_exists:
+                self._rvc_no_backend_lbl.setText(_T('ui', 'vc_rvc_ai_incomplete'))
+                self._rvc_install_btn.setText(_T('ui', 'vc_rvc_repair_ai'))
+            else:
+                self._rvc_no_backend_lbl.setText(_T('ui', 'vc_rvc_no_backend'))
+                self._rvc_install_btn.setText(_T('ui', 'vc_rvc_install_ai'))
         self._rvc_backend_lbl.setText(
             _T('ui', 'vc_rvc_backend') + ': ' + (', '.join(backends) if backends else '—')
         )
@@ -560,6 +759,9 @@ class QVCWidget(QWidget):
         if sources and not self._sources:
             self._populate_sources(sources)
 
+    def refresh_models(self) -> None:
+        DbusWrapper.request_rvc_models(self.sig_rvc_models)
+
     def _on_rvc_models(self, models: list) -> None:
         folder = self._rvc_caps.get('models_folder', '')
         self._refresh_rvc_models(models, folder)
@@ -570,15 +772,20 @@ class QVCWidget(QWidget):
         self._rvc_model_combo.clear()
         for m in models:
             self._rvc_model_combo.addItem(m['name'], m['name'])
-        if current:
-            idx = self._rvc_model_combo.findData(current)
+
+        # Honour a post-download pending selection, then fall back to previous selection
+        target = self._pending_model_select or current
+        self._pending_model_select = None
+        if target:
+            idx = self._rvc_model_combo.findData(target)
             if idx >= 0:
                 self._rvc_model_combo.setCurrentIndex(idx)
         self._rvc_model_combo.blockSignals(False)
 
-        no_models = not models
-        self._rvc_no_models_lbl.setVisible(no_models)
-        if no_models and folder:
+        has_models = bool(models)
+        self._rvc_no_models_lbl.setVisible(not has_models)
+        self._rvc_delete_btn.setEnabled(has_models)
+        if not has_models and folder:
             self._rvc_no_models_lbl.setText(_T('ui', 'vc_rvc_no_models') + f'\n{folder}')
 
     def _on_vc_settings(self, settings: dict) -> None:
@@ -658,6 +865,17 @@ class QVCWidget(QWidget):
         self._rvc_pitch_sl.blockSignals(False)
         v = pitch_off
         self._rvc_pitch_lbl.setText(f'{v:+d} st' if v != 0 else '0 st')
+        hubert = str(rv.get('hubert_model', 'torchaudio'))
+        hidx = self._rvc_hubert_combo.findData(hubert)
+        if hidx >= 0:
+            self._rvc_hubert_combo.blockSignals(True)
+            self._rvc_hubert_combo.setCurrentIndex(hidx)
+            self._rvc_hubert_combo.blockSignals(False)
+        vtln_alpha_val = int(round(float(rv.get('vtln_alpha', 1.0)) * 100))
+        self._rvc_vtln_sl.blockSignals(True)
+        self._rvc_vtln_sl.setValue(vtln_alpha_val)
+        self._rvc_vtln_lbl.setText(f'{vtln_alpha_val/100:.2f}')
+        self._rvc_vtln_sl.blockSignals(False)
 
         self._loading = False
         self._update_global_state()
@@ -751,8 +969,152 @@ class QVCWidget(QWidget):
             'rvc': {
                 'model':        self._rvc_model_combo.currentData() or '',
                 'pitch_offset': float(self._rvc_pitch_sl.value()),
+                'hubert_model': self._rvc_hubert_combo.currentData() or 'torchaudio',
+                'vtln_alpha': self._rvc_vtln_sl.value() / 100.0,
             },
         })
+
+    # ── Model management ───────────────────────────────────────────────
+
+    def _delete_model(self) -> None:
+        name = self._rvc_model_combo.currentData()
+        if not name:
+            return
+        reply = QMessageBox.question(
+            self,
+            _T('ui', 'vc_rvc_delete_confirm_title'),
+            _T('ui', 'vc_rvc_delete_confirm_msg').format(name=name),
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            DbusWrapper.delete_rvc_model(name, self.sig_delete_result)
+
+    def _on_delete_result(self, success) -> None:
+        if success:
+            self.refresh_models()
+
+    def _open_models_folder(self) -> None:
+        folder = self._rvc_caps.get('models_folder', '')
+        if folder:
+            subprocess.Popen(['xdg-open', folder])
+
+    # ── HuggingFace search ─────────────────────────────────────────────
+
+    def _hf_search(self) -> None:
+        query   = self._hf_search_input.text().strip()
+        sort_by = self._hf_sort_combo.currentData() or 'downloads'
+        self._hf_search_btn.setEnabled(False)
+        self._hf_status_lbl.setText(_T('ui', 'vc_rvc_hf_searching'))
+        self._hf_status_lbl.setVisible(True)
+        self._hf_results_list.setVisible(False)
+        self._dl_row_widget.setVisible(False)
+        DbusWrapper.search_hf_models(query, sort_by, self.sig_hf_results)
+
+    def _on_hf_results(self, results: list) -> None:
+        self._hf_search_btn.setEnabled(True)
+        self._hf_results = results
+        self._hf_results_list.clear()
+
+        if not results:
+            self._hf_status_lbl.setText(_T('ui', 'vc_rvc_hf_no_results'))
+            self._hf_status_lbl.setVisible(True)
+            self._hf_results_list.setVisible(False)
+            return
+
+        self._hf_status_lbl.setVisible(False)
+        sort_field = self._hf_sort_combo.currentData() or 'trendingScore'
+        for r in results:
+            downloads = r.get('downloads', 0) or 0
+            likes     = r.get('likes', 0) or 0
+            if sort_field == 'downloads':
+                count, suffix = downloads, '↓'
+            elif sort_field == 'likes':
+                count, suffix = likes, '♥'
+            else:
+                count, suffix = downloads, '↓'  # trending: show downloads as context
+            count_str = f'{count:,} {suffix}' if count else ''
+            label = f"{r['repo_id']}   {count_str}"
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, r['repo_id'])
+            self._hf_results_list.addItem(item)
+        self._hf_results_list.setVisible(True)
+
+    def _on_hf_result_selected(self, row: int) -> None:
+        if row < 0 or row >= len(self._hf_results):
+            return
+        repo_id = self._hf_results[row]['repo_id']
+        self._hf_file_combo.clear()
+        self._hf_file_combo.setEnabled(False)
+        self._hf_download_btn.setEnabled(False)
+        self._dl_row_widget.setVisible(True)
+        self._hf_file_combo.addItem(_T('ui', 'vc_rvc_hf_loading_files'))
+        DbusWrapper.list_repo_model_files(repo_id, self.sig_hf_repo_files)
+
+    def _on_hf_repo_files(self, files: list) -> None:
+        self._hf_file_combo.clear()
+        if not files:
+            self._hf_file_combo.addItem(_T('ui', 'vc_rvc_hf_no_model_files'))
+            self._hf_file_combo.setEnabled(False)
+            self._hf_download_btn.setEnabled(False)
+        else:
+            for f in files:
+                self._hf_file_combo.addItem(f)
+            self._hf_file_combo.setEnabled(True)
+            self._hf_download_btn.setEnabled(True)
+
+    def _hf_download(self) -> None:
+        row = self._hf_results_list.currentRow()
+        if row < 0 or row >= len(self._hf_results):
+            return
+        repo_id  = self._hf_results[row]['repo_id']
+        if not self._hf_file_combo.isEnabled():
+            return
+        filename = self._hf_file_combo.currentText()
+        if not filename:
+            return
+        self._hf_download_btn.setEnabled(False)
+        DbusWrapper.download_hf_model(repo_id, filename)
+        # Re-enable button when download completes (sig_download_complete → main_app →
+        # refresh_models, which is enough; but we also re-enable via _on_rvc_models).
+
+    def on_download_done(self) -> None:
+        """Called by main_app after download completes to re-enable the download button."""
+        if self._hf_file_combo.count() and self._hf_file_combo.isEnabled():
+            self._hf_download_btn.setEnabled(True)
+
+    def _save_hf_token(self) -> None:
+        token = self._hf_token_input.text().strip()
+        self._hf_token_save_btn.setEnabled(False)
+        DbusWrapper.set_hf_token(token, self.sig_hf_token_saved)
+
+    def _on_hf_token_loaded(self, token) -> None:
+        if isinstance(token, str) and token:
+            self._hf_token_input.setText(token)
+
+    def _on_hf_token_saved(self, success) -> None:
+        self._hf_token_save_btn.setEnabled(True)
+        if success:
+            self._hf_token_hint.setText(_T('ui', 'vc_rvc_hf_token_saved'))
+            QTimer.singleShot(3000, lambda: self._hf_token_hint.setText(_T('ui', 'vc_rvc_hf_token_hint')))
+
+    def _detect_gpu(self) -> None:
+        self._rvc_gpu_lbl.setText(_T('ui', 'vc_rvc_detecting'))
+        DbusWrapper.detect_gpu(self.sig_gpu_detected)
+
+    def _on_gpu_detected(self, info: dict) -> None:
+        gtype = info.get('type')
+        name  = info.get('name', '')
+        if gtype:
+            self._rvc_gpu_lbl.setText(f"{_T('ui', 'vc_rvc_gpu_detected')} {name or gtype}")
+            idx = self._rvc_install_combo.findData(gtype)
+            if idx >= 0:
+                self._rvc_install_combo.setCurrentIndex(idx)
+        else:
+            self._rvc_gpu_lbl.setText(_T('ui', 'vc_rvc_gpu_none'))
+
+    def _install_ai_deps(self) -> None:
+        backend = self._rvc_install_combo.currentData() or 'auto'
+        self._rvc_install_btn.setEnabled(False)
+        DbusWrapper.install_ai_deps(backend)
 
     def _retry_check(self) -> None:
         DbusWrapper.request_vc_capabilities(self.sig_vc_capabilities)
