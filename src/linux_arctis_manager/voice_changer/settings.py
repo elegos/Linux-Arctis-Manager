@@ -51,6 +51,8 @@ class VCSettings:
     # RVC
     rvc_model:        str
     rvc_pitch_offset: float  # semitones
+    rvc_hubert_model: str    # 'torchaudio' | 'contentvec'
+    rvc_vtln_alpha: float  # warp factor: <1 = formants up (male→female); 1.0 = off
 
     def __init__(self) -> None:
         self.enabled   = False
@@ -86,6 +88,8 @@ class VCSettings:
 
         self.rvc_model        = ''
         self.rvc_pitch_offset = 0.0
+        self.rvc_hubert_model = 'torchaudio'
+        self.rvc_vtln_alpha = 1.0
 
     def _to_dict(self) -> dict:
         return {
@@ -127,6 +131,8 @@ class VCSettings:
             'rvc': {
                 'model':        self.rvc_model,
                 'pitch_offset': self.rvc_pitch_offset,
+                'hubert_model': self.rvc_hubert_model,
+                'vtln_alpha': self.rvc_vtln_alpha,
             },
         }
 
@@ -183,6 +189,8 @@ class VCSettings:
             rv = data.get('rvc', {})
             s.rvc_model        = str(rv.get('model', ''))
             s.rvc_pitch_offset = float(rv.get('pitch_offset', 0.0))
+            s.rvc_hubert_model = str(rv.get('hubert_model', 'torchaudio'))
+            s.rvc_vtln_alpha = float(rv.get('vtln_alpha', 1.0))
 
             _log.debug('Loaded VC settings: mode=%s enabled=%s', s.mode, s.enabled)
         except Exception as e:

@@ -2,7 +2,7 @@ import logging
 import threading
 from typing import Literal
 
-from PySide6.QtCore import QSize, Qt, Signal, Slot
+from PySide6.QtCore import QSize, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QHBoxLayout, QLabel,
                                QMessageBox, QSizePolicy, QToolButton,
@@ -78,6 +78,10 @@ class QMainApp(QBaseDesktopApp):
         self.sig_service_version.connect(self._on_service_version)
         self._sig_set_label.connect(self._version_label.setText)
         self._sig_show_error.connect(self._show_error_dialog)
+        self.dbus_wrapper.sig_ai_progress.connect(self._on_ai_progress)
+        self.dbus_wrapper.sig_ai_complete.connect(self._on_ai_complete)
+        self.dbus_wrapper.sig_download_progress.connect(self._on_download_progress)
+        self.dbus_wrapper.sig_download_complete.connect(self._on_download_complete)
 
         self._ui_version = project_version()
         self._service_restart_attempted = False
@@ -186,7 +190,13 @@ class QMainApp(QBaseDesktopApp):
         # FOOTER
         footer = QHBoxLayout()
         footer.setContentsMargins(4, 0, 4, 2)
-        footer.addStretch()
+        self._ai_status_label = QLabel()
+        self._ai_status_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        _italic = self._ai_status_label.font()
+        _italic.setItalic(True)
+        self._ai_status_label.setFont(_italic)
+        self._ai_status_label.setVisible(False)
+        footer.addWidget(self._ai_status_label, 1)
         self._version_label = QLabel(
             I18n.translate('ui', 'version_footer').format(version=project_version())
         )
@@ -264,6 +274,31 @@ class QMainApp(QBaseDesktopApp):
                 I18n.translate('ui', 'version_mismatch_service_restart_failed_message').format(
                     command=f'systemctl --user restart {SYSTEMD_SERVICE_NAME}'),
             )
+
+    @Slot(str)
+    def _on_ai_progress(self, message: str) -> None:
+        self._ai_status_label.setVisible(True)
+        self._ai_status_label.setText(f'AI install: {message}')
+
+    @Slot(bool, str)
+    def _on_ai_complete(self, success: bool, message: str) -> None:
+        self._ai_status_label.setText(f'AI install: {message}')
+        QTimer.singleShot(5000, lambda: self._ai_status_label.setVisible(False))
+        QTimer.singleShot(1000, self.mic_widget.vc_widget.refresh)
+
+    @Slot(str)
+    def _on_download_progress(self, message: str) -> None:
+        self._ai_status_label.setVisible(True)
+        self._ai_status_label.setText(f'Download: {message}')
+
+    @Slot(bool, str, str)
+    def _on_download_complete(self, success: bool, message: str, name: str) -> None:
+        self._ai_status_label.setText(f'Download: {message}')
+        QTimer.singleShot(5000, lambda: self._ai_status_label.setVisible(False))
+        if success and name:
+            self.mic_widget.vc_widget._pending_model_select = name
+        QTimer.singleShot(500, self.mic_widget.vc_widget.refresh_models)
+        QTimer.singleShot(600, self.mic_widget.vc_widget.on_download_done)
 
     @Slot(str, str)
     def _show_error_dialog(self, title: str, message: str) -> None:

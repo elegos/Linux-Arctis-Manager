@@ -15,7 +15,11 @@ class VoiceChangerManager:
         self._ladspa: 'LADSPAVoiceChanger | None' = None
         self._rvc:    'RVCVoiceChanger | None'     = None
 
-    def apply(self, settings: 'VCSettings') -> bool:
+    def apply(self, settings: 'VCSettings', nc_source: str | None = None) -> bool:
+        """
+        nc_source: if NC chain is active, pass its output source name here so RVC
+                   records from NC output instead of the saved (possibly physical) source.
+        """
         from linux_arctis_manager.voice_changer.settings import VCSettings
 
         # Always tear down existing chains first
@@ -26,7 +30,7 @@ class VoiceChangerManager:
             return True
 
         if settings.mode == 'rvc':
-            return self._apply_rvc(settings)
+            return self._apply_rvc(settings, nc_source)
         return self._apply_ladspa(settings)
 
     def teardown(self) -> None:
@@ -40,14 +44,25 @@ class VoiceChangerManager:
         self._ladspa = LADSPAVoiceChanger()
         return self._ladspa.apply(cfg)
 
-    def _apply_rvc(self, settings: 'VCSettings') -> bool:
+    def _apply_rvc(self, settings: 'VCSettings', nc_source: str | None = None) -> bool:
         from linux_arctis_manager.voice_changer.rvc.rvc_chain import RVCVoiceChanger
-        self._rvc = RVCVoiceChanger()
-        return self._rvc.apply(
-            source_id=settings.source_id,
+        # Prefer NC chain output over the saved (possibly physical) source_id
+        source_id = nc_source or settings.source_id
+        if nc_source:
+            logger.info('RVC: using NC chain output as source (%s)', nc_source)
+        chain = RVCVoiceChanger()
+        ok = chain.apply(
+            source_id=source_id,
             model_name=settings.rvc_model,
             pitch_offset=settings.rvc_pitch_offset,
+            hubert_model=settings.rvc_hubert_model,
+            vtln_alpha=settings.rvc_vtln_alpha,
         )
+        if ok:
+            self._rvc = chain
+        else:
+            chain.teardown()
+        return ok
 
     def _teardown_all(self) -> None:
         if self._ladspa:

@@ -43,6 +43,7 @@ class CoreEngine:
     eq_manager: Any | None = None
     nc_manager: Any | None = None
     vc_manager: Any | None = None
+    mic_router: Any | None = None
 
     device_status_observers: list[Callable[[dict[str, int]], None]]
     device_settings_observers: list[Callable[[DeviceSettings], None]]
@@ -314,13 +315,30 @@ class CoreEngine:
         if self.nc_manager is None:
             self.nc_manager = NCManager()
         self.nc_manager.apply(nc_config)
+        self._update_mic_routing()
 
     def reapply_vc(self) -> None:
         from linux_arctis_manager.voice_changer.manager import VoiceChangerManager
         from linux_arctis_manager.voice_changer.settings import VCSettings
         if self.vc_manager is None:
             self.vc_manager = VoiceChangerManager()
-        self.vc_manager.apply(VCSettings.load())
+        nc_source = self.nc_manager.output_source if self.nc_manager else None
+        self.vc_manager.apply(VCSettings.load(), nc_source=nc_source)
+        self._update_mic_routing()
+
+    def _update_mic_routing(self) -> None:
+        from linux_arctis_manager.mic_router import MicRouter
+        from linux_arctis_manager.voice_changer.rvc.rvc_chain import ARCTIS_VC_SINK
+        if self.mic_router is None:
+            self.mic_router = MicRouter()
+        vc_active = bool(self.vc_manager and getattr(self.vc_manager, '_rvc', None))
+        nc_source = self.nc_manager.output_source if self.nc_manager else None
+        if vc_active:
+            self.mic_router.update(f'{ARCTIS_VC_SINK}.monitor')
+        elif nc_source:
+            self.mic_router.update(nc_source)
+        else:
+            self.mic_router.teardown()
 
     def reload_device_configurations(self) -> None:
         self.device_configurations = load_device_configurations()
@@ -421,6 +439,7 @@ class CoreEngine:
 
         # Set up software NC (non-fatal: if rnnoise is unavailable we log and continue)
         self.reapply_nc()
+        self.reapply_vc()
 
         self.redirect_to_media_sink()
     
@@ -621,6 +640,9 @@ class CoreEngine:
         self.send_command([self.device_config.status.request], endpoint, self.device_config.command_interface_index[1])
 
     def teardown(self) -> None:
+        if self.mic_router:
+            self.mic_router.teardown()
+            self.mic_router = None
         if self.vc_manager:
             self.vc_manager.teardown()
             self.vc_manager = None

@@ -29,7 +29,8 @@ class OpenVINORVCBackend(RVCBackend):
 
     def is_available(self) -> bool:
         try:
-            import openvino
+            import numpy  # noqa: F401 — required at runtime; missing = broken env
+            import openvino  # noqa: F401
             return bool(self._best_device())
         except ImportError:
             return False
@@ -47,7 +48,8 @@ class OpenVINORVCBackend(RVCBackend):
             pass
         return ''
 
-    def load_model(self, path: Path) -> None:
+    def load_model(self, path: Path, hubert_model: str = 'torchaudio',
+                   vtln_alpha: float = 1.0) -> None:
         from openvino import Core
         core = Core()
         self._device_name = self._best_device()

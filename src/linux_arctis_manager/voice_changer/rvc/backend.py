@@ -16,7 +16,8 @@ class RVCBackend(ABC):
         """Return True if the required runtime libraries and GPU are present."""
 
     @abstractmethod
-    def load_model(self, path: Path) -> None:
+    def load_model(self, path: Path, hubert_model: str = 'torchaudio',
+                   vtln_alpha: float = 1.0) -> None:
         """Load a .pth model file. Raises on failure."""
 
     @abstractmethod

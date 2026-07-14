@@ -2,6 +2,7 @@ import asyncio
 import itertools
 import json
 import logging
+import threading
 
 from dbus_next.aio.message_bus import MessageBus
 from dbus_next.service import ServiceInterface, method, signal
@@ -418,6 +419,8 @@ class ArctisManagerDbusVCService(ServiceInterface):
         super().__init__(DBUS_VC_INTERFACE_NAME)
         self.core_engine = core
         self.logger = logging.getLogger('ArctisManagerDbusVCService')
+        self._installing = False
+        self._downloading = False
 
     @method('GetVCCapabilities')
     def get_vc_capabilities(self) -> 's':  # type: ignore
@@ -444,14 +447,16 @@ class ArctisManagerDbusVCService(ServiceInterface):
             self.logger.error('GetVCCapabilities: failed to list sources: %s', e)
             sources = []
 
+        from linux_arctis_manager.ai_deps import ai_env_exists
         return json.dumps({
             'sources': sources,
             'ladspa': ladspa,
             'rvc': {
-                'available': bool(rvc_backends),
-                'backends':  rvc_backends,
-                'models':    rvc_models,
+                'available':    bool(rvc_backends),
+                'backends':     rvc_backends,
+                'models':       rvc_models,
                 'models_folder': str(RVCModelManager.models_folder()),
+                'ai_env_exists': ai_env_exists(),
             },
         })
 
@@ -505,6 +510,8 @@ class ArctisManagerDbusVCService(ServiceInterface):
             rv = data.get('rvc', {})
             s.rvc_model        = str(rv.get('model', ''))
             s.rvc_pitch_offset = float(rv.get('pitch_offset', 0.0))
+            s.rvc_hubert_model = str(rv.get('hubert_model', 'torchaudio'))
+            s.rvc_vtln_alpha = float(rv.get('vtln_alpha', 1.0))
 
             s.save()
             self.core_engine.reapply_vc()
@@ -518,6 +525,137 @@ class ArctisManagerDbusVCService(ServiceInterface):
         from linux_arctis_manager.voice_changer.rvc.model_manager import RVCModelManager
         models = [{'name': m.name, 'path': str(m.path)} for m in RVCModelManager.list_models()]
         return json.dumps(models)
+
+    @signal('InstallProgress')
+    def signal_install_progress(self, message: 's') -> 's':  # type: ignore
+        return message
+
+    @signal('InstallComplete')
+    def signal_install_complete(self, result_json: 's') -> 's':  # type: ignore
+        return result_json
+
+    @method('DetectGPU')
+    def detect_gpu_method(self) -> 's':  # type: ignore
+        from linux_arctis_manager.ai_deps import detect_gpu
+        return json.dumps(detect_gpu())
+
+    @method('InstallAIDeps')
+    def install_ai_deps_method(self, backend: 's') -> None:  # type: ignore
+        if self._installing:
+            self.signal_install_progress('Already installing, please wait...')
+            return
+        self._installing = True
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = asyncio.get_event_loop()
+        threading.Thread(target=self._run_install, args=(backend, loop), daemon=True).start()
+
+    def _run_install(self, backend: str, loop: asyncio.AbstractEventLoop) -> None:
+        from linux_arctis_manager.ai_deps import install_ai_deps, activate_ai_env
+
+        def progress(msg: str) -> None:
+            try:
+                loop.call_soon_threadsafe(self.signal_install_progress, msg)
+            except Exception:
+                pass
+
+        try:
+            success = install_ai_deps(backend, progress)
+            result = json.dumps({
+                'success': success,
+                'message': 'Installation complete.' if success else 'Installation failed.',
+            })
+            try:
+                loop.call_soon_threadsafe(self.signal_install_complete, result)
+            except Exception:
+                pass
+            if success:
+                activate_ai_env()
+        finally:
+            self._installing = False
+
+    @signal('DownloadProgress')
+    def signal_download_progress(self, message: 's') -> 's':  # type: ignore
+        return message
+
+    @signal('DownloadComplete')
+    def signal_download_complete(self, result_json: 's') -> 's':  # type: ignore
+        return result_json
+
+    @method('SearchHFModels')
+    async def search_hf_models(self, query: 's', sort_by: 's') -> 's':  # type: ignore
+        from linux_arctis_manager.voice_changer.rvc.hf_search import search_models
+        loop = asyncio.get_event_loop()
+        results = await loop.run_in_executor(None, search_models, query, sort_by)
+        return json.dumps(results)
+
+    @method('ListRepoFiles')
+    async def list_repo_files_method(self, repo_id: 's') -> 's':  # type: ignore
+        from linux_arctis_manager.voice_changer.rvc.hf_search import list_repo_model_files
+        loop = asyncio.get_event_loop()
+        files = await loop.run_in_executor(None, list_repo_model_files, repo_id)
+        return json.dumps(files)
+
+    @method('DownloadHFModel')
+    def download_hf_model_method(self, repo_id: 's', filename: 's') -> None:  # type: ignore
+        if self._downloading:
+            self.signal_download_progress('Already downloading, please wait...')
+            return
+        self._downloading = True
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = asyncio.get_event_loop()
+        threading.Thread(
+            target=self._run_download, args=(repo_id, filename, loop), daemon=True,
+        ).start()
+
+    def _run_download(self, repo_id: str, filename: str, loop: asyncio.AbstractEventLoop) -> None:
+        from linux_arctis_manager.voice_changer.rvc.hf_search import download_model
+        from linux_arctis_manager.voice_changer.rvc.model_manager import RVCModelManager
+
+        last_msg: list[str] = ['']
+
+        def progress(msg: str) -> None:
+            last_msg[0] = msg
+            try:
+                loop.call_soon_threadsafe(self.signal_download_progress, msg)
+            except Exception:
+                pass
+
+        try:
+            success, names = download_model(repo_id, filename, RVCModelManager.models_folder(), progress)
+            primary = names[0] if names else ''
+            if success:
+                msg = f'Downloaded {", ".join(names)}.' if names else 'Done.'
+            else:
+                reason = last_msg[0]
+                msg = (f'Download of {filename} failed: {reason}' if reason
+                       else f'Download of {filename} failed.')
+            result = json.dumps({'success': success, 'message': msg, 'name': primary})
+            try:
+                loop.call_soon_threadsafe(self.signal_download_complete, result)
+            except Exception:
+                pass
+        finally:
+            self._downloading = False
+
+    @method('DeleteRVCModel')
+    def delete_rvc_model_method(self, name: 's') -> 'b':  # type: ignore
+        from linux_arctis_manager.voice_changer.rvc.hf_search import delete_model
+        from linux_arctis_manager.voice_changer.rvc.model_manager import RVCModelManager
+        return delete_model(name, RVCModelManager.models_folder())
+
+    @method('GetHFToken')
+    def get_hf_token_method(self) -> 's':  # type: ignore
+        from linux_arctis_manager.voice_changer.rvc.hf_search import get_hf_token
+        return get_hf_token()
+
+    @method('SetHFToken')
+    def set_hf_token_method(self, token: 's') -> 'b':  # type: ignore
+        from linux_arctis_manager.voice_changer.rvc.hf_search import set_hf_token
+        return set_hf_token(token)
 
 
 class DbusManager:

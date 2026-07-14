@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import logging
 import queue
-import struct
 import subprocess
 import threading
-from pathlib import Path
 
 import numpy as np
 import pulsectl
@@ -19,11 +17,13 @@ ARCTIS_VC_SINK     = 'Arctis_VC_Sink'
 ARCTIS_VC_MIC      = 'Arctis_VC_Mic'
 ARCTIS_VC_MIC_DESC = 'Arctis Manager VC Mic'
 
-_SAMPLE_RATE   = 16000     # Hz — RVC models typically expect 16 kHz
-_CHUNK_FRAMES  = 1024      # frames per processing chunk
-_CHUNK_BYTES   = _CHUNK_FRAMES * 2  # int16 = 2 bytes/frame
-_FORMAT        = 's16le'
-_CHANNELS      = 1
+_SAMPLE_RATE    = 16000    # Hz — parec capture rate (HuBERT input)
+_PLAYBACK_RATE  = 48000    # Hz — pacat/null-sink rate (model native output, no downsample)
+_CHUNK_FRAMES   = 1024     # frames per processing chunk at _SAMPLE_RATE
+_CHUNK_BYTES    = _CHUNK_FRAMES * 2   # int16 = 2 bytes/frame
+_RATE_RATIO     = _PLAYBACK_RATE // _SAMPLE_RATE   # = 3
+_FORMAT         = 's16le'
+_CHANNELS       = 1
 
 
 class RVCVoiceChanger:
@@ -52,8 +52,14 @@ class RVCVoiceChanger:
 
     # ── Public API ────────────────────────────────────────────────────────
 
-    def apply(self, source_id: str, model_name: str, pitch_offset: float) -> bool:
+    def apply(self, source_id: str, model_name: str, pitch_offset: float,
+              hubert_model: str = 'torchaudio', vtln_alpha: float = 1.0) -> bool:
         self.teardown()
+
+        # Recreate queues: teardown's final capture-loop put() may have left a
+        # stale None sentinel that would kill the new run's convert thread instantly.
+        self._raw_q = queue.Queue(maxsize=32)
+        self._processed_q = queue.Queue(maxsize=32)
 
         backend = BackendRegistry.best_backend()
         if backend is None:
@@ -67,7 +73,7 @@ class RVCVoiceChanger:
             return False
 
         try:
-            backend.load_model(model.path)
+            backend.load_model(model.path, hubert_model=hubert_model, vtln_alpha=vtln_alpha)
         except Exception as e:
             logger.error('RVC: failed to load model %r: %s', model_name, e)
             return False
@@ -93,8 +99,8 @@ class RVCVoiceChanger:
         self._convert_thread.start()
         self._playback_thread.start()
 
-        logger.info('RVC chain started: source=%r model=%r pitch=%.1f',
-                    source_id, model_name, pitch_offset)
+        logger.info('RVC chain started: source=%r model=%r pitch=%.1f hubert=%s vtln=%.2f',
+                    source_id, model_name, pitch_offset, hubert_model, vtln_alpha)
         return True
 
     def teardown(self) -> None:
@@ -133,35 +139,38 @@ class RVCVoiceChanger:
     def _ensure_virtual_devices(self) -> bool:
         try:
             pulse = self._pulse_conn()
-            existing = next(
-                (s for s in pulse.sink_list()
-                 if s.name == ARCTIS_VC_SINK
-                 or s.proplist.get('node.name', '') == ARCTIS_VC_SINK),
-                None,
+            # Tear down any pre-existing sink: it may be stale from a previous
+            # run at a different sample rate (e.g., old 16kHz sink).
+            for s in pulse.sink_list():
+                if s.name == ARCTIS_VC_SINK or s.proplist.get('node.name', '') == ARCTIS_VC_SINK:
+                    try:
+                        pulse.module_unload(s.owner_module)
+                        logger.debug('RVC: removed stale null sink (module %d)', s.owner_module)
+                    except Exception:
+                        pass
+            # No device.class=filter: KDE propagates that class to the monitor
+            # source, hiding it from the input device list.
+            idx = pulse.module_load(
+                'module-null-sink',
+                f'sink_name={ARCTIS_VC_SINK} '
+                f'node.description="Arctis VC Output" '
+                f'channels={_CHANNELS} rate={_PLAYBACK_RATE}',
             )
-            if not existing:
-                idx = pulse.module_load(
-                    'module-null-sink',
-                    f'sink_name={ARCTIS_VC_SINK} '
-                    f'sink_properties=node.description="Arctis VC Output" '
-                    f'source_name={ARCTIS_VC_MIC} '
-                    f'source_properties=node.description="{ARCTIS_VC_MIC_DESC}" '
-                    f'channels={_CHANNELS} rate={_SAMPLE_RATE}',
-                )
-                self._null_sink_module = idx
-                logger.info('RVC null sink created (module %d)', idx)
+            self._null_sink_module = idx
+            logger.info('RVC null sink created (module %d) at %d Hz', idx, _PLAYBACK_RATE)
             return True
         except Exception as e:
             logger.error('RVC: failed to create virtual devices: %s', e)
             return False
 
     def _unload_virtual_devices(self) -> None:
+        pulse = self._pulse_conn()
         if self._null_sink_module is not None:
             try:
-                self._pulse_conn().module_unload(self._null_sink_module)
+                pulse.module_unload(self._null_sink_module)
             except Exception as e:
                 logger.warning('RVC: failed to unload null sink: %s', e)
-            self._null_sink_module = None
+        self._null_sink_module = None
         if self._pulse:
             try:
                 self._pulse.close()
@@ -184,9 +193,13 @@ class RVCVoiceChanger:
             f'--channels={_CHANNELS}',
             f'--rate={_SAMPLE_RATE}',
             f'--format={_FORMAT}',
+            '--latency-msec=20',
         ]
         logger.debug('RVC parec: %s', ' '.join(cmd))
-        return subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        threading.Thread(target=self._log_stderr, args=(proc, 'parec'),
+                         daemon=True, name='rvc-parec-stderr').start()
+        return proc
 
     def _start_pacat(self) -> subprocess.Popen:
         cmd = [
@@ -194,11 +207,26 @@ class RVCVoiceChanger:
             f'--device={ARCTIS_VC_SINK}',
             '--raw',
             f'--channels={_CHANNELS}',
-            f'--rate={_SAMPLE_RATE}',
+            f'--rate={_PLAYBACK_RATE}',
             f'--format={_FORMAT}',
+            '--latency-msec=200',
         ]
         logger.debug('RVC pacat: %s', ' '.join(cmd))
-        return subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        threading.Thread(target=self._log_stderr, args=(proc, 'pacat'),
+                         daemon=True, name='rvc-pacat-stderr').start()
+        return proc
+
+    @staticmethod
+    def _log_stderr(proc: subprocess.Popen, name: str) -> None:
+        assert proc.stderr is not None
+        for line in proc.stderr:
+            line = line.decode(errors='replace').rstrip()
+            if line:
+                logger.warning('RVC %s: %s', name, line)
+        rc = proc.wait()
+        if rc not in (0, -15):   # -15 = SIGTERM (expected on teardown)
+            logger.warning('RVC %s exited with code %d', name, rc)
 
     # ── Processing threads ────────────────────────────────────────────────
 
@@ -206,20 +234,29 @@ class RVCVoiceChanger:
         proc = self._capture_proc
         if proc is None or proc.stdout is None:
             return
+        chunks = 0
         try:
+            buf = b''
             while self._running:
-                data = proc.stdout.read(_CHUNK_BYTES)
+                data = proc.stdout.read(_CHUNK_BYTES - len(buf))
                 if not data:
                     break
-                if len(data) == _CHUNK_BYTES:
-                    self._raw_q.put(data)
+                buf += data
+                if len(buf) >= _CHUNK_BYTES:
+                    self._raw_q.put(buf[:_CHUNK_BYTES])
+                    buf = buf[_CHUNK_BYTES:]
+                    chunks += 1
+                    if chunks == 1:
+                        logger.debug('RVC capture: first chunk received')
         except Exception as e:
             logger.warning('RVC capture loop: %s', e)
         finally:
-            self._raw_q.put(None)   # signal end
+            logger.debug('RVC capture loop exiting (chunks=%d, running=%s)', chunks, self._running)
+            self._raw_q.put(None)
 
     def _convert_loop(self, pitch_offset: float) -> None:
         backend = self._backend
+        chunks = 0
         try:
             while True:
                 data = self._raw_q.get()
@@ -227,19 +264,31 @@ class RVCVoiceChanger:
                     break
                 # int16 → float32 [-1, 1]
                 samples = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
-                converted = backend.convert(samples, _SAMPLE_RATE, pitch_offset) if backend else samples
+                try:
+                    if backend:
+                        converted = backend.convert(samples, _SAMPLE_RATE, pitch_offset)
+                    else:
+                        converted = np.repeat(samples, _RATE_RATIO)
+                except Exception as e:
+                    logger.warning('RVC convert: %s', e)
+                    converted = np.repeat(samples, _RATE_RATIO)
                 # float32 → int16
                 out = np.clip(converted * 32767.0, -32768, 32767).astype(np.int16)
                 self._processed_q.put(out.tobytes())
+                chunks += 1
+                if chunks == 1:
+                    logger.debug('RVC convert: first chunk processed')
         except Exception as e:
             logger.warning('RVC convert loop: %s', e)
         finally:
+            logger.debug('RVC convert loop exiting (chunks=%d)', chunks)
             self._processed_q.put(None)
 
     def _playback_loop(self) -> None:
         proc = self._playback_proc
         if proc is None or proc.stdin is None:
             return
+        chunks = 0
         try:
             while True:
                 data = self._processed_q.get()
@@ -247,5 +296,10 @@ class RVCVoiceChanger:
                     break
                 proc.stdin.write(data)
                 proc.stdin.flush()
+                chunks += 1
+                if chunks == 1:
+                    logger.debug('RVC playback: first chunk written to pacat')
         except Exception as e:
             logger.warning('RVC playback loop: %s', e)
+        finally:
+            logger.debug('RVC playback loop exiting (chunks=%d)', chunks)
