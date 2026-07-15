@@ -175,6 +175,51 @@ def test_configure_uses_fallback_when_only_unknown_pid_matched():
     assert engine.device_config is config
 
 
+def test_send_command_preserves_protocol_prefix_with_control_report_id():
+    config = DeviceConfiguration({
+        'device': {
+            'name': 'Test Device',
+            'vendor_id': 0x1038,
+            'product_ids': [0x2290],
+            'command_interface_index': [0, 3],
+            'command_report_id': 0x07,
+            'listen_interface_indexes': [3],
+            'command_padding': {'length': 64, 'position': 'end', 'filler': 0x00},
+        },
+    })
+    engine = _make_engine()
+    engine.device_config = config
+    engine.usb_device = MagicMock()
+
+    # Omni's inner GG protocol prefix remains payload; report 7 selects the HID report.
+    engine.send_command([0x01b0], 0x00, 3)
+
+    expected_report = [0x01, 0xb0, *([0x00] * 61)]
+    engine.usb_device.ctrl_transfer.assert_called_once_with(0x21, 0x09, 0x0207, 3, expected_report)
+
+
+def test_send_command_includes_configured_hid_report_id_for_interrupt_transfer():
+    config = DeviceConfiguration({
+        'device': {
+            'name': 'Test Device',
+            'vendor_id': 0x1038,
+            'product_ids': [0x2290],
+            'command_interface_index': [3, 0],
+            'command_report_id': 0x07,
+            'listen_interface_indexes': [3],
+            'command_padding': {'length': 64, 'position': 'end', 'filler': 0x00},
+        },
+    })
+    engine = _make_engine()
+    engine.device_config = config
+    engine.usb_device = MagicMock()
+
+    engine.send_command([0x01b0], 0x03, 0)
+
+    expected_report = [0x07, 0x01, 0xb0, *([0x00] * 61)]
+    engine.usb_device.write.assert_called_once_with(0x03, expected_report)
+
+
 # --- on_device_connected ---
 
 def test_on_connected_known_pid_calls_configure():

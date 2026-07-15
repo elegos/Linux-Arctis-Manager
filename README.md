@@ -36,6 +36,7 @@ An open-source replacement for SteelSeries GG, to manage your Arctis headset on 
 | Arctis Nova Elite | ✅ | ✅ | `2244` |
 | Arctis Nova Pro Wireless / X | ✅ | ✅ | `12e0`, `12e5`, `225d` |
 | Arctis Nova Pro / X (GameDAC Gen2) | ✅ | ✅ | `12cb`, `12cd` |
+| Arctis Nova Pro Omni | ✅ | ✅ | `2290` |
 
 ### Legend
 

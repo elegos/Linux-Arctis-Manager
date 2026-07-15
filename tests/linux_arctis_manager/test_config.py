@@ -26,6 +26,7 @@ def test_config_parse():
     assert config.product_string == "Arctis Nova Pro Wireless"
 
     assert config.command_interface_index == [4, 0]
+    assert config.command_report_id == 0
     assert config.listen_interface_indexes == [4]
     
     assert config.command_padding.length == 64
@@ -88,6 +89,26 @@ def test_config_parse():
     gain_kwargs = gain.get_kwargs()
     assert len(gain_kwargs) == 1
     assert gain_kwargs['values_mapping'] == {0x01: 'low', 0x02: 'high'}
+
+
+def test_nova_pro_omni_config_parse():
+    config_path = Path(__file__).parent.parent.parent / 'src' / 'linux_arctis_manager' / 'devices' / 'nova_pro_omni.yaml'
+    config = DeviceConfiguration(YAML(typ='safe').load(config_path))
+
+    assert config.name == 'SteelSeries Arctis Nova Pro Omni'
+    assert config.product_ids == [0x2290]
+    assert config.product_string == 'Arctis Nova Pro Omni'
+    assert config.command_interface_index == [0, 3]
+    assert config.command_report_id == 0x07
+    assert config.status is not None
+    assert config.status.request == 0x01b0
+    wireless_settings = config.status.response_mapping[0]
+    assert wireless_settings.starts_with == 0x01b0
+    assert wireless_settings.headset_battery_charge == 0x06
+    assert wireless_settings.headset_power_status == 0x0e
+    assert wireless_settings.noise_cancelling_level == 0x10
+    assert config.status.response_mapping[1].starts_with == 0x0725
+    assert config.status.response_mapping[1].station_volume == 0x02
 
 def _minimal_raw(overrides: dict[str, Any] | None = None) -> dict[str, Any]:
     base: dict[str, Any] = {
@@ -169,6 +190,31 @@ def test_config_setting_get_update_sequence_passes_ints_through():
     s = ConfigSetting(name='vol', type='slider', default_value=0,
                       update_sequence=[0x01, 0x02])
     assert s.get_update_sequence(0xFF) == [0x01, 0x02]
+
+
+def test_config_setting_uses_value_specific_update_sequence():
+    s = ConfigSetting(
+        name='mic_noise_reduction',
+        type='discrete_map',
+        default_value=0,
+        update_sequence_mapping={
+            0: [0x01, 0x3C, 0x00, 0x01],
+            1: [0x01, 0x3C, 0x01, 0x01],
+        },
+    )
+    assert s.get_update_sequence(0) == [0x01, 0x3C, 0x00, 0x01]
+    assert s.get_update_sequence(1) == [0x01, 0x3C, 0x01, 0x01]
+
+
+def test_config_setting_rejects_missing_value_specific_update_sequence():
+    s = ConfigSetting(
+        name='mic_noise_reduction',
+        type='discrete_map',
+        default_value=0,
+        update_sequence_mapping={0: [0x01, 0x3C, 0x00, 0x01]},
+    )
+    with pytest.raises(ValueError, match='No update sequence configured'):
+        s.get_update_sequence(1)
 
 
 def test_config_setting_get_update_sequence_raises_on_invalid_token():

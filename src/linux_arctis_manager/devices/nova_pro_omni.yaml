@@ -1,0 +1,467 @@
+device:
+  name: SteelSeries Arctis Nova Pro Omni
+  vendor_id: 0x1038
+  product_string: "Arctis Nova Pro Omni"
+  product_ids:
+    - 0x2290
+  command_padding:
+    length: 64
+    position: end
+    filler: 0x00
+
+  # USB HID output report 7 carries GG's report-1 protocol payloads.
+  # Incoming messages retain the GG protocol report prefix (0x01).
+  command_interface_index: [0, 3]
+  command_report_id: 0x07
+  listen_interface_indexes: [3]
+
+  # GG exposes ChatMix through the same virtual media/chat routing model used
+  # by this application. The remaining controls are user initiated.
+  device_init:
+    - [0x01, 0x49, 'settings.chatmix_enabled']
+    - ['status.request']
+
+  status:
+    request: 0x01b0
+    response_mapping:
+      # GG's wireless_settings response to the 0x01, 0xb0 request.
+      - starts_with: 0x01b0
+        bluetooth_default: 0x02
+        bluetooth_call_option: 0x03
+        headset_battery_charge: 0x06
+        charge_slot_battery_charge: 0x07
+        transparent_noise_cancelling_level: 0x08
+        mic_status: 0x09
+        noise_cancelling: 0x0a
+        mic_led_brightness: 0x0b
+        auto_off_time_minutes: 0x0c
+        headset_power_status: 0x0e
+        headset_charging_status: 0x0f
+        noise_cancelling_level: 0x10
+      - starts_with: 0x0725
+        station_volume: 0x02
+      - starts_with: 0x0727
+        volume_limiter: 0x02
+      - starts_with: 0x0737
+        mic_volume: 0x02
+      - starts_with: 0x0738
+        mic_sidetone_enabled: 0x02
+        mic_sidetone_boom: 0x03
+      - starts_with: 0x073c
+        mic_noise_reduction_enabled: 0x02
+        mic_noise_reduction_level: 0x03
+      - starts_with: 0x0743
+        line_out: 0x02
+      - starts_with: 0x0745
+        media_mix: 0x02
+        chat_mix: 0x03
+      - starts_with: 0x0749
+        chatmix_enabled: 0x02
+      - starts_with: 0x0783
+        station_screen_saver_timeout: 0x02
+      - starts_with: 0x0785
+        station_screen_brightness: 0x02
+      - starts_with: 0x0788
+        station_screensaver: 0x02
+      - starts_with: 0x0789
+        station_home_screen_view: 0x02
+      - starts_with: 0x078a
+        station_home_screen_options: 0x02
+      - starts_with: 0x07b2
+        bluetooth_default: 0x02
+      - starts_with: 0x07b3
+        bluetooth_call_option: 0x02
+      - starts_with: 0x07b5
+        bluetooth_connection: 0x03
+        headset_power_status: 0x04
+      - starts_with: 0x07b7
+        headset_battery_charge: 0x02
+        charge_slot_battery_charge: 0x03
+        headset_charging_status: 0x04
+      - starts_with: 0x07b8
+        noise_cancelling_level: 0x02
+      - starts_with: 0x07b9
+        transparent_noise_cancelling_level: 0x02
+      - starts_with: 0x07bb
+        mic_status: 0x02
+      - starts_with: 0x07bd
+        noise_cancelling: 0x02
+      - starts_with: 0x07bf
+        mic_led_brightness: 0x02
+      - starts_with: 0x07c1
+        auto_off_time_minutes: 0x02
+    representation:
+      headset:
+        - headset_power_status
+        - headset_battery_charge
+        - headset_charging_status
+        - noise_cancelling
+        - noise_cancelling_level
+        - transparent_noise_cancelling_level
+        - auto_off_time_minutes
+      mic:
+        - mic_status
+        - mic_volume
+        - mic_sidetone_enabled
+        - mic_sidetone_boom
+        - mic_noise_reduction_enabled
+        - mic_noise_reduction_level
+        - mic_led_brightness
+      gamedac:
+        - station_volume
+        - charge_slot_battery_charge
+        - volume_limiter
+        - line_out
+        - chatmix_enabled
+        - station_screen_brightness
+        - station_screensaver
+        - station_screen_saver_timeout
+        - station_home_screen_view
+        - station_home_screen_options
+      chatmix:
+        - media_mix
+        - chat_mix
+      bluetooth:
+        - bluetooth_default
+        - bluetooth_call_option
+        - bluetooth_connection
+
+  online_status:
+    status_variable: headset_power_status
+    online_value: online
+
+  status_parse:
+    auto_off_time_minutes:
+      type: int_int_mapping
+      values:
+        0x00: 0
+        0x01: 1
+        0x02: 5
+        0x03: 10
+        0x04: 15
+        0x05: 30
+        0x06: 60
+    bluetooth_call_option:
+      type: int_str_mapping
+      values:
+        0x00: do_nothing
+        0x01: lower_volume
+        0x02: mute
+    bluetooth_connection:
+      type: int_str_mapping
+      values:
+        0x00: off
+        0x01: connected
+        0x02: disconnected
+        0x04: active
+    bluetooth_default:
+      type: on_off
+      off: 0x00
+      on: 0x01
+    charge_slot_battery_charge:
+      type: percentage
+      perc_min: 0
+      perc_max: 100
+    chat_mix:
+      type: percentage
+      perc_min: 0
+      perc_max: 100
+    chatmix_enabled:
+      type: on_off
+      off: 0x00
+      on: 0x01
+    headset_battery_charge:
+      type: percentage
+      perc_min: 0
+      perc_max: 100
+    headset_charging_status:
+      type: int_str_mapping
+      values:
+        0x02: charging
+        0x08: discharging
+    headset_power_status:
+      type: int_str_mapping
+      values:
+        0x01: offline
+        0x02: cable_charging
+        0x04: standby
+        0x08: online
+    line_out:
+      type: int_str_mapping
+      values:
+        0x01: speaker
+        0x02: stream
+    media_mix:
+      type: percentage
+      perc_min: 0
+      perc_max: 100
+    mic_led_brightness:
+      type: percentage
+      perc_min: 1
+      perc_max: 10
+    mic_noise_reduction_enabled:
+      type: on_off
+      off: 0x00
+      on: 0x01
+    mic_noise_reduction_level:
+      type: int_str_mapping
+      values:
+        0x00: off
+        0x01: low
+        0x02: medium
+        0x03: high
+    mic_sidetone_boom:
+      type: percentage
+      perc_min: 1
+      perc_max: 10
+    mic_sidetone_enabled:
+      type: on_off
+      off: 0x00
+      on: 0x01
+    mic_status:
+      type: int_str_mapping
+      values:
+        0x00: unmuted
+        0x01: muted
+    mic_volume:
+      type: percentage
+      perc_min: 1
+      perc_max: 10
+    noise_cancelling:
+      type: int_str_mapping
+      values:
+        0x00: off
+        0x01: transparency
+        0x02: on
+    noise_cancelling_level:
+      type: int_str_mapping
+      values:
+        0x01: low
+        0x02: medium
+        0x03: high
+    station_volume:
+      type: percentage
+      perc_min: 56
+      perc_max: 0
+    station_home_screen_options:
+      type: int_str_mapping
+      values:
+        0x00: stereo
+        0x01: preset
+        0x02: meters
+    station_home_screen_view:
+      type: int_str_mapping
+      values:
+        0x00: detailed
+        0x01: simple
+    station_screen_brightness:
+      type: percentage
+      perc_min: 1
+      perc_max: 10
+    station_screen_saver_timeout:
+      type: int_int_mapping
+      values:
+        0x00: 0
+        0x01: 1
+        0x02: 5
+        0x03: 10
+        0x04: 15
+        0x05: 30
+        0x06: 60
+    station_screensaver:
+      type: int_str_mapping
+      values:
+        0x00: off
+        0x01: dimm
+    transparent_noise_cancelling_level:
+      type: percentage
+      perc_min: 1
+      perc_max: 10
+    volume_limiter:
+      type: on_off
+      off: 0x00
+      on: 0x01
+
+  settings:
+    headset:
+      noise_cancelling:
+        type: discrete_map
+        default: 0x00
+        update_sequence: [0x01, 0xbd, 'value']
+        values_mapping:
+          0x00: off
+          0x01: transparency
+          0x02: on
+      noise_cancelling_level:
+        type: discrete_map
+        default: 0x03
+        update_sequence: [0x01, 0xb8, 'value']
+        values_mapping:
+          0x01: low
+          0x02: medium
+          0x03: high
+      transparent_noise_cancelling_level:
+        type: slider
+        min: 0x01
+        max: 0x0a
+        step: 1
+        min_label: perc_10
+        max_label: perc_100
+        default: 0x08
+        update_sequence: [0x01, 0xb9, 'value']
+      volume_limiter:
+        type: toggle
+        values:
+          off: 0x00
+          on: 0x01
+          off_label: off
+          on_label: on
+        default: 0x00
+        update_sequence: [0x01, 0x27, 'value']
+
+    microphone:
+      mic_volume:
+        type: slider
+        min: 0x01
+        max: 0x0a
+        step: 1
+        min_label: mic_muted
+        max_label: perc_100
+        default: 0x0a
+        update_sequence: [0x01, 0x37, 'value']
+      mic_sidetone_boom:
+        type: slider
+        min: 0x00
+        max: 0x0a
+        step: 1
+        min_label: off
+        max_label: perc_100
+        default: 0x05
+        update_sequence_mapping:
+          0x00: [0x01, 0x38, 0x00, 0x0a]
+          0x01: [0x01, 0x38, 0x01, 0x01]
+          0x02: [0x01, 0x38, 0x01, 0x02]
+          0x03: [0x01, 0x38, 0x01, 0x03]
+          0x04: [0x01, 0x38, 0x01, 0x04]
+          0x05: [0x01, 0x38, 0x01, 0x05]
+          0x06: [0x01, 0x38, 0x01, 0x06]
+          0x07: [0x01, 0x38, 0x01, 0x07]
+          0x08: [0x01, 0x38, 0x01, 0x08]
+          0x09: [0x01, 0x38, 0x01, 0x09]
+          0x0a: [0x01, 0x38, 0x01, 0x0a]
+      mic_noise_reduction:
+        type: discrete_map
+        default: 0x00
+        values_mapping:
+          0x00: off
+          0x01: low
+          0x02: medium
+          0x03: high
+        update_sequence_mapping:
+          0x00: [0x01, 0x3c, 0x00, 0x01]
+          0x01: [0x01, 0x3c, 0x01, 0x01]
+          0x02: [0x01, 0x3c, 0x01, 0x02]
+          0x03: [0x01, 0x3c, 0x01, 0x03]
+      mic_led_brightness:
+        type: slider
+        min: 0x01
+        max: 0x0a
+        step: 1
+        min_label: perc_10
+        max_label: perc_100
+        default: 0x0a
+        update_sequence: [0x01, 0xbf, 'value']
+
+    station:
+      line_out:
+        type: discrete_map
+        default: 0x01
+        update_sequence: [0x01, 0x43, 'value']
+        values_mapping:
+          0x01: speaker
+          0x02: stream
+      chatmix_enabled:
+        type: toggle
+        values:
+          off: 0x00
+          on: 0x01
+          off_label: off
+          on_label: on
+        default: 0x01
+        update_sequence: [0x01, 0x49, 'value']
+      station_screen_brightness:
+        type: slider
+        min: 0x01
+        max: 0x0a
+        step: 1
+        min_label: perc_10
+        max_label: perc_100
+        default: 0x0a
+        update_sequence: [0x01, 0x85, 'value']
+      station_screensaver:
+        type: discrete_map
+        default: 0x01
+        update_sequence: [0x01, 0x88, 'value']
+        values_mapping:
+          0x00: off
+          0x01: dimm
+      station_screen_saver_timeout:
+        type: discrete_map
+        default: 0x05
+        update_sequence: [0x01, 0x83, 'value']
+        values_mapping:
+          0x00: never
+          0x01: 1_minute
+          0x02: 5_minutes
+          0x03: 10_minutes
+          0x04: 15_minutes
+          0x05: 30_minutes
+          0x06: 60_minutes
+      station_home_screen_view:
+        type: discrete_map
+        default: 0x00
+        update_sequence: [0x01, 0x89, 'value']
+        values_mapping:
+          0x00: detailed
+          0x01: simple
+      station_home_screen_options:
+        type: discrete_map
+        default: 0x00
+        update_sequence: [0x01, 0x8a, 'value']
+        values_mapping:
+          0x00: stereo
+          0x01: preset
+          0x02: meters
+
+    connectivity:
+      bluetooth_default:
+        type: toggle
+        values:
+          off: 0x00
+          on: 0x01
+          off_label: off
+          on_label: on
+        default: 0x01
+        update_sequence: [0x01, 0xb2, 'value']
+      bluetooth_call_option:
+        type: discrete_map
+        default: 0x00
+        update_sequence: [0x01, 0xb3, 'value']
+        values_mapping:
+          0x00: do_nothing
+          0x01: lower_volume
+          0x02: mute
+
+    power_management:
+      auto_off_time_minutes:
+        type: discrete_map
+        default: 0x05
+        update_sequence: [0x01, 0xc1, 'value']
+        values_mapping:
+          0x00: never
+          0x01: 1_minute
+          0x02: 5_minutes
+          0x03: 10_minutes
+          0x04: 15_minutes
+          0x05: 30_minutes
+          0x06: 60_minutes

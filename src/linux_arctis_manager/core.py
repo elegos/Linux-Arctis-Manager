@@ -529,10 +529,20 @@ class CoreEngine:
         if len(filler) % 2 != 0:
             filler = f'0{filler}'
         
-        if len(command_str) < self.device_config.command_padding.length * 2:
-            command_str = f'{command_str}{filler * (self.device_config.command_padding.length - len(command_str) // 2)}'
+        report_id = self.device_config.command_report_id
+        # An interrupt transfer carries the report ID in its data packet, while
+        # HID SET_REPORT carries it in wValue.
+        include_report_id = report_id and endpoint != 0x00
+        command_length = self.device_config.command_padding.length - (1 if report_id else 0)
+        if command_length < 1:
+            raise Exception('Command padding length must leave room for the HID report payload')
+
+        if len(command_str) < command_length * 2:
+            command_str = f'{command_str}{filler * (command_length - len(command_str) // 2)}'
 
         command_lst = [int.from_bytes([int(command_str[i:i+2], 16)], 'big') for i in range(0, len(command_str), 2)]
+        if include_report_id:
+            command_lst.insert(0, report_id)
 
         try:
             if endpoint != 0x00:
@@ -545,7 +555,7 @@ class CoreEngine:
                     recipient=usb.util.CTRL_RECIPIENT_INTERFACE
                 )
                 bRequest = 0x09  # SET_REPORT
-                wValue = (0x02 << 8) | 0x00
+                wValue = (0x02 << 8) | report_id
                 wIndex = control_interface_index
                 self.usb_device.ctrl_transfer(bmRequestType, bRequest, wValue, wIndex, command_lst)
         except usb.core.USBError as e:

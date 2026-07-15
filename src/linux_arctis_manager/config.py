@@ -70,8 +70,15 @@ class ConfigSetting(JsonSerializable):
         return { **super().to_dict(), **self.get_kwargs() }
 
     def get_update_sequence(self, value: int) -> list[int]:
+        sequence_mapping = getattr(self, 'update_sequence_mapping', None)
+        sequence = self.update_sequence
+        if sequence_mapping is not None:
+            sequence = sequence_mapping.get(value, sequence_mapping.get(str(value)))
+            if sequence is None:
+                raise ValueError(f"No update sequence configured for {self.name}={value}")
+
         result = []
-        for b in self.update_sequence:
+        for b in sequence:
             if isinstance(b, int):
                 result.append(b)
             elif b == 'value':
@@ -118,6 +125,7 @@ class DeviceConfiguration:
     product_ids: list[int]
     product_string: str | None
     command_interface_index: tuple[int, int]
+    command_report_id: int
     listen_interface_indexes: list[int]
     command_padding: ConfigPadding
     device_init: list[list[int|str]] | None
@@ -136,6 +144,7 @@ class DeviceConfiguration:
         self.product_ids = raw_config.get('product_ids', [])
         self.product_string = raw_config.get('product_string', None)
         self.command_interface_index = raw_config.get('command_interface_index', (-1, -1))
+        self.command_report_id = raw_config.get('command_report_id', 0)
         self.listen_interface_indexes = raw_config.get('listen_interface_indexes', [])
         
         online_status = raw_config.get('online_status', None)
@@ -147,6 +156,8 @@ class DeviceConfiguration:
             raise ValueError("Invalid configuration: 'device.vendor_id' must be specified and non-zero")
         if not self.product_ids:
             raise ValueError("Invalid configuration: 'device.product_ids' must be a non-empty list")
+        if not isinstance(self.command_report_id, int) or not 0 <= self.command_report_id <= 0xff:
+            raise ValueError("Invalid configuration: 'device.command_report_id' must be an integer between 0 and 255")
         if not self.listen_interface_indexes:
             raise ValueError("Invalid configuration: 'device.listen_interface_indexes' must be a non-empty list")
         if any(i < 0 for i in self.listen_interface_indexes):
