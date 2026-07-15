@@ -27,10 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Runtime plugin detection: missing `ladspa-rnnoise-plugin` disables the whole panel with a banner and per-distro install instructions; missing `swh-plugins` disables only HPF/gate/compressor stages with a separate inline banner. Both banners include a Retry button.
 - D-Bus NC interface stub (`GetNCCapabilities`, `GetNCSettings`, `SetNCSettings`) on `/NC` object path — daemon-side implementation is a separate task.
 - Side navigation replaced with icon buttons (36 px system-theme icons, label underneath) using `QToolButton` with palette-aware highlight on selection and hover.
+- RVC voice changer: per-model advanced tuning (envelope mix, F0 smoothing, input drive, output limiter knee, VTLN formant warp) is now saved automatically per loaded model. An "Auto-tune" mode listens while you speak and lowers the input drive/envelope mix until output saturation (clipping) disappears, then saves the result.
 
 ## Fixed
 
 - Switching EQ presets no longer interrupts audio playback in apps such as Spotify. Previously, unloading the LADSPA module broadcast a PipeWire sink-removal event to all clients, causing them to reset their streams. LADSPA modules are now accumulated and kept idle for the session lifetime, cleaned up only on headset disconnect.
+- RVC voice changer: fixed a range of real-time synthesis artifacts — periodic clicking, dropped/garbled syllables at the start of phrases and after pauses, unintelligible isolated short words, and inconsistent output when repeating the same phrase. These were caused by issues specific to streaming (window-by-window) synthesis: hard cuts between overlapping synthesis windows, silence handling that fed the model artificial padding, and per-window randomness in the synthesizer.
+- Noise cancellation: quiet consonants (e.g. nasals, word-final sounds) were sometimes being swallowed by the RNNoise/gate stages before reaching the voice changer, corrupting speech at the source; detection and gate release timing have been tuned to preserve them.
+- Sidetone preview no longer stays silent when the underlying virtual audio routing had been rebuilt since the daemon started; the daemon also now self-heals that routing on restart.
 
 ## Changed
 
