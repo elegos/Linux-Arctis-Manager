@@ -30,7 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Fixed
 
-- Switching EQ presets no longer interrupts audio playback in apps such as Spotify. Previously, unloading the LADSPA module broadcast a PipeWire sink-removal event to all clients, causing them to reset their streams. LADSPA modules are now accumulated and kept idle for the session lifetime, cleaned up only on headset disconnect.
+- Switching EQ presets, gains, or toggling EQ on/off no longer interrupts audio playback in apps such as Spotify, and no longer piles up dozens of unused PipeWire sinks over a session. Previously, every EQ change loaded a fresh LADSPA module and left the old one behind (idle, to avoid a PipeWire sink-removal event resetting playback streams). Changes are now pushed live to the existing LADSPA node instead, so the same sink and module are reused for the whole session — nothing to leak, nothing to reset.
+- Internal EQ and noise-cancellation virtual devices are now clearly labelled (e.g. `Arctis Media EQ (internal)`) instead of showing truncated or garbled names in system sound settings.
 
 ## Changed
 
