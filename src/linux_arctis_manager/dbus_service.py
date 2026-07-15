@@ -508,10 +508,15 @@ class ArctisManagerDbusVCService(ServiceInterface):
             s.reverb_tail_db    = float(r.get('tail_db', -12.0))
 
             rv = data.get('rvc', {})
-            s.rvc_model        = str(rv.get('model', ''))
-            s.rvc_pitch_offset = float(rv.get('pitch_offset', 0.0))
-            s.rvc_hubert_model = str(rv.get('hubert_model', 'torchaudio'))
-            s.rvc_vtln_alpha = float(rv.get('vtln_alpha', 1.0))
+            s.rvc_model         = str(rv.get('model', ''))
+            s.rvc_pitch_offset  = float(rv.get('pitch_offset', 0.0))
+            s.rvc_hubert_model  = str(rv.get('hubert_model', 'torchaudio'))
+            s.rvc_vtln_alpha    = float(rv.get('vtln_alpha', 1.0))
+            s.rvc_rms_mix_rate  = float(rv.get('rms_mix_rate', 0.25))
+            s.rvc_filter_radius = int(rv.get('filter_radius', 3))
+            s.rvc_target_rms    = float(rv.get('target_rms', 0.06))
+            s.rvc_limiter_thr   = float(rv.get('limiter_thr', 0.80))
+            s.rvc_model_params  = dict(rv.get('model_params', {}) or {})
 
             s.save()
             self.core_engine.reapply_vc()
@@ -525,6 +530,37 @@ class ArctisManagerDbusVCService(ServiceInterface):
         from linux_arctis_manager.voice_changer.rvc.model_manager import RVCModelManager
         models = [{'name': m.name, 'path': str(m.path)} for m in RVCModelManager.list_models()]
         return json.dumps(models)
+
+    @method('GetRVCMetrics')
+    def get_rvc_metrics(self) -> 's':  # type: ignore
+        """Drain per-hop quality metrics from the live RVC pipeline (auto-tuner)."""
+        vc = getattr(self.core_engine, 'vc_manager', None)
+        metrics = vc.rvc_metrics() if vc else None
+        return json.dumps(metrics or {})
+
+    @method('SetRVCLiveParams')
+    def set_rvc_live_params(self, params_json: 's') -> 'b':  # type: ignore
+        """Update RVC tuning params on the running chain without a rebuild.
+
+        Does NOT persist — the GUI persists the converged values via
+        SetVCSettings when the auto-tune session ends.
+        """
+        try:
+            from linux_arctis_manager.voice_changer.rvc.backend import RVCParams
+            p = json.loads(params_json)
+            params = RVCParams(
+                hubert_model=str(p.get('hubert_model', 'torchaudio')),
+                vtln_alpha=float(p.get('vtln_alpha', 1.0)),
+                rms_mix_rate=float(p.get('rms_mix_rate', 0.25)),
+                filter_radius=int(p.get('filter_radius', 3)),
+                target_rms=float(p.get('target_rms', 0.06)),
+                limiter_thr=float(p.get('limiter_thr', 0.80)),
+            )
+            vc = getattr(self.core_engine, 'vc_manager', None)
+            return bool(vc and vc.update_rvc_params(params))
+        except Exception as e:
+            self.logger.error('SetRVCLiveParams: %s', e)
+            return False
 
     @signal('InstallProgress')
     def signal_install_progress(self, message: 's') -> 's':  # type: ignore

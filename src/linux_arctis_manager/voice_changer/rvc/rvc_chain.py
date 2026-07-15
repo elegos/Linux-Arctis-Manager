@@ -8,7 +8,7 @@ import threading
 import numpy as np
 import pulsectl
 
-from linux_arctis_manager.voice_changer.rvc.backend import RVCBackend
+from linux_arctis_manager.voice_changer.rvc.backend import RVCBackend, RVCParams
 from linux_arctis_manager.voice_changer.rvc.registry import BackendRegistry
 
 logger = logging.getLogger('RVCVoiceChanger')
@@ -53,7 +53,7 @@ class RVCVoiceChanger:
     # ── Public API ────────────────────────────────────────────────────────
 
     def apply(self, source_id: str, model_name: str, pitch_offset: float,
-              hubert_model: str = 'torchaudio', vtln_alpha: float = 1.0) -> bool:
+              params: RVCParams | None = None) -> bool:
         self.teardown()
 
         # Recreate queues: teardown's final capture-loop put() may have left a
@@ -73,7 +73,7 @@ class RVCVoiceChanger:
             return False
 
         try:
-            backend.load_model(model.path, hubert_model=hubert_model, vtln_alpha=vtln_alpha)
+            backend.load_model(model.path, params)
         except Exception as e:
             logger.error('RVC: failed to load model %r: %s', model_name, e)
             return False
@@ -99,9 +99,16 @@ class RVCVoiceChanger:
         self._convert_thread.start()
         self._playback_thread.start()
 
-        logger.info('RVC chain started: source=%r model=%r pitch=%.1f hubert=%s vtln=%.2f',
-                    source_id, model_name, pitch_offset, hubert_model, vtln_alpha)
+        logger.info('RVC chain started: source=%r model=%r pitch=%.1f params=%s',
+                    source_id, model_name, pitch_offset, params)
         return True
+
+    def update_params(self, params: RVCParams) -> bool:
+        """Live param swap on the running backend — no chain rebuild."""
+        return self._backend.update_params(params) if self._backend else False
+
+    def get_metrics(self) -> dict | None:
+        return self._backend.get_metrics() if self._backend else None
 
     def teardown(self) -> None:
         self._running = False

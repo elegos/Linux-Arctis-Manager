@@ -103,18 +103,26 @@ class QMicWidget(QWidget):
                          Arctis_Manager_Mic > Arctis_NC_Mic > physical mic
         Using the VC sink monitor directly avoids a PipeWire loopback
         reconnect race that occurs when MicRouter recreates Arctis_Manager_Mic.
-        sink: Arctis_Media (always explicit so PipeWire doesn't pick randomly)
+        sink: physical headset output directly — the Arctis_Media null sink
+        depends on its own monitor loopback being alive, which is not
+        guaranteed (it can be lost across EQ/chain rebuilds).
         """
         source = self.nc_widget._source_combo.currentData() or ''
-        sink = 'Arctis_Media'
+        sink = ''
         try:
             import pulsectl
             with pulsectl.Pulse('lam-sidetone-probe') as pulse:
                 source_names = {s.name for s in pulse.source_list()}
+                sink_names = [s.name for s in pulse.sink_list()]
             for candidate in ('Arctis_VC_Sink.monitor', 'Arctis_Manager_Mic', 'Arctis_NC_Mic'):
                 if candidate in source_names:
                     source = candidate
                     break
+            sink = next(
+                (n for n in sink_names
+                 if n.startswith('alsa_output') and ('SteelSeries' in n or 'Arctis' in n)),
+                'Arctis_Media',
+            )
         except Exception:
             pass
         return source, sink

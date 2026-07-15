@@ -36,6 +36,13 @@ class VoiceChangerManager:
     def teardown(self) -> None:
         self._teardown_all()
 
+    def update_rvc_params(self, params: 'RVCParams') -> bool:
+        """Live tuning update on the active RVC chain (auto-tuner path)."""
+        return self._rvc.update_params(params) if self._rvc else False
+
+    def rvc_metrics(self) -> dict | None:
+        return self._rvc.get_metrics() if self._rvc else None
+
     # ── Internal ──────────────────────────────────────────────────────────
 
     def _apply_ladspa(self, settings: 'VCSettings') -> bool:
@@ -46,17 +53,25 @@ class VoiceChangerManager:
 
     def _apply_rvc(self, settings: 'VCSettings', nc_source: str | None = None) -> bool:
         from linux_arctis_manager.voice_changer.rvc.rvc_chain import RVCVoiceChanger
+        from linux_arctis_manager.voice_changer.rvc.backend import RVCParams
         # Prefer NC chain output over the saved (possibly physical) source_id
         source_id = nc_source or settings.source_id
         if nc_source:
             logger.info('RVC: using NC chain output as source (%s)', nc_source)
         chain = RVCVoiceChanger()
+        params = RVCParams(
+            hubert_model=settings.rvc_hubert_model,
+            vtln_alpha=settings.rvc_vtln_alpha,
+            rms_mix_rate=settings.rvc_rms_mix_rate,
+            filter_radius=settings.rvc_filter_radius,
+            target_rms=settings.rvc_target_rms,
+            limiter_thr=settings.rvc_limiter_thr,
+        )
         ok = chain.apply(
             source_id=source_id,
             model_name=settings.rvc_model,
             pitch_offset=settings.rvc_pitch_offset,
-            hubert_model=settings.rvc_hubert_model,
-            vtln_alpha=settings.rvc_vtln_alpha,
+            params=params,
         )
         if ok:
             self._rvc = chain

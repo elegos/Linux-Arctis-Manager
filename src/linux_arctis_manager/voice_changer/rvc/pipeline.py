@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 import math
+import threading
 import wave
+from collections import deque
 from pathlib import Path
 
 import numpy as np
@@ -53,18 +55,53 @@ _CONTEXT_FRAMES = _WINDOW_FRAMES - _HOP_FRAMES   # 6144 = 384ms previous audio
 # target (24576 = WINDOW_FRAMES × 3), avoiding an underrun.
 _HUBERT_EXTRA_PAD = 320
 
-# Crossfade overlap between adjacent hop slices.
-# Set to 0 to disable entirely: consecutive NSF synthesis runs for the same
-# time window may have different phases (different transformer attention
-# position), so blending them creates phase-cancellation beats that are more
-# audible than a clean hard cut at the hop boundary.
-_XFADE_OUT = 0
+# SOLA (synchronized overlap-add) hop stitching.
+# Consecutive NSF synthesis runs have unrelated phase, so a hard cut at each
+# hop boundary is a waveform discontinuity — audible as periodic crackle
+# ("micro-stutter") on sustained vowels.  Blind crossfading instead causes
+# phase-cancellation beats.  SOLA fixes both: find the offset (within a small
+# search range) where the new hop's waveform best correlates with the existing
+# tail, then crossfade at the aligned position.  Same approach as w-okada and
+# the RVC realtime clients.
+_XFADE_OUT   = 480    # 10 ms @ 48 kHz crossfade length
+_SOLA_SEARCH = 960    # 20 ms @ 48 kHz alignment search range
 
-# VAD gate: skip synthesis when new_chunk energy is below this threshold.
-# NC-filtered silence is typically 0.001–0.003 RMS; quiet speech is ~0.008+.
-# Without this gate, the gain-capped normalizer amplifies residual noise 4×
-# and the model synthesises it as voice-like artifacts.
-_VAD_RMS = 0.005
+# VAD gate: skip synthesis when neither the current hop nor the look-ahead
+# carries speech.  Detection uses the look-ahead too so the gate opens one hop
+# BEFORE speech arrives (no clipped word onsets), and a hangover keeps it open
+# after speech ends (no chopped phrase tails).
+# NC-gated silence is near digital zero, so the threshold can sit well below
+# speech level.  Nasals/plosives at word onsets ('m', 'b') are the quietest
+# phonemes (~0.002–0.004 RMS) — a higher threshold swallows them
+# ("My name" → "mmm name").
+_VAD_RMS       = 0.0015
+_VAD_HANG_HOPS = 4    # keep gate open ~510 ms after last speech hop
+
+# Output-gate envelope release time.  Must bridge plosive closures (50–120 ms
+# of true silence inside words) yet close on real silence before the VAD
+# hangover ends: 60 ms holds mask=1.0 through a 120 ms stop and reaches ~0 in
+# ~280 ms of genuine silence.
+_GATE_RELEASE_S = 0.060
+
+
+def _fill_f0_gaps(f0: np.ndarray, max_gap: int = 3) -> np.ndarray:
+    """Interpolate over short unvoiced flickers inside voiced runs.
+
+    Weakly-voiced phonation (nasals, closed vowels, creak) makes RMVPE's
+    voicing decision flicker on/off frame to frame; each off frame switches
+    the NSF vocoder to noise excitation mid-vowel — audible as garbled rasp.
+    Gaps of ≤ max_gap frames (30 ms) flanked by voiced frames are bridged by
+    linear interpolation.  Genuine unvoiced consonants are longer and keep
+    their gap.
+    """
+    v = np.flatnonzero(f0 > 0)
+    if v.size < 2:
+        return f0
+    for a, b in zip(v[:-1], v[1:]):
+        gap = b - a - 1
+        if 0 < gap <= max_gap:
+            f0[a + 1:b] = np.linspace(f0[a], f0[b], gap + 2)[1:-1]
+    return f0
 
 
 def _f0_to_coarse(f0: np.ndarray) -> np.ndarray:
@@ -123,25 +160,46 @@ class RVCPipeline:
         self._rmvpe = None   # RMVPE instance, loaded lazily
         self._device: torch.device | None = None
         self._model_sr: int = 48000
-        self._vtln_alpha: float = 1.0
+        self._params: 'RVCParams | None' = None
         self._context_buf: np.ndarray = np.empty(0, dtype=np.float32)  # previous window tail
         self._new_buf: np.ndarray = np.empty(0, dtype=np.float32)      # accumulates until HOP
         self._out_buf: np.ndarray = np.empty(0, dtype=np.float32)
+        self._vad_hang = 0            # hops of hangover left after last speech
+        self._gate_was_open = False   # for fade-out on speech→silence transition
+        # Output-gate mask for the last _XFADE_OUT samples of the previous hop:
+        # the SOLA crossfade re-synthesises that region, so it must be masked
+        # with the PREVIOUS hop's envelope or silent boundaries click.
+        self._prev_mask_tail = np.zeros(_XFADE_OUT, dtype=np.float32)
+        self._env_last = 0.0          # gate-envelope release carry across hops
+        # Previous hop's envelope tail, for SOLA-shifted mask sourcing
+        self._env_tail = np.zeros(_SOLA_SEARCH * 16000 // _OUTPUT_SR, dtype=np.float32)
+        self._ctx_frozen = False      # context held through silence (speech-only context)
+        # Cold start: context is all silence right after the gate was closed.
+        # The first hops of an utterance then synthesise from a mostly-silence
+        # window → garbled short words.  At cold start we wait for a second
+        # look-ahead hop (256 ms of real right context); the one-hop latency
+        # debt is repaid by emitting fewer zeros during the next silence.
+        self._cold_start = True
         # Debug rolling buffers: name → (list[chunk], total_samples, sample_rate)
         self._dbg_bufs:  dict[str, list[np.ndarray]] = {}
         self._dbg_total: dict[str, int] = {}
         self._dbg_sr:    dict[str, int] = {}
         self._dbg_cycle: int = 0
+        # Rolling per-hop quality metrics for the auto-tuner (thread-safe:
+        # written by the convert thread, drained by the D-Bus thread).
+        self._metrics_lock = threading.Lock()
+        self._metrics: deque[dict] = deque(maxlen=200)
         _DEBUG_DIR.mkdir(parents=True, exist_ok=True)
         logger.info('RVC debug buffers enabled — WAV files → %s', _DEBUG_DIR)
 
     # ── Public ────────────────────────────────────────────────────────────
 
     def load(self, path: Path, device: torch.device,
-             hubert_model: str = 'torchaudio', vtln_alpha: float = 1.0) -> None:
+             params: 'RVCParams | None' = None) -> None:
+        from linux_arctis_manager.voice_changer.rvc.backend import RVCParams
         self._device = device
-        self._vtln_alpha = float(vtln_alpha)
-        if hubert_model == 'contentvec':
+        self._params = params or RVCParams()
+        if self._params.hubert_model == 'contentvec':
             self._load_hubert_contentvec(device)
         else:
             self._load_hubert_torchaudio(device)
@@ -152,9 +210,36 @@ class RVCPipeline:
         # steady state.  Without this, produce == drain exactly, _out_buf is
         # empty when each hop arrives, and the guard never fires.
         self._out_buf = np.zeros(_XFADE_OUT, dtype=np.float32)
+        self._vad_hang = 0
+        self._gate_was_open = False
+        self._prev_mask_tail = np.zeros(_XFADE_OUT, dtype=np.float32)
+        self._env_last = 0.0
+        self._env_tail = np.zeros(_SOLA_SEARCH * 16000 // _OUTPUT_SR, dtype=np.float32)
+        self._cold_start = True
+        self._ctx_frozen = False
         self._load_rmvpe(device)
-        logger.info('RVC pipeline ready on %s (model_sr=%d hubert=%s vtln=%.2f)',
-                    device, self._model_sr, hubert_model, self._vtln_alpha)
+        logger.info('RVC pipeline ready on %s (model_sr=%d params=%s)',
+                    device, self._model_sr, self._params)
+
+    def update_params(self, params: 'RVCParams') -> None:
+        """Swap tuning params live — safe because _params is read once per hop."""
+        self._params = params
+        logger.info('RVC params updated live: %s', params)
+
+    def drain_metrics(self) -> dict:
+        """Return aggregated per-hop quality metrics collected since the last
+        call, then clear the buffer.  Single-consumer (the auto-tuner)."""
+        with self._metrics_lock:
+            hops = list(self._metrics)
+            self._metrics.clear()
+        speaking = [h for h in hops if h['speaking']]
+        return {
+            'hops':          len(hops),
+            'speaking_hops': len(speaking),
+            'sat_ratio':     float(np.mean([h['sat'] for h in speaking])) if speaking else 0.0,
+            'peak':          float(max((h['peak'] for h in speaking), default=0.0)),
+            'in_rms':        float(np.mean([h['in_rms'] for h in speaking])) if speaking else 0.0,
+        }
 
     def unload(self) -> None:
         self._dbg_flush()   # save whatever is in the rolling buffers before teardown
@@ -169,6 +254,13 @@ class RVCPipeline:
         self._context_buf = np.empty(0, dtype=np.float32)
         self._new_buf = np.empty(0, dtype=np.float32)
         self._out_buf = np.zeros(_XFADE_OUT, dtype=np.float32)
+        self._vad_hang = 0
+        self._gate_was_open = False
+        self._prev_mask_tail = np.zeros(_XFADE_OUT, dtype=np.float32)
+        self._env_last = 0.0
+        self._env_tail = np.zeros(_SOLA_SEARCH * 16000 // _OUTPUT_SR, dtype=np.float32)
+        self._cold_start = True
+        self._ctx_frozen = False
 
     def convert(self, audio: np.ndarray, sr: int, pitch_offset: float) -> np.ndarray:
         """
@@ -192,25 +284,75 @@ class RVCPipeline:
 
         self._new_buf = np.concatenate([self._new_buf, audio])
 
-        # Need current hop + one look-ahead hop so _run_inference gets real future
+        # Need current hop + look-ahead so _run_inference gets real future
         # audio as right context instead of an artificial reflect/zero pad.
-        # Extra cost: +_HOP_FRAMES of latency (128ms).
-        while len(self._new_buf) >= 2 * _HOP_FRAMES:
+        # Steady state: 1 look-ahead hop (+128 ms latency).  Cold start (first
+        # hop after silence): 2 look-ahead hops, because the left context is
+        # all silence and short words otherwise synthesise as garbage; the
+        # extra hop of latency is repaid during the next silence.
+        while True:
+            required = (3 if self._cold_start else 2) * _HOP_FRAMES
+            if len(self._new_buf) < required:
+                break
             new_chunk = self._new_buf[:_HOP_FRAMES]
-            look_ahead = self._new_buf[_HOP_FRAMES : 2 * _HOP_FRAMES]
+            look_ahead = self._new_buf[_HOP_FRAMES:required]
             self._new_buf = self._new_buf[_HOP_FRAMES:]
 
             # VAD gate: silence → zeros, no inference.  Keeps context current
-            # so speech onset has proper history when gate reopens.
-            if float(np.sqrt(np.mean(new_chunk ** 2))) < _VAD_RMS:
+            # so speech onset has proper history when gate reopens.  The
+            # look-ahead is checked too, opening the gate one hop early so
+            # word onsets aren't clipped; the hangover keeps it open after
+            # speech so quiet phrase tails aren't chopped.
+            chunk_rms = float(np.sqrt(np.mean(new_chunk ** 2)))
+            la_rms = float(np.sqrt(np.mean(look_ahead ** 2)))
+            if chunk_rms >= _VAD_RMS or la_rms >= _VAD_RMS:
+                self._vad_hang = _VAD_HANG_HOPS
+                gate_open = True
+            elif self._vad_hang > 0:
+                self._vad_hang -= 1
+                gate_open = True
+            else:
+                gate_open = False
+            if not gate_open:
+                with self._metrics_lock:
+                    self._metrics.append(
+                        {'speaking': False, 'sat': 0.0, 'peak': 0.0, 'in_rms': chunk_rms})
                 n_hop_out = _HOP_FRAMES * _OUTPUT_SR // sr
+                # Fade the reserve tail to zero on the speech→silence edge so
+                # the transition into digital silence doesn't click.
+                if self._gate_was_open and len(self._out_buf) >= _XFADE_OUT:
+                    self._out_buf[-_XFADE_OUT:] *= np.linspace(
+                        1.0, 0.0, _XFADE_OUT, dtype=np.float32)
+                self._gate_was_open = False
+                self._cold_start = True
+                self._prev_mask_tail = np.zeros(_XFADE_OUT, dtype=np.float32)
+                # Keep the release envelope decaying through skipped hops
+                self._env_last *= math.exp(-_HOP_FRAMES / (_GATE_RELEASE_S * sr))
+                self._env_tail = np.full_like(self._env_tail, self._env_last)
+                # Repay latency debt from cold-start stalls: any backlog in
+                # _out_buf beyond the reserve + this call's drain is delayed
+                # audio; emit fewer silence zeros so the timing pulls back.
+                excess = max(0, len(self._out_buf) - _XFADE_OUT - n_out)
+                zeros_n = max(0, n_hop_out - excess)
                 self._out_buf = np.concatenate([
-                    self._out_buf, np.zeros(n_hop_out, dtype=np.float32)
+                    self._out_buf, np.zeros(zeros_n, dtype=np.float32)
                 ])
-                self._context_buf = np.concatenate([self._context_buf, new_chunk])
-                if len(self._context_buf) > _CONTEXT_FRAMES:
-                    self._context_buf = self._context_buf[-_CONTEXT_FRAMES:]
+                # Context is FROZEN through silence — do not slide zeros in.
+                # Sliding silence through meant every post-pause word was
+                # synthesised from a silence-dominated window (garbled), while
+                # the same word mid-phrase rode on real speech context and
+                # sounded fine.  Freezing makes a post-pause word look like
+                # continuous speech to the (stateless) model.
+                self._ctx_frozen = True
                 continue
+            self._gate_was_open = True
+
+            # Unfreeze: smooth the splice between the pre-pause speech held in
+            # the frozen context and the new phrase (5 ms fade-out on the old
+            # tail — reads as a natural glottal stop, not a click).
+            if self._ctx_frozen and len(self._context_buf) >= 80:
+                self._context_buf[-80:] *= np.linspace(1.0, 0.0, 80, dtype=np.float32)
+            self._ctx_frozen = False
 
             # Zero-pad context only before the pipeline is warm
             ctx = self._context_buf
@@ -226,48 +368,126 @@ class RVCPipeline:
             full_out = self._run_inference(window, sr, pitch_offset, look_ahead)
             n_hop_out = _HOP_FRAMES * _OUTPUT_SR // sr
 
-            # Take XFADE extra samples from the context region (better quality)
-            # so the crossfade blend uses context output, not new-chunk output.
-            n_take = n_hop_out + _XFADE_OUT
+            # Take extra samples from the context region: crossfade length plus
+            # the SOLA search range, so alignment can slide up to _SOLA_SEARCH.
+            n_take = n_hop_out + _XFADE_OUT + _SOLA_SEARCH
             if len(full_out) >= n_take:
                 hop_ext = full_out[-n_take:]
             else:
                 hop_ext = np.pad(full_out, (0, n_take - len(full_out)))
 
-            # Per-hop soft limiter: linear below _SOFT_THR, tanh-compressed above.
-            # 0.80 catches true clipping peaks without compressing the bulk of
-            # the dynamic range — models with higher native output level were
-            # audibly distorted by the previous 0.55 threshold.
-            _SOFT_THR = 0.80
+            # Quality metrics, measured pre-limiter: sat = fraction of samples
+            # riding the generator's tanh rail (audible harmonic distortion).
+            with self._metrics_lock:
+                self._metrics.append({
+                    'speaking': True,
+                    'sat':      float(np.mean(np.abs(hop_ext) > 0.95)),
+                    'peak':     float(np.abs(hop_ext).max()),
+                    'in_rms':   chunk_rms,
+                })
+
+            # Per-hop soft limiter: linear below the knee, tanh-compressed above.
+            # Default 0.80 catches true clipping peaks without compressing the
+            # bulk of the dynamic range; tunable per model (1.0 disables).
+            _SOFT_THR = self._params.limiter_thr if self._params else 0.80
             _OUT_CEIL = 1.0
-            hop_ext = np.where(
-                np.abs(hop_ext) <= _SOFT_THR,
-                hop_ext,
-                np.sign(hop_ext) * (
-                    _SOFT_THR + (_OUT_CEIL - _SOFT_THR) *
-                    np.tanh((np.abs(hop_ext) - _SOFT_THR) / (_OUT_CEIL - _SOFT_THR))
-                ),
-            ).astype(np.float32)
+            if _SOFT_THR < 0.999:
+                hop_ext = np.where(
+                    np.abs(hop_ext) <= _SOFT_THR,
+                    hop_ext,
+                    np.sign(hop_ext) * (
+                        _SOFT_THR + (_OUT_CEIL - _SOFT_THR) *
+                        np.tanh((np.abs(hop_ext) - _SOFT_THR) / (_OUT_CEIL - _SOFT_THR))
+                    ),
+                ).astype(np.float32)
 
-            # Stage 5: the new-chunk portion sent to pacat (48 kHz)
-            self._dbg_push('05_hop_output_48k', hop_ext[_XFADE_OUT:], _OUTPUT_SR)
+            # SOLA: find the offset (0.._SOLA_SEARCH) where the new output's
+            # waveform best aligns with the un-drained tail of _out_buf, then
+            # crossfade there.  Normalised cross-correlation avoids loudness
+            # bias.  Timing is preserved: exactly n_hop_out samples are
+            # appended regardless of the chosen offset.
+            tail = self._out_buf[-_XFADE_OUT:] if len(self._out_buf) >= _XFADE_OUT else None
+            if tail is not None and np.any(tail):
+                seg = hop_ext[:_XFADE_OUT + _SOLA_SEARCH]
+                corr = np.correlate(seg, tail, 'valid')
+                norm = np.sqrt(
+                    np.convolve(seg.astype(np.float64) ** 2,
+                                np.ones(_XFADE_OUT), 'valid') + 1e-8)
+                k = int(np.argmax(corr / norm))
+            else:
+                k = 0
+            aligned = hop_ext[k:]
+            hop = aligned[_XFADE_OUT:_XFADE_OUT + n_hop_out]
 
-            # Retroactive crossfade: blend hop_ext[:XFADE] into the existing
-            # tail of _out_buf (fade out old tail, fade in new start), then
-            # append the remaining n_hop_out samples.  Output rate unchanged.
-            if len(self._out_buf) >= _XFADE_OUT:
+            # Input-envelope output gate, at 10 ms resolution.  The model
+            # synthesises a noise floor for silent input (NSF unvoiced noise
+            # excitation + VITS prior noise — silence is out-of-distribution
+            # for speech-trained models).  The hop-level VAD can't catch the
+            # short gaps between words/syllables or the hangover hops, so gate
+            # every output sample with the smoothed input envelope of the SAME
+            # time window: silence in → silence out, speech passes untouched.
+            env = np.convolve(np.abs(new_chunk),
+                              np.ones(160, dtype=np.float32) / 160, 'same')
+            # Fast attack, _GATE_RELEASE_S release.  Plosive closures ('p',
+            # 'pp') are genuine 50–120 ms silences inside words; an instantly-
+            # tracking mask chops the stop plus the quiet unstressed syllable
+            # after it ("clipping anymore" → "clip… nymore").  The release
+            # bridges intra-word stops (mask stays 1.0 through a 120 ms
+            # closure) while real silence still gates to ~0 within ~280 ms,
+            # inside the VAD hangover.  env_rel[i] = max(env[j]·decay^(i−j)),
+            # carried across hops via _env_last.
+            decay = math.exp(-1.0 / (_GATE_RELEASE_S * sr))
+            dk = decay ** np.arange(len(env) + 1)
+            a = np.concatenate(([self._env_last], env)) / dk
+            env_rel = (dk * np.maximum.accumulate(a))[1:].astype(np.float32)
+            self._env_last = float(env_rel[-1])
+
+            # Align the mask with the SOLA time shift: the hop content lags
+            # input time by (_SOLA_SEARCH − k) output samples, so an unshifted
+            # mask lands up to 20 ms early and shaves attacks at onsets and
+            # after stops.  Use the previous hop's envelope tail to source the
+            # shifted region.
+            n_tail = _SOLA_SEARCH * sr // _OUTPUT_SR
+            shift = (_SOLA_SEARCH - k) * sr // _OUTPUT_SR
+            ext = np.concatenate([self._env_tail, env_rel])
+            start = n_tail - shift
+            env_shifted = ext[start : start + len(env_rel)]
+            self._env_tail = env_rel[-n_tail:].copy()
+
+            mask = np.clip(env_shifted / 0.002, 0.0, 1.0) ** 2
+            mask_out = np.repeat(mask, _OUTPUT_SR // sr)
+            if len(mask_out) < n_hop_out:
+                mask_out = np.pad(mask_out, (0, n_hop_out - len(mask_out)), mode='edge')
+            mask_out = mask_out[:n_hop_out].astype(np.float32)
+            hop = (hop * mask_out).astype(np.float32)
+
+            # Stage 5: the gated hop sent to pacat (48 kHz)
+            self._dbg_push('05_hop_output_48k', hop, _OUTPUT_SR)
+
+            if tail is not None:
                 fade_out = np.linspace(1.0, 0.0, _XFADE_OUT, dtype=np.float32)
                 fade_in  = 1.0 - fade_out
+                # The crossfade region re-synthesises the tail of the PREVIOUS
+                # hop, so apply the previous hop's gate mask to it — blending
+                # unmasked audio into a masked tail injects a 10 ms noise
+                # burst at every hop boundary (audible as a rhythmic click).
                 self._out_buf[-_XFADE_OUT:] = (
-                    self._out_buf[-_XFADE_OUT:] * fade_out +
-                    hop_ext[:_XFADE_OUT]        * fade_in
+                    tail * fade_out +
+                    aligned[:_XFADE_OUT] * self._prev_mask_tail * fade_in
                 )
-            self._out_buf = np.concatenate([self._out_buf, hop_ext[_XFADE_OUT:]])
+            self._out_buf = np.concatenate([self._out_buf, hop])
+            self._prev_mask_tail = mask_out[-_XFADE_OUT:]
+            self._cold_start = False
 
-            # Slide context forward by one hop
-            self._context_buf = np.concatenate([self._context_buf, new_chunk])
-            if len(self._context_buf) > _CONTEXT_FRAMES:
-                self._context_buf = self._context_buf[-_CONTEXT_FRAMES:]
+            # Slide context forward — but only with chunks that contain actual
+            # speech.  Hangover hops carry near-silence; letting them into the
+            # context would dilute it before the next freeze.
+            if chunk_rms >= _VAD_RMS:
+                self._context_buf = np.concatenate([self._context_buf, new_chunk])
+                if len(self._context_buf) > _CONTEXT_FRAMES:
+                    self._context_buf = self._context_buf[-_CONTEXT_FRAMES:]
+            else:
+                self._ctx_frozen = True
 
             # Flush debug WAVs to disk every _SAVE_EVERY inference cycles
             self._dbg_cycle += 1
@@ -344,9 +564,15 @@ class RVCPipeline:
         import torch as _torch
         ckpt = _torch.load(path, map_location='cpu', weights_only=False)
         logger.info('Checkpoint keys: %s', list(ckpt.keys()))
+        version = ckpt.get('version', 'v1')
         logger.info('Checkpoint version=%r  f0=%r  sr=%r  info=%r',
-                    ckpt.get('version'), ckpt.get('f0'), ckpt.get('sr'),
+                    version, ckpt.get('f0'), ckpt.get('sr'),
                     ckpt.get('info', ckpt.get('epoch_info', '—')))
+        if version != 'v2':
+            raise ValueError(
+                f'Model {path.name!r} is RVC {version}; only v2 (768-dim) is supported. '
+                'Re-download or retrain with v2.'
+            )
         config: list = ckpt['config']
         weights: dict = ckpt['weight']
         self._model_sr = _parse_sr(ckpt.get('sr', config[-1]))
@@ -378,10 +604,16 @@ class RVCPipeline:
     def _extract_f0(self, audio: np.ndarray, sr: int,
                     pitch_offset: float) -> tuple[np.ndarray, np.ndarray]:
         if self._rmvpe is not None:
-            f0 = self._rmvpe.infer(audio)
+            # 0.022 instead of RMVPE's default 0.03: nasal and closed vowels
+            # (e.g. British English) have weak harmonics — anti-formants
+            # cancel them — and sit just under the default threshold, getting
+            # synthesised as noise excitation.  Input is NC-cleaned, so the
+            # lower threshold doesn't pick up environmental noise.
+            f0 = self._rmvpe.infer(audio, threshold=0.022)
         else:
             hop = sr // _FEATURE_RATE   # 160 at 16kHz → 100fps
             f0 = _extract_f0_autocorr(audio, sr, hop)
+        f0 = _fill_f0_gaps(f0)
         if pitch_offset != 0.0:
             voiced = f0 > 0
             f0[voiced] *= 2.0 ** (pitch_offset / 12.0)
@@ -401,17 +633,28 @@ class RVCPipeline:
         # added harmonic distortion that corrupted HuBERT features and made
         # synthesis sound harsh regardless of output-side processing.
         audio = audio - audio.mean()
-        rms = float(np.sqrt(np.mean(audio ** 2)))
-        _TARGET_RMS = 0.10
+        # Active-frame RMS: measure level over speech frames only, not the
+        # whole window.  At a phrase onset the 640 ms window is mostly silence;
+        # whole-window RMS is diluted ~10×, the gain hits its cap, and the
+        # onset reaches the model underdriven — audible as mumbled first
+        # syllables ("My name" → "mmm name").
+        _frames = audio[:len(audio) // 160 * 160].reshape(-1, 160)
+        _fr_rms = np.sqrt(np.mean(_frames ** 2, axis=1))
+        _active = _fr_rms[_fr_rms >= max(float(_fr_rms.max()) * 0.2, 1e-5)]
+        rms = float(np.mean(_active)) if _active.size else float(np.sqrt(np.mean(audio ** 2)))
+        # Default 0.06 keeps the model well below tanh saturation; 0.10 drove
+        # higher-amplitude models into the NSF generator's tanh causing audible
+        # harmonic distortion on every voiced frame.  Tunable per model.
+        _TARGET_RMS = self._params.target_rms if self._params else 0.06
         if rms > 1e-4:
             norm_gain = min(_TARGET_RMS / rms, 4.0)
             audio = audio * norm_gain
         else:
             norm_gain = 1.0
         peak = float(np.abs(audio).max())
-        if peak > 0.90:
-            norm_gain = norm_gain * (0.90 / peak)
-            audio = audio * (0.90 / peak)
+        if peak > 0.70:
+            norm_gain = norm_gain * (0.70 / peak)
+            audio = audio * (0.70 / peak)
         audio = audio.astype(np.float32)
 
         # Right context: use real look-ahead audio when available (caller buffers
@@ -422,13 +665,15 @@ class RVCPipeline:
         # Fall back to zero-pad (silence) when no look-ahead is provided — silence
         # is also in-distribution (standard batch-training padding), unlike reflect.
         # Apply the same DC+gain so the concatenated signal is level-consistent.
-        if look_ahead is not None and len(look_ahead) == _HOP_FRAMES:
+        # Look-ahead is 1 hop in steady state, 2 hops at cold start (the extra
+        # right context is what keeps short words from garbling after silence).
+        if look_ahead is not None and len(look_ahead) >= _HOP_FRAMES:
             la = look_ahead.astype(np.float32)
             la = (la - la.mean()) * norm_gain
             right_pad = la
         else:
             right_pad = np.zeros(_HOP_FRAMES, dtype=np.float32)
-        audio_padded = np.concatenate([audio, right_pad])  # 10240 samples
+        audio_padded = np.concatenate([audio, right_pad])
 
         # Stage 3: normalized original window portion only (for audible diagnosis)
         self._dbg_push('03_normalized_16k', audio, sr)
@@ -437,9 +682,23 @@ class RVCPipeline:
         # toward the model's training distribution (alpha<1 = upward shift for
         # male→female).  F0 is extracted from the original, unwarped audio so
         # pitch is unaffected.
-        hubert_input = _vtln_warp(audio_padded, self._vtln_alpha)
+        vtln_alpha = self._params.vtln_alpha if self._params else 1.0
+        hubert_input = _vtln_warp(audio_padded, vtln_alpha)
         feats = self._extract_features(hubert_input)              # [T_f, 768]
         f0, f0_coarse = self._extract_f0(audio_padded, sr, pitch_offset)
+
+        # F0 median filter (WebUI 'filter_radius'): kills single-frame pitch
+        # spikes that produce glottal bursts / crackle in the NSF source.
+        radius = self._params.filter_radius if self._params else 3
+        if radius >= 3 and len(f0) >= radius:
+            radius |= 1  # ensure odd
+            pad = radius // 2
+            padded = np.pad(f0, pad, mode='edge')
+            windows = np.lib.stride_tricks.sliding_window_view(padded, radius)
+            f0_smooth = np.median(windows, axis=1).astype(f0.dtype)
+            # Don't let the median smear voiced F0 into unvoiced (zero) frames
+            f0 = np.where(f0 > 0, np.where(f0_smooth > 0, f0_smooth, f0), 0.0)
+            f0_coarse = _f0_to_coarse(f0)
 
         voiced = f0[f0 > 0]
         if voiced.size:
@@ -488,6 +747,13 @@ class RVCPipeline:
             out_np = np.pad(out_np, (0, n_out_target - len(out_np)))
 
         out_np = out_np.astype(np.float32)
+
+        # Envelope mix: pull the model's hot sustained output level back toward
+        # the input dynamics.  Directly reduces the perceived clipping — the
+        # model tends to synthesise near-constant high amplitude regardless of
+        # how loudly the source was speaking.
+        rms_rate = self._params.rms_mix_rate if self._params else 1.0
+        out_np = _mix_rms(audio, out_np, rms_rate)
 
         # Stage 4: synthesizer output for the original window (at _OUTPUT_SR)
         self._dbg_push('04_synth_output_48k', out_np, _OUTPUT_SR)
@@ -660,6 +926,37 @@ def _vtln_warp(audio: np.ndarray, alpha: float) -> np.ndarray:
     hi = np.minimum(lo + 1, n_bins - 1)
     warped_spec = spec[lo] * (1.0 - frac) + spec[hi] * frac
     return np.fft.irfft(warped_spec, n=n).astype(np.float32)
+
+
+def _mix_rms(source: np.ndarray, target: np.ndarray, rate: float) -> np.ndarray:
+    """Scale `target`'s volume envelope toward `source`'s (WebUI 'rms_mix_rate').
+
+    rate=1 keeps the model's own envelope; rate=0 makes the output follow the
+    input dynamics exactly.  Unlike the WebUI we transfer only the envelope
+    *shape* (both envelopes are normalised to unit mean first): the input here
+    is already RMS-normalised, and absolute-level transfer would tie output
+    loudness to mic gain.  Sample rates may differ — envelopes are per-frame
+    and interpolated, so only relative timing matters.
+    """
+    if rate >= 0.999 or len(source) == 0 or len(target) == 0:
+        return target
+    n_frames = 32   # ~20ms frames over a 640ms window
+    def _env(x: np.ndarray) -> np.ndarray:
+        frame = max(1, len(x) // n_frames)
+        usable = (len(x) // frame) * frame
+        e = np.sqrt(np.mean(x[:usable].reshape(-1, frame) ** 2, axis=1))
+        e = np.maximum(e, 1e-6)
+        return e / e.mean()
+    env_s = _env(source)
+    env_t = _env(target)
+    if len(env_s) != len(env_t):
+        env_s = np.interp(np.linspace(0, 1, len(env_t)),
+                          np.linspace(0, 1, len(env_s)), env_s)
+    gain = (env_s / env_t) ** (1.0 - rate)
+    gain = np.clip(gain, 0.0, 4.0)
+    gain_full = np.interp(np.linspace(0, 1, len(target)),
+                          np.linspace(0, 1, len(gain)), gain)
+    return (target * gain_full).astype(np.float32)
 
 
 def _resample_audio(audio: np.ndarray, orig_sr: int, target_sr: int) -> np.ndarray:
