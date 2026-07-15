@@ -16,6 +16,12 @@ logger = logging.getLogger('NCManager')
 
 RNNOISE_PLUGIN = 'librnnoise_ladspa'    # /usr/lib64/ladspa/librnnoise_ladspa.so
 RNNOISE_LABEL  = 'noise_suppressor_mono'
+# Control ports: VAD Threshold (%), VAD Grace Period (ms), Retroactive VAD Grace (ms).
+# The plugin HARD-MUTES frames its VAD judges non-voice.  At the default 50 %
+# threshold quiet consonants score below the line and get chopped — liquids
+# after plosives, nasal word endings ("clipping" → "kippin'").  15 % keeps
+# quiet-mic consonants; 350 ms grace bridges word-internal dips and endings.
+RNNOISE_CONTROLS = '15,350,0'
 
 # swh-plugins ships with numeric-suffix filenames (e.g. gate_1410.so on Fedora/Debian).
 # Some distros may use bare names — each list is tried in order; first hit wins.
@@ -195,7 +201,7 @@ class NCManager:
         # Stage 2: RNNoise (always, when NC is active)
         name = self._next_name('RNNoise')
         ok = self._load_ladspa_source(pulse, name, current,
-                                      rnnoise_plugin, RNNOISE_LABEL, '')
+                                      rnnoise_plugin, RNNOISE_LABEL, RNNOISE_CONTROLS)
         if not ok:
             logger.error('NC apply failed: RNNoise stage could not be loaded')
             self._teardown_chain()

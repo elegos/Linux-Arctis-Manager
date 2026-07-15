@@ -82,6 +82,7 @@ class QVCWidget(QWidget):
     sig_delete_result    = Signal(object)
     sig_hf_token         = Signal(object)
     sig_hf_token_saved   = Signal(object)
+    sig_rvc_metrics      = Signal(object)
     _sig_sources_loaded  = Signal(object)
 
     def __init__(self, parent: QWidget, show_title: bool = True) -> None:
@@ -103,11 +104,22 @@ class QVCWidget(QWidget):
         self.sig_delete_result.connect(self._on_delete_result)
         self.sig_hf_token.connect(self._on_hf_token_loaded)
         self.sig_hf_token_saved.connect(self._on_hf_token_saved)
+        self.sig_rvc_metrics.connect(self._on_rvc_metrics)
         self._sig_sources_loaded.connect(self._on_sources_loaded)
 
         self._apply_timer = QTimer(self)
         self._apply_timer.setSingleShot(True)
         self._apply_timer.setInterval(500)
+
+        # Auto-tune controller state
+        self._tune_timer = QTimer(self)
+        self._tune_timer.setInterval(800)
+        self._tune_timer.timeout.connect(
+            lambda: DbusWrapper.request_rvc_metrics(self.sig_rvc_metrics))
+        self._tune_params: dict = {}
+        self._tune_clean_polls = 0
+        self._tune_steps_down = 0
+        self._tune_skip_first = False
         self._apply_timer.timeout.connect(self._apply)
 
         outer = QVBoxLayout()
@@ -516,46 +528,6 @@ class QVCWidget(QWidget):
         hubert_hint.setWordWrap(True)
         cl.addWidget(hubert_hint)
 
-        # ── VTLN (vocal tract length normalization) ────────────────────
-        vtln_sep = QLabel('Vocal tract length normalization (VTLN)')
-        vtln_sep.setStyleSheet('font-weight: bold; margin-top: 6px;')
-        cl.addWidget(vtln_sep)
-
-        vtln_row = QHBoxLayout()
-        vtln_alpha_lbl = QLabel('Warp α')
-        vtln_alpha_lbl.setFixedWidth(50)
-        vtln_alpha_lbl.setToolTip(
-            'Shifts formant frequencies in the HuBERT input so the model\n'
-            'hears your voice as if from a shorter vocal tract (higher formants).\n'
-            'Use when your voice is male and the model was trained on female audio.\n'
-            'Pitch is unaffected — only the model\'s content features change.\n'
-            '1.00 = disabled (no shift).'
-        )
-        vtln_row.addWidget(vtln_alpha_lbl)
-        self._rvc_vtln_sl = QSlider(Qt.Orientation.Horizontal)
-        self._rvc_vtln_sl.setMinimum(65)   # 0.65 (strong upshift)
-        self._rvc_vtln_sl.setMaximum(100)  # 1.00 (no change)
-        self._rvc_vtln_sl.setValue(100)    # default 1.00 = off
-        self._rvc_vtln_sl.setFixedWidth(120)
-        self._rvc_vtln_lbl = QLabel('1.00')
-        self._rvc_vtln_lbl.setFixedWidth(32)
-        self._rvc_vtln_sl.valueChanged.connect(
-            lambda v: (self._rvc_vtln_lbl.setText(f'{v/100:.2f}'),
-                       self._apply_timer.start()))
-        vtln_row.addWidget(self._rvc_vtln_sl)
-        vtln_row.addWidget(self._rvc_vtln_lbl)
-        vtln_row.addStretch()
-        cl.addLayout(vtln_row)
-
-        vtln_hint = QLabel(
-            'α < 1.0 = formants shift up (male→female). '
-            'Try 0.80 as a starting point; lower values = stronger shift. '
-            '1.00 = off.'
-        )
-        vtln_hint.setStyleSheet('font-size: 10px; color: gray;')
-        vtln_hint.setWordWrap(True)
-        cl.addWidget(vtln_hint)
-
         # ── Local models ───────────────────────────────────────────────
         local_sep = QLabel(_T('ui', 'vc_rvc_local_models'))
         local_sep.setStyleSheet('font-weight: bold; margin-top: 6px;')
@@ -565,9 +537,10 @@ class QVCWidget(QWidget):
         model_lbl = QLabel(_T('ui', 'vc_rvc_model'))
         model_lbl.setFixedWidth(80)
         model_row.addWidget(model_lbl)
+        self._rvc_model_params: dict = {}   # per-model tunable snapshots
         self._rvc_model_combo = QComboBox()
         self._rvc_model_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self._rvc_model_combo.currentIndexChanged.connect(lambda _: self._apply())
+        self._rvc_model_combo.currentIndexChanged.connect(self._on_rvc_model_changed)
         model_row.addWidget(self._rvc_model_combo)
         refresh_btn = QPushButton('↻')
         refresh_btn.setFixedWidth(28)
@@ -595,6 +568,101 @@ class QVCWidget(QWidget):
             lambda v: (self._rvc_pitch_lbl.setText(f'{v:+d} st' if v != 0 else '0 st'),
                        self._apply_timer.start()))
         cl.addLayout(row)
+
+        # ── Advanced tuning (persisted per model) ──────────────────────
+        adv_sep = QLabel('Advanced tuning (saved per model)')
+        adv_sep.setStyleSheet('font-weight: bold; margin-top: 6px;')
+        cl.addWidget(adv_sep)
+
+        # VTLN warp: <1 shifts formants up (male voice → female-trained model)
+        row, self._rvc_vtln_sl, self._rvc_vtln_lbl = _slider_row(
+            'VTLN warp α', 65, 100, 100, lambda v: f'{v/100:.2f}')
+        self._rvc_vtln_sl.setToolTip(
+            'Vocal tract length normalization: shifts formant frequencies in the\n'
+            'HuBERT input so the model hears your voice as if from a shorter vocal\n'
+            'tract. Use when your voice is male and the model was trained on female\n'
+            'audio (try 0.80; lower = stronger shift). Pitch is unaffected.\n'
+            '1.00 = disabled.'
+        )
+        self._rvc_vtln_sl.valueChanged.connect(
+            lambda v: (self._rvc_vtln_lbl.setText(f'{v/100:.2f}'),
+                       self._apply_timer.start()))
+        cl.addLayout(row)
+
+        # Envelope mix: 0 % = follow input dynamics, 100 % = model's own envelope
+        row, self._rvc_rms_sl, self._rvc_rms_lbl = _slider_row(
+            'Envelope mix', 0, 100, 25, lambda v: f'{v} %')
+        self._rvc_rms_sl.setToolTip(
+            'How much of the model\'s own volume envelope to keep.\n'
+            'Lower values make the output follow your speaking dynamics,\n'
+            'reducing the sustained hot levels that sound like clipping.'
+        )
+        self._rvc_rms_sl.valueChanged.connect(
+            lambda v: (self._rvc_rms_lbl.setText(f'{v} %'),
+                       self._apply_timer.start()))
+        cl.addLayout(row)
+
+        # F0 median filter: 0 = off, 3/5/7 = radius
+        f0f_row = QHBoxLayout()
+        f0f_lbl = QLabel('F0 smoothing')
+        f0f_lbl.setFixedWidth(140)
+        f0f_row.addWidget(f0f_lbl)
+        self._rvc_f0filt_combo = QComboBox()
+        self._rvc_f0filt_combo.addItem('Off', 0)
+        self._rvc_f0filt_combo.addItem('Light (3)', 3)
+        self._rvc_f0filt_combo.addItem('Medium (5)', 5)
+        self._rvc_f0filt_combo.addItem('Strong (7)', 7)
+        self._rvc_f0filt_combo.setCurrentIndex(1)
+        self._rvc_f0filt_combo.setToolTip(
+            'Median filter on the detected pitch curve. Removes single-frame\n'
+            'pitch spikes that cause crackle/glottal bursts in the output.'
+        )
+        self._rvc_f0filt_combo.currentIndexChanged.connect(lambda _: self._apply())
+        f0f_row.addWidget(self._rvc_f0filt_combo)
+        f0f_row.addStretch()
+        cl.addLayout(f0f_row)
+
+        # Input drive: RMS level fed to the model (×100)
+        row, self._rvc_drive_sl, self._rvc_drive_lbl = _slider_row(
+            'Input drive', 2, 15, 6, lambda v: f'{v/100:.2f}')
+        self._rvc_drive_sl.setToolTip(
+            'Input level fed to the model. Higher = louder, fuller output but\n'
+            'risks saturating the synthesizer (harmonic distortion / clipping).\n'
+            'Lower this if you hear clipping on accented syllables.'
+        )
+        self._rvc_drive_sl.valueChanged.connect(
+            lambda v: (self._rvc_drive_lbl.setText(f'{v/100:.2f}'),
+                       self._apply_timer.start()))
+        cl.addLayout(row)
+
+        # Output soft limiter knee (×100); 1.00 = off
+        row, self._rvc_lim_sl, self._rvc_lim_lbl = _slider_row(
+            'Limiter knee', 50, 100, 80,
+            lambda v: 'Off' if v >= 100 else f'{v/100:.2f}')
+        self._rvc_lim_sl.setToolTip(
+            'Output peaks above this level are softly compressed.\n'
+            '1.00 disables the limiter entirely.'
+        )
+        self._rvc_lim_sl.valueChanged.connect(
+            lambda v: (self._rvc_lim_lbl.setText('Off' if v >= 100 else f'{v/100:.2f}'),
+                       self._apply_timer.start()))
+        cl.addLayout(row)
+
+        # Auto-tune: closed-loop drive calibration against live saturation metrics
+        tune_row = QHBoxLayout()
+        self._rvc_tune_btn = QPushButton('Auto-tune (speak normally)')
+        self._rvc_tune_btn.setCheckable(True)
+        self._rvc_tune_btn.setToolTip(
+            'Monitors the model output while you speak and lowers the input\n'
+            'drive until saturation (clipping) disappears, then saves the\n'
+            'result for this model. Click again to stop early.'
+        )
+        self._rvc_tune_btn.toggled.connect(self._on_tune_toggled)
+        tune_row.addWidget(self._rvc_tune_btn)
+        self._rvc_tune_status = QLabel('')
+        self._rvc_tune_status.setStyleSheet('font-size: 10px; color: gray;')
+        tune_row.addWidget(self._rvc_tune_status, 1)
+        cl.addLayout(tune_row)
 
         open_folder_btn = QPushButton(_T('ui', 'vc_rvc_open_folder'))
         open_folder_btn.clicked.connect(self._open_models_folder)
@@ -854,31 +922,152 @@ class QVCWidget(QWidget):
 
         # RVC
         rv = settings.get('rvc', {})
+        self._rvc_model_params = dict(rv.get('model_params', {}) or {})
         rvc_model = str(rv.get('model', ''))
         if rvc_model:
             idx = self._rvc_model_combo.findData(rvc_model)
             if idx >= 0:
                 self._rvc_model_combo.setCurrentIndex(idx)
-        pitch_off = round(float(rv.get('pitch_offset', 0.0)))
-        self._rvc_pitch_sl.blockSignals(True)
-        self._rvc_pitch_sl.setValue(pitch_off)
-        self._rvc_pitch_sl.blockSignals(False)
-        v = pitch_off
-        self._rvc_pitch_lbl.setText(f'{v:+d} st' if v != 0 else '0 st')
-        hubert = str(rv.get('hubert_model', 'torchaudio'))
-        hidx = self._rvc_hubert_combo.findData(hubert)
+        # The flat rvc keys carry the active model's tunables
+        self._restore_model_params(rv)
+
+        self._loading = False
+        self._update_global_state()
+
+    # ── RVC per-model params ───────────────────────────────────────────
+
+    def _on_rvc_model_changed(self, _: int) -> None:
+        if self._tune_timer.isActive():
+            self._finish_tune(persist=False, message='Model changed — tuning aborted.')
+        if not self._loading:
+            name = self._rvc_model_combo.currentData()
+            saved = self._rvc_model_params.get(name) if name else None
+            if saved:
+                self._restore_model_params(saved)
+        self._apply()
+
+    def _restore_model_params(self, mp: dict) -> None:
+        """Set the per-model tunable controls from a saved snapshot (no signals)."""
+        if not mp:
+            return
+
+        def _sl(sl: QSlider, lbl: QLabel, value: int, fmt) -> None:
+            sl.blockSignals(True)
+            sl.setValue(value)
+            sl.blockSignals(False)
+            lbl.setText(fmt(value))
+
+        v = int(round(float(mp.get('pitch_offset', 0.0))))
+        _sl(self._rvc_pitch_sl, self._rvc_pitch_lbl, v,
+            lambda x: f'{x:+d} st' if x != 0 else '0 st')
+        hidx = self._rvc_hubert_combo.findData(str(mp.get('hubert_model', 'torchaudio')))
         if hidx >= 0:
             self._rvc_hubert_combo.blockSignals(True)
             self._rvc_hubert_combo.setCurrentIndex(hidx)
             self._rvc_hubert_combo.blockSignals(False)
-        vtln_alpha_val = int(round(float(rv.get('vtln_alpha', 1.0)) * 100))
-        self._rvc_vtln_sl.blockSignals(True)
-        self._rvc_vtln_sl.setValue(vtln_alpha_val)
-        self._rvc_vtln_lbl.setText(f'{vtln_alpha_val/100:.2f}')
-        self._rvc_vtln_sl.blockSignals(False)
+        v = int(round(float(mp.get('vtln_alpha', 1.0)) * 100))
+        _sl(self._rvc_vtln_sl, self._rvc_vtln_lbl, v, lambda x: f'{x/100:.2f}')
+        v = int(round(float(mp.get('rms_mix_rate', 0.25)) * 100))
+        _sl(self._rvc_rms_sl, self._rvc_rms_lbl, v, lambda x: f'{x} %')
+        fidx = self._rvc_f0filt_combo.findData(int(mp.get('filter_radius', 3)))
+        if fidx >= 0:
+            self._rvc_f0filt_combo.blockSignals(True)
+            self._rvc_f0filt_combo.setCurrentIndex(fidx)
+            self._rvc_f0filt_combo.blockSignals(False)
+        v = int(round(float(mp.get('target_rms', 0.06)) * 100))
+        _sl(self._rvc_drive_sl, self._rvc_drive_lbl, v, lambda x: f'{x/100:.2f}')
+        v = int(round(float(mp.get('limiter_thr', 0.80)) * 100))
+        _sl(self._rvc_lim_sl, self._rvc_lim_lbl, v,
+            lambda x: 'Off' if x >= 100 else f'{x/100:.2f}')
 
-        self._loading = False
-        self._update_global_state()
+    def _current_model_params(self) -> dict:
+        return {
+            'pitch_offset':  float(self._rvc_pitch_sl.value()),
+            'hubert_model':  self._rvc_hubert_combo.currentData() or 'torchaudio',
+            'vtln_alpha':    self._rvc_vtln_sl.value() / 100.0,
+            'rms_mix_rate':  self._rvc_rms_sl.value() / 100.0,
+            'filter_radius': int(self._rvc_f0filt_combo.currentData() or 0),
+            'target_rms':    self._rvc_drive_sl.value() / 100.0,
+            'limiter_thr':   self._rvc_lim_sl.value() / 100.0,
+        }
+
+    # ── Auto-tune ──────────────────────────────────────────────────────
+    #
+    # Closed loop against the daemon's per-hop saturation metrics:
+    #   sat_ratio = fraction of output samples riding the generator's tanh
+    #   rail while speaking.  > 2 % → step the input drive down (live, no
+    #   chain rebuild); at the drive floor, pull the envelope mix down.
+    #   4 consecutive clean polls → converged: push values into the sliders
+    #   and persist per model.
+
+    def _on_tune_toggled(self, checked: bool) -> None:
+        if checked:
+            self._tune_params = self._current_model_params()
+            self._tune_clean_polls = 0
+            self._tune_steps_down = 0
+            self._tune_skip_first = True
+            # First response drains hops recorded under the old params — ignored.
+            DbusWrapper.request_rvc_metrics(self.sig_rvc_metrics)
+            self._rvc_tune_status.setText('Listening… speak normally.')
+            self._tune_timer.start()
+        else:
+            self._finish_tune(persist=self._tune_steps_down > 0)
+
+    def _finish_tune(self, persist: bool, message: str = '') -> None:
+        self._tune_timer.stop()
+        self._rvc_tune_btn.blockSignals(True)
+        self._rvc_tune_btn.setChecked(False)
+        self._rvc_tune_btn.blockSignals(False)
+        if persist and self._tune_params:
+            self._restore_model_params(self._tune_params)
+            self._apply()
+            message = message or (
+                f'Saved: drive {self._tune_params["target_rms"]:.3f}, '
+                f'mix {self._tune_params["rms_mix_rate"]:.2f}')
+        self._rvc_tune_status.setText(message or 'Stopped.')
+
+    def _on_rvc_metrics(self, m: object) -> None:
+        if not self._tune_timer.isActive() or not isinstance(m, dict) or not m:
+            return
+        if self._tune_skip_first:
+            self._tune_skip_first = False
+            return
+        if int(m.get('speaking_hops', 0)) < 3:
+            self._rvc_tune_status.setText('Waiting for speech…')
+            return
+        sat = float(m.get('sat_ratio', 0.0))
+        drive = float(self._tune_params.get('target_rms', 0.06))
+        if sat > 0.02:
+            self._tune_clean_polls = 0
+            if drive > 0.021:
+                self._tune_params['target_rms'] = round(max(drive - 0.005, 0.02), 3)
+            else:
+                mix = float(self._tune_params.get('rms_mix_rate', 0.25))
+                if mix > 0.06:
+                    self._tune_params['rms_mix_rate'] = round(mix - 0.05, 2)
+                else:
+                    self._finish_tune(
+                        persist=True,
+                        message='Saturation persists at the floor — saved best effort.')
+                    return
+            self._tune_steps_down += 1
+            DbusWrapper.set_rvc_live_params(self._tune_params)
+            self._rvc_tune_status.setText(
+                f'sat {sat*100:.1f} % → drive {self._tune_params["target_rms"]:.3f}, '
+                f'mix {self._tune_params["rms_mix_rate"]:.2f}')
+        elif sat < 0.002:
+            self._tune_clean_polls += 1
+            self._rvc_tune_status.setText(
+                f'clean {self._tune_clean_polls}/4 (sat {sat*100:.2f} %)')
+            if self._tune_clean_polls >= 4:
+                if self._tune_steps_down == 0:
+                    self._finish_tune(persist=False,
+                                      message='Already clean — nothing to adjust.')
+                else:
+                    self._finish_tune(persist=True)
+        else:
+            self._tune_clean_polls = 0
+            self._rvc_tune_status.setText(f'borderline (sat {sat*100:.2f} %)')
 
     # ── Effect enable toggles ──────────────────────────────────────────
 
@@ -930,6 +1119,10 @@ class QVCWidget(QWidget):
     def _apply(self) -> None:
         if self._loading:
             return
+        rvc_model = self._rvc_model_combo.currentData() or ''
+        rvc_params = self._current_model_params()
+        if rvc_model:
+            self._rvc_model_params[rvc_model] = dict(rvc_params)
         DbusWrapper.set_vc_settings({
             'enabled':   self._enable_check.isChecked(),
             'mode':      self._mode_combo.currentData() or 'ladspa',
@@ -967,10 +1160,9 @@ class QVCWidget(QWidget):
                 'tail_db':    float(self._rev_tail_sl.value()),
             },
             'rvc': {
-                'model':        self._rvc_model_combo.currentData() or '',
-                'pitch_offset': float(self._rvc_pitch_sl.value()),
-                'hubert_model': self._rvc_hubert_combo.currentData() or 'torchaudio',
-                'vtln_alpha': self._rvc_vtln_sl.value() / 100.0,
+                'model': rvc_model,
+                **rvc_params,
+                'model_params': self._rvc_model_params,
             },
         })
 

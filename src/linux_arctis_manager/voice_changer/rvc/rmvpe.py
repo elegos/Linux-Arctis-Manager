@@ -282,7 +282,23 @@ class RMVPE:
         sal_win = np.stack([sal_pad[i, c - 4:c + 5] for i, c in enumerate(center)])
         map_win = np.stack([self._cents[c - 4:c + 5]  for c in center])
         cents   = np.sum(sal_win * map_win, 1) / (np.sum(sal_win, 1) + 1e-10)
-        cents[np.max(salience, axis=1) <= thred] = 0
+        peak = np.max(salience, axis=1)
+        cents[peak <= thred] = 0
         f0 = 10.0 * (2.0 ** (cents / 1200))
         f0[f0 == 10] = 0
+        # Onset backfill: at a soft phrase start the first frames of a vowel
+        # have weak salience and are marked unvoiced — the NSF vocoder then
+        # synthesises noise excitation there (garbled starts).  Extend voicing
+        # BACKWARD only, into weak frames (≥ thred/3) directly preceding a
+        # confident onset, copying the onset's F0 (weak frames' own estimates
+        # are too noisy to trust).  Backward-only + copied F0 keeps the
+        # decision stable across overlapping hops; symmetric hysteresis made
+        # marginal frames flip voiced/unvoiced between hops → crackle.
+        weak = peak > (thred / 3.0)
+        onsets = np.flatnonzero((f0[1:] > 0) & (f0[:-1] == 0)) + 1
+        for i in onsets:
+            j = i - 1
+            while j >= 0 and i - j <= 5 and weak[j] and f0[j] == 0:
+                f0[j] = f0[i]
+                j -= 1
         return f0.astype(np.float32)

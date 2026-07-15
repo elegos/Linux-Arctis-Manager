@@ -321,6 +321,14 @@ class DbusWrapper(QObject):
         Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async('GetRVCModels', '', [], qt_signal, is_json=True))).start()
 
     @staticmethod
+    def request_rvc_metrics(qt_signal: SignalInstance) -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async('GetRVCMetrics', '', [], qt_signal, is_json=True))).start()
+
+    @staticmethod
+    def set_rvc_live_params(params: dict) -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async('SetRVCLiveParams', 's', [json.dumps(params)]))).start()
+
+    @staticmethod
     def detect_gpu(qt_signal: SignalInstance) -> None:
         Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async('DetectGPU', '', [], qt_signal, is_json=True))).start()
 

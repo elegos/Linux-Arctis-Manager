@@ -49,10 +49,15 @@ class VCSettings:
     reverb_tail_db:    float  # -70-0 dB
 
     # RVC
-    rvc_model:        str
-    rvc_pitch_offset: float  # semitones
-    rvc_hubert_model: str    # 'torchaudio' | 'contentvec'
-    rvc_vtln_alpha: float  # warp factor: <1 = formants up (male→female); 1.0 = off
+    rvc_model:         str
+    rvc_pitch_offset:  float  # semitones
+    rvc_hubert_model:  str    # 'torchaudio' | 'contentvec'
+    rvc_vtln_alpha:    float  # warp factor: <1 = formants up (male→female); 1.0 = off
+    rvc_rms_mix_rate:  float  # 0 = output follows input envelope, 1 = model's own
+    rvc_filter_radius: int    # F0 median filter length (odd; <3 = off)
+    rvc_target_rms:    float  # input drive into the model
+    rvc_limiter_thr:   float  # output soft-limiter knee (1.0 = off)
+    rvc_model_params:  dict   # per-model snapshots of the tunables, keyed by model name
 
     def __init__(self) -> None:
         self.enabled   = False
@@ -86,10 +91,15 @@ class VCSettings:
         self.reverb_early_db   = -9.0
         self.reverb_tail_db    = -12.0
 
-        self.rvc_model        = ''
-        self.rvc_pitch_offset = 0.0
-        self.rvc_hubert_model = 'torchaudio'
-        self.rvc_vtln_alpha = 1.0
+        self.rvc_model         = ''
+        self.rvc_pitch_offset  = 0.0
+        self.rvc_hubert_model  = 'torchaudio'
+        self.rvc_vtln_alpha    = 1.0
+        self.rvc_rms_mix_rate  = 0.25
+        self.rvc_filter_radius = 3
+        self.rvc_target_rms    = 0.06
+        self.rvc_limiter_thr   = 0.80
+        self.rvc_model_params  = {}
 
     def _to_dict(self) -> dict:
         return {
@@ -129,10 +139,15 @@ class VCSettings:
                 'tail_db':    self.reverb_tail_db,
             },
             'rvc': {
-                'model':        self.rvc_model,
-                'pitch_offset': self.rvc_pitch_offset,
-                'hubert_model': self.rvc_hubert_model,
-                'vtln_alpha': self.rvc_vtln_alpha,
+                'model':         self.rvc_model,
+                'pitch_offset':  self.rvc_pitch_offset,
+                'hubert_model':  self.rvc_hubert_model,
+                'vtln_alpha':    self.rvc_vtln_alpha,
+                'rms_mix_rate':  self.rvc_rms_mix_rate,
+                'filter_radius': self.rvc_filter_radius,
+                'target_rms':    self.rvc_target_rms,
+                'limiter_thr':   self.rvc_limiter_thr,
+                'model_params':  self.rvc_model_params,
             },
         }
 
@@ -187,10 +202,15 @@ class VCSettings:
             s.reverb_tail_db    = float(r.get('tail_db', -12.0))
 
             rv = data.get('rvc', {})
-            s.rvc_model        = str(rv.get('model', ''))
-            s.rvc_pitch_offset = float(rv.get('pitch_offset', 0.0))
-            s.rvc_hubert_model = str(rv.get('hubert_model', 'torchaudio'))
-            s.rvc_vtln_alpha = float(rv.get('vtln_alpha', 1.0))
+            s.rvc_model         = str(rv.get('model', ''))
+            s.rvc_pitch_offset  = float(rv.get('pitch_offset', 0.0))
+            s.rvc_hubert_model  = str(rv.get('hubert_model', 'torchaudio'))
+            s.rvc_vtln_alpha    = float(rv.get('vtln_alpha', 1.0))
+            s.rvc_rms_mix_rate  = float(rv.get('rms_mix_rate', 0.25))
+            s.rvc_filter_radius = int(rv.get('filter_radius', 3))
+            s.rvc_target_rms    = float(rv.get('target_rms', 0.06))
+            s.rvc_limiter_thr   = float(rv.get('limiter_thr', 0.80))
+            s.rvc_model_params  = dict(rv.get('model_params', {}) or {})
 
             _log.debug('Loaded VC settings: mode=%s enabled=%s', s.mode, s.enabled)
         except Exception as e:

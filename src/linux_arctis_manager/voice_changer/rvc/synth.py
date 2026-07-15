@@ -73,7 +73,12 @@ class SynthesizerTrnMs768NSFsid(nn.Module):
         g = self.emb_g(sid).unsqueeze(-1)          # [B, gin_ch, 1]
         x, m_p, logs_p = self.enc_p(phone, pitch, phone_lengths)
         x_mask = torch.ones(1, 1, x.shape[2], device=x.device, dtype=x.dtype)
-        z_p = m_p + torch.randn_like(m_p) * torch.exp(logs_p)
+        # Reduced prior-noise scale (offline RVC uses 1.0): we re-synthesize
+        # overlapping windows 8×/s, and a fresh full-scale noise draw per hop
+        # gives each hop audibly different timbre — heard as warbling/garbled
+        # interference between hops, and non-repeatable output for identical
+        # input.  0.33 keeps some naturalness while making hops consistent.
+        z_p = m_p + torch.randn_like(m_p) * torch.exp(logs_p) * 0.33
         z = self.flow(z_p, x_mask, g=g, reverse=True)
 
         # Interpolate F0 to audio sample rate using the model's actual upsample total

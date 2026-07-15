@@ -72,8 +72,23 @@ class PulseAudioManager:
     def create_virtual_sink(self, name: str, description: str, sink_output: str) -> None:
         sink = next((s for s in self.get_arctis_sinks(ONLY_VIRTUAL) if s.proplist.get('node.name', '') == name), None)
         if sink:
+            # The null sink survives daemon restarts, but its monitor loopback
+            # can be lost (e.g. unloaded by a failed EQ reapply).  Without it
+            # everything played to the sink is silently discarded — recreate.
+            has_loopback = any(
+                m.name == 'module-loopback' and m.argument and f'source={name}.monitor' in m.argument
+                for m in self.pulse.module_list()
+            )
+            if not has_loopback:
+                self.logger.warning(f'Loopback for "{name}.monitor" missing — recreating -> "{sink_output}"')
+                self.pulse.module_load(
+                    'module-loopback',
+                    f'source={name}.monitor '
+                    f'sink={sink_output} '
+                    'latency_msec=0'
+                )
             return
-        
+
         self.logger.info(f'Creating virtual sink "{name}" -> "{sink_output}"...')
         escaped_node_description = description.replace(' ', '\\ ')
         self.pulse.module_load(

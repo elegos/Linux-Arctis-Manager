@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from linux_arctis_manager.voice_changer.rvc.backend import RVCBackend
+from linux_arctis_manager.voice_changer.rvc.backend import RVCBackend, RVCParams
 
 logger = logging.getLogger('OpenVINORVCBackend')
 
@@ -48,8 +48,7 @@ class OpenVINORVCBackend(RVCBackend):
             pass
         return ''
 
-    def load_model(self, path: Path, hubert_model: str = 'torchaudio',
-                   vtln_alpha: float = 1.0) -> None:
+    def load_model(self, path: Path, params: RVCParams | None = None) -> None:
         from openvino import Core
         core = Core()
         self._device_name = self._best_device()

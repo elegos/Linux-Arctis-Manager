@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from linux_arctis_manager.voice_changer.rvc.backend import RVCBackend
+from linux_arctis_manager.voice_changer.rvc.backend import RVCBackend, RVCParams
 
 logger = logging.getLogger('PyTorchRVCBackend')
 
@@ -33,18 +33,27 @@ class PyTorchRVCBackend(RVCBackend):
         except ImportError:
             return False
 
-    def load_model(self, path: Path, hubert_model: str = 'torchaudio',
-                   vtln_alpha: float = 1.0) -> None:
+    def load_model(self, path: Path, params: RVCParams | None = None) -> None:
         import torch
         from linux_arctis_manager.voice_changer.rvc.pipeline import RVCPipeline
         self._pipeline = RVCPipeline()
-        self._pipeline.load(path, torch.device('cuda'),
-                            hubert_model=hubert_model, vtln_alpha=vtln_alpha)
+        self._pipeline.load(path, torch.device('cuda'), params or RVCParams())
 
     def unload_model(self) -> None:
         if self._pipeline is not None:
             self._pipeline.unload()
             self._pipeline = None
+
+    def update_params(self, params: RVCParams) -> bool:
+        if self._pipeline is None:
+            return False
+        self._pipeline.update_params(params)
+        return True
+
+    def get_metrics(self) -> dict | None:
+        if self._pipeline is None:
+            return None
+        return self._pipeline.drain_metrics()
 
     def convert(self, audio: 'np.ndarray', sr: int, pitch_offset: float) -> 'np.ndarray':
         if self._pipeline is None:
