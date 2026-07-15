@@ -32,6 +32,15 @@ ARCTIS_NC_SINK = 'Arctis_NC_Sink'
 ARCTIS_NC_MIC  = 'Arctis_NC_Mic'
 ARCTIS_NC_MIC_DESC = 'Arctis Manager NC Mic'
 
+# Human-readable names for each chain stage, shown as the source's
+# node.description in OS sound settings so it reads as internal plumbing.
+_STAGE_DESCRIPTIONS = {
+    'HPF':     'Arctis NC: High-pass filter (internal)',
+    'RNNoise': 'Arctis NC: Noise suppression (internal)',
+    'Gate':    'Arctis NC: Noise gate (internal)',
+    'Comp':    'Arctis NC: Compressor (internal)',
+}
+
 _LADSPA_SEARCH_PATHS = [
     '/usr/lib/ladspa',
     '/usr/lib64/ladspa',
@@ -185,7 +194,7 @@ class NCManager:
                 hpf_plugin, hpf_label = hpf
                 name = self._next_name('HPF')
                 ok = self._load_ladspa_source(pulse, name, current,
-                                              hpf_plugin, hpf_label, HPF_CONTROLS)
+                                              hpf_plugin, hpf_label, HPF_CONTROLS, 'HPF')
                 if ok:
                     current = name
                     stages_loaded.append('HPF')
@@ -195,7 +204,7 @@ class NCManager:
         # Stage 2: RNNoise (always, when NC is active)
         name = self._next_name('RNNoise')
         ok = self._load_ladspa_source(pulse, name, current,
-                                      rnnoise_plugin, RNNOISE_LABEL, '')
+                                      rnnoise_plugin, RNNOISE_LABEL, '', 'RNNoise')
         if not ok:
             logger.error('NC apply failed: RNNoise stage could not be loaded')
             self._teardown_chain()
@@ -213,7 +222,7 @@ class NCManager:
                 name = self._next_name('Gate')
                 ok = self._load_ladspa_source(pulse, name, current,
                                               gate_plugin, gate_label,
-                                              config.gate.ladspa_controls())
+                                              config.gate.ladspa_controls(), 'Gate')
                 if ok:
                     current = name
                     stages_loaded.append('Gate')
@@ -230,7 +239,7 @@ class NCManager:
                 name = self._next_name('Comp')
                 ok = self._load_ladspa_source(pulse, name, current,
                                               comp_plugin, comp_label,
-                                              config.compressor.ladspa_controls())
+                                              config.compressor.ladspa_controls(), 'Comp')
                 if ok:
                     current = name
                     stages_loaded.append('Comp')
@@ -269,9 +278,11 @@ class NCManager:
 
     def _load_ladspa_source(self, pulse: pulsectl.Pulse, name: str,
                              master: str, plugin: str, label: str,
-                             controls: str) -> bool:
+                             controls: str, stage: str) -> bool:
+        description = _STAGE_DESCRIPTIONS.get(stage, name).replace(' ', '\\ ')
         args = (f'source_name={name} master={master} '
-                f'plugin={plugin} label={label}')
+                f'plugin={plugin} label={label} '
+                f'source_properties=node.description="{description}"')
         if controls:
             args += f' control={controls}'
         logger.debug('module-ladspa-source args: %s', args)
@@ -295,12 +306,14 @@ class NCManager:
             if existing:
                 logger.debug('NC null sink %r already exists', ARCTIS_NC_SINK)
                 return True
+            sink_desc = 'Arctis\\ NC\\ Output\\ (internal)'
+            source_desc = ARCTIS_NC_MIC_DESC.replace(' ', '\\ ')
             idx = pulse.module_load(
                 'module-null-sink',
                 f'sink_name={ARCTIS_NC_SINK} '
-                f'sink_properties=node.description="Arctis NC Output" '
+                f'sink_properties=node.description="{sink_desc}" '
                 f'source_name={ARCTIS_NC_MIC} '
-                f'source_properties=node.description="{ARCTIS_NC_MIC_DESC}"',
+                f'source_properties=node.description="{source_desc}"',
             )
             self._null_sink_module = idx
             logger.info('NC null sink %r created (module %d)', ARCTIS_NC_SINK, idx)
