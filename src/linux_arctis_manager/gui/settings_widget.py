@@ -3,7 +3,7 @@ from typing import Callable
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QSlider,
-                               QVBoxLayout, QWidget)
+                               QScrollArea, QVBoxLayout, QWidget)
 
 from linux_arctis_manager.config import ConfigSetting, SettingType
 from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
@@ -38,8 +38,14 @@ class QSettingsWidget(QWidget):
         title_widget.setFont(title_font)
         layout.addWidget(title_widget)
 
-        self.main_layout = QVBoxLayout()
-        layout.addLayout(self.main_layout)
+        self.settings_scroll = QScrollArea()
+        self.settings_scroll.setWidgetResizable(True)
+        self.settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.settings_container = QWidget()
+        self.main_layout = QVBoxLayout(self.settings_container)
+        self.main_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.settings_scroll.setWidget(self.settings_container)
+        layout.addWidget(self.settings_scroll)
 
         self.title = I18n.get_instance().translate('ui', i18n_section_name)
         self.dbus_settings_section = dbus_settings_section
