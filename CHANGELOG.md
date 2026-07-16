@@ -31,13 +31,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Fixed
 
-- Switching EQ presets no longer interrupts audio playback in apps such as Spotify. Previously, unloading the LADSPA module broadcast a PipeWire sink-removal event to all clients, causing them to reset their streams. LADSPA modules are now accumulated and kept idle for the session lifetime, cleaned up only on headset disconnect.
+- Switching EQ presets, gains, or toggling EQ on/off no longer interrupts audio playback in apps such as Spotify, and no longer piles up dozens of unused PipeWire sinks over a session. Previously, every EQ change loaded a fresh LADSPA module and left the old one behind (idle, to avoid a PipeWire sink-removal event resetting playback streams). Changes are now pushed live to the existing LADSPA node instead, so the same sink and module are reused for the whole session — nothing to leak, nothing to reset.
+- Internal EQ and noise-cancellation virtual devices are now clearly labelled (e.g. `Arctis Media EQ (internal)`) instead of showing truncated or garbled names in system sound settings.
 - RVC voice changer: fixed a range of real-time synthesis artifacts — periodic clicking, dropped/garbled syllables at the start of phrases and after pauses, unintelligible isolated short words, and inconsistent output when repeating the same phrase. These were caused by issues specific to streaming (window-by-window) synthesis: hard cuts between overlapping synthesis windows, silence handling that fed the model artificial padding, and per-window randomness in the synthesizer.
 - Noise cancellation: quiet consonants (e.g. nasals, word-final sounds) were sometimes being swallowed by the RNNoise/gate stages before reaching the voice changer, corrupting speech at the source; detection and gate release timing have been tuned to preserve them.
 - Sidetone preview no longer stays silent when the underlying virtual audio routing had been rebuilt since the daemon started; the daemon also now self-heals that routing on restart.
 
 ## Changed
 
+- The noise-cancellation chain now runs as a single native PipeWire filter-chain graph in a dedicated process, exposing exactly one recording device (`Arctis Manager NC Mic`) instead of one source per LADSPA stage plus a null sink and its monitor. Settings changes are pushed live to the running graph (disabled stages are neutralized/bypassed via their controls), so the microphone device never disappears from running apps when tweaking NC parameters. The previous per-plugin PulseAudio module chain is kept as an automatic fallback when PipeWire native tools are unavailable.
 - Device detection now uses the USB iProduct string (e.g. `Arctis Nova Pro Wireless`) as the primary identifier, scoped to the SteelSeries vendor ID. Product IDs remain as a tiebreaker when multiple configurations share the same product name (e.g. Nova 7 Wireless discrete vs. percentage battery variants), and as the sole matching method for configurations that do not declare a `product_string`. This allows firmware updates that change the product ID to still be recognised automatically; unknown PIDs that match by name log a warning suggesting udev rules may need updating.
 
 ## [2.4.1]

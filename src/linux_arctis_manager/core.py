@@ -296,14 +296,19 @@ class CoreEngine:
             return
         if self.eq_manager is None:
             self.eq_manager = EQManager()
-        # Load new LADSPA module (unique name); old modules stay idle — see EQManager.reapply().
-        new_targets = self.eq_manager.reapply(physical_name, eq_config)
-        for null_sink, output in (
-            (PULSE_MEDIA_NODE_NAME, new_targets.get('media', physical_name)),
-            (PULSE_CHAT_NODE_NAME,  new_targets.get('chat',  physical_name)),
+        # Gains on an already-active channel are pushed live to the running
+        # sink (see EQManager.reapply()); only a channel whose sink actually
+        # changed needs its loopback cable rerouted.
+        new_targets, changed_channels = self.eq_manager.reapply(physical_name, eq_config)
+        for null_sink, output, channel in (
+            (PULSE_MEDIA_NODE_NAME, new_targets.get('media', physical_name), 'media'),
+            (PULSE_CHAT_NODE_NAME,  new_targets.get('chat',  physical_name), 'chat'),
         ):
+            if channel not in changed_channels:
+                continue
             try:
                 self.pa_audio_manager.update_virtual_sink_loopback(null_sink, output)
+                self.eq_manager.unload_stale_module(channel)
             except Exception as e:
                 self.logger.warning('reapply_eq: redirect loopback for %s: %s', null_sink, e)
 
