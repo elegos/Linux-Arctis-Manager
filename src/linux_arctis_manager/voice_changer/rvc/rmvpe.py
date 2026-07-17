@@ -265,8 +265,13 @@ class RMVPE:
         logger.info('RMVPE loaded on %s', device)
 
     @torch.inference_mode()
-    def infer(self, audio: np.ndarray, threshold: float = 0.03) -> np.ndarray:
-        """audio: float32 at 16 kHz.  Returns F0 Hz array at 100 fps, 0 = unvoiced."""
+    def infer(self, audio: np.ndarray, threshold: float = 0.03) -> tuple[np.ndarray, np.ndarray]:
+        """audio: float32 at 16 kHz.
+
+        Returns (f0, confidence): F0 Hz at 100 fps (0 = unvoiced) and the
+        per-frame salience peak (0..1) — weak for creak/fry, strong for
+        cleanly-phonated (including sung) frames.
+        """
         wav = torch.from_numpy(audio).float().unsqueeze(0).to(self.device)
         mel = self._mel(wav)                   # [1, 128, T]
         n_frames = mel.shape[-1]
@@ -276,7 +281,7 @@ class RMVPE:
         hidden = self._model(mel)[:, :n_frames].squeeze(0).cpu().numpy()  # [T, 360]
         return self._decode(hidden, threshold)
 
-    def _decode(self, salience: np.ndarray, thred: float) -> np.ndarray:
+    def _decode(self, salience: np.ndarray, thred: float) -> tuple[np.ndarray, np.ndarray]:
         center  = np.argmax(salience, axis=1) + 4          # [T], offset into padded
         sal_pad = np.pad(salience, ((0, 0), (4, 4)))       # [T, 368]
         sal_win = np.stack([sal_pad[i, c - 4:c + 5] for i, c in enumerate(center)])
@@ -301,4 +306,4 @@ class RMVPE:
             while j >= 0 and i - j <= 5 and weak[j] and f0[j] == 0:
                 f0[j] = f0[i]
                 j -= 1
-        return f0.astype(np.float32)
+        return f0.astype(np.float32), peak.astype(np.float32)
