@@ -47,3 +47,8 @@ UDEV_RULES_PATHS = [
     '/etc/udev/rules.d/91-steelseries-arctis.rules',
     '/usr/lib/udev/rules.d/91-steelseries-arctis.rules',
 ]
+
+# Voice-changer output sink name.  Lives here (not in the VC chain modules)
+# so core can reference it at daemon boot without importing modules that
+# require the AI environment (numpy etc.), which is activated lazily.
+ARCTIS_VC_SINK = 'Arctis_VC_Sink'

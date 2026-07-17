@@ -13,7 +13,7 @@ from linux_arctis_manager.voice_changer.rvc.registry import BackendRegistry
 
 logger = logging.getLogger('RVCVoiceChanger')
 
-ARCTIS_VC_SINK     = 'Arctis_VC_Sink'
+from linux_arctis_manager.constants import ARCTIS_VC_SINK  # noqa: E402 — single source
 ARCTIS_VC_MIC      = 'Arctis_VC_Mic'
 ARCTIS_VC_MIC_DESC = 'Arctis Manager VC Mic'
 
