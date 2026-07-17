@@ -46,7 +46,11 @@ _COMP_MONO_CANDIDATES = [('sc4m_1916', 'sc4m'), ('sc4m', 'sc4m')]
 # Fixed virtual source that apps should select once and always have available.
 ARCTIS_NC_SINK = 'Arctis_NC_Sink'
 ARCTIS_NC_MIC  = 'Arctis_NC_Mic'
-ARCTIS_NC_MIC_DESC = 'Arctis Manager NC Mic'
+# "(internal)" + virtual classification: apps should record from the
+# MicRouter-managed Arctis_Manager_Mic, which always follows the active
+# chain (VC or NC).  The NC tap is plumbing, styled like the EQ sinks so
+# desktop mixers hide it by default.
+ARCTIS_NC_MIC_DESC = 'Arctis Manager NC Mic (internal)'
 
 # Human-readable names for each chain stage, shown as the source's
 # node.description in OS sound settings so it reads as internal plumbing.
@@ -527,11 +531,11 @@ context.modules = [
             playback.props = {{
                 node.name    = "{ARCTIS_NC_MIC}"
                 media.class  = Audio/Source
-                # Present as a regular (non-virtual) device so KDE's volume
-                # applet lists it alongside real microphones; virtual/filter
-                # devices are hidden there by default.
-                node.virtual = false
-                device.class = "sound"
+                # Internal plumbing: apps record from Arctis_Manager_Mic
+                # (MicRouter), which follows the active chain.  Classified
+                # virtual so desktop mixers hide it, like the EQ sinks.
+                node.virtual = true
+                device.class = "filter"
             }}
         }}
     }}

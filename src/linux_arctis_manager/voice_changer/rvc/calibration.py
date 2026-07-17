@@ -95,9 +95,13 @@ class CalibrationSession:
             # filter-chain nodes that the PulseAudio compat layer does not
             # always expose — parec silently records nothing from them.
             # '-' streams raw samples to stdout.
+            # Stereo float32, downmixed by averaging in record_stop: asking
+            # pw-record for mono makes it SUM the source channels (measured
+            # 2-3× gain), hard-clipping speech — clipped input corrupts
+            # HuBERT features and the renders come out as static-like noise.
             cmd = ['pw-record', '--target', source_id,
-                   '--rate', str(_RECORD_SR), '--channels', '1',
-                   '--format', 's16', '-']
+                   '--rate', str(_RECORD_SR), '--channels', '2',
+                   '--format', 'f32', '-']
             try:
                 self._rec_proc = subprocess.Popen(
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
@@ -116,7 +120,7 @@ class CalibrationSession:
     def _drain_rec(self) -> None:
         proc = self._rec_proc
         assert proc is not None and proc.stdout is not None
-        limit = _MAX_RECORD_SECS * _RECORD_SR * 2
+        limit = _MAX_RECORD_SECS * _RECORD_SR * 8   # f32 stereo
         while True:
             chunk = proc.stdout.read(4096)
             if not chunk:
@@ -142,14 +146,19 @@ class CalibrationSession:
             self._rec_proc = None
 
             path = CALIBRATION_DIR / 'original.wav'
+            # Raw f32 stereo → average-downmix to mono, then s16 wav.
+            buf = bytes(self._rec_buf)
+            buf = buf[:len(buf) // 8 * 8]
+            frames = np.frombuffer(buf, dtype=np.float32).reshape(-1, 2)
+            frames = np.nan_to_num(frames, nan=0.0, posinf=0.0, neginf=0.0)
+            mono = np.clip(frames.mean(axis=1), -1.0, 1.0)
             with wave.open(str(path), 'w') as f:
                 f.setnchannels(1)
                 f.setsampwidth(2)
                 f.setframerate(_RECORD_SR)
-                f.writeframes(bytes(self._rec_buf))
-            secs = len(self._rec_buf) / 2 / _RECORD_SR
-            samples = np.frombuffer(bytes(self._rec_buf), dtype=np.int16)
-            self.peak = float(np.abs(samples).max()) / 32768 if samples.size else 0.0
+                f.writeframes((mono * 32767).astype(np.int16).tobytes())
+            secs = len(mono) / _RECORD_SR
+            self.peak = float(np.abs(mono).max()) if mono.size else 0.0
             self.recording_path = path
             self.state = 'recorded'
             logger.info('calibration recording stopped: %.1f s, peak %.3f → %s',

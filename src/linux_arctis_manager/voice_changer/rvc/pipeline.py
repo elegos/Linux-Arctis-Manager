@@ -577,8 +577,15 @@ class RVCPipeline:
             # breath, room noise — that the model happily voices; raising the
             # knee to half the running speech level crushes that hallucinated
             # tail while a genuinely quiet phrase tail (still speech-classed
-            # by the relative VAD) is untouched.
-            knee = 0.002 if not hangover_hop else max(0.002, 0.5 * self._speech_rms)
+            # by the relative VAD) is untouched.  The FIRST hangover hop keeps
+            # the gentle knee: word-final plosive releases (t/k/p in "cup",
+            # "top") are quiet aperiodic bursts landing right after the last
+            # speech-classed hop, and the harsh knee was deleting them
+            # ("popping words cut").  Breath onset in that one 128 ms hop is
+            # an acceptable leak; hops 2+ still crush.
+            first_hang = hangover_hop and self._vad_hang >= _VAD_HANG_HOPS - 1
+            harsh = hangover_hop and not first_hang
+            knee = max(0.002, 0.5 * self._speech_rms) if harsh else 0.002
             mask = np.clip(env_shifted / knee, 0.0, 1.0) ** 2
             mask_out = np.repeat(mask, _OUTPUT_SR // sr)
             if len(mask_out) < n_hop_out:
@@ -739,10 +746,11 @@ class RVCPipeline:
             # cancel them — and sit just under the default threshold, getting
             # synthesised as noise excitation.  Input is NC-cleaned, so the
             # lower threshold doesn't pick up environmental noise.
-            f0 = self._rmvpe.infer(audio, threshold=0.022)
+            f0, f0_conf = self._rmvpe.infer(audio, threshold=0.022)
         else:
             hop = sr // _FEATURE_RATE   # 160 at 16kHz → 100fps
             f0 = _extract_f0_autocorr(audio, sr, hop)
+            f0_conf = None
         # max_gap 8 (80 ms): phrase-final creaky voice makes RMVPE drop 50–80 ms
         # of a voiced nasal mid-word ("Ginny") to unvoiced; the NSF then
         # switches to noise excitation in the middle of the word (heard as a
@@ -766,14 +774,33 @@ class RVCPipeline:
         if voiced.size >= 20:
             self._f0_meds.append(float(np.median(voiced)))
         # Apply the floor only once there is enough evidence of the modal
-        # pitch.  0.9× the modal median: tight enough to keep the NSF stable
-        # on fry (which lives at ~0.6–0.7× modal), loose enough that normal
-        # declination inside phrases is untouched most of the time.
-        # Perceptually fry is quasi-static, so pinning it is inaudible.
+        # pitch.  0.8× the modal median: floors true fry (~0.6–0.7× modal)
+        # while leaving normal phrase declination free to move.  0.9 measured
+        # marginally better on fry stability but audibly flattened intonation
+        # — recordings read as monotone/robotic, and a flattened F0 track
+        # also makes the NSF pulse train more regular (buzzier).
+        # Scope: flooring every low frame snapped sung low notes to the floor
+        # ("auto-tune" effect).  Fry and sung notes can both be confidently
+        # tracked, so salience alone cannot separate them — context can:
+        # a phrase-final fall is followed by silence inside this window, a
+        # sustained sung note is not.  Floor (a) weak-salience frames (true
+        # creak) anywhere, and (b) the last voiced run of the window when the
+        # window ends in ≥100 ms of unvoiced (phrase-final tail, capped at
+        # 300 ms so a long sung phrase ending is not flattened wholesale).
         if voiced.size and len(self._f0_meds) >= 5:
             anchor = float(np.median(self._f0_meds))
-            floor = max(55.0, 0.9 * anchor)
-            f0 = np.where((f0 > 0) & (f0 < floor), floor, f0)
+            floor = max(55.0, 0.8 * anchor)
+            apply = ((f0_conf < 0.10) if f0_conf is not None and len(f0_conf) == len(f0)
+                     else np.zeros(len(f0), dtype=bool))
+            v_idx = np.flatnonzero(f0 > 0)
+            if v_idx.size and len(f0) - 1 - v_idx[-1] >= 10:
+                run_end = v_idx[-1]
+                run_start = run_end
+                while run_start > 0 and f0[run_start - 1] > 0:
+                    run_start -= 1
+                run_start = max(run_start, run_end - 30)
+                apply[run_start:run_end + 1] = True
+            f0 = np.where((f0 > 0) & (f0 < floor) & apply, floor, f0)
 
         coarse = _f0_to_coarse(f0)
         return f0.astype(np.float32), coarse

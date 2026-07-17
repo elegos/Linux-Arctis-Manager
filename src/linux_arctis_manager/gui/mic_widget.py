@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import subprocess
 
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QHideEvent
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QPushButton, QTabWidget, QVBoxLayout, QWidget
 
@@ -119,18 +120,33 @@ class QMicWidget(QWidget):
         # settings apply, the daemon may rebuild the chain and recreate
         # Arctis_VC_Sink, orphaning the pinned loopback.  Restart the preview
         # once the rebuild has settled so the user doesn't have to.
+        self._preview_restart_tries = 0
         self.vc_widget.sig_applied.connect(self._on_vc_applied)
 
     def _on_vc_applied(self) -> None:
-        if self._preview.active:
-            from PySide6.QtCore import QTimer
+        if self._preview_btn.isChecked():
+            self._preview_restart_tries = 0
             QTimer.singleShot(1500, self._restart_preview)
 
     def _restart_preview(self) -> None:
-        if not self._preview.active:
+        """Reload the preview loopback, waiting out a VC chain rebuild.
+
+        A VC apply rebuilds the chain over several seconds (model load), and
+        MicRouter recreates its nodes at the end — restarting too early pins
+        the loopback to a source that is missing or about to be destroyed.
+        Retry until the expected VC sink monitor is back (or, as a last
+        resort, start with whatever endpoint is available).
+        """
+        if not self._preview_btn.isChecked():
             return
+        self._preview_restart_tries += 1
         source, sink = self._pick_preview_endpoints()
-        self._preview.start(source, sink)
+        vc_on = self.vc_widget._enable_check.isChecked()
+        waiting = vc_on and source != 'Arctis_VC_Sink.monitor' \
+            and self._preview_restart_tries < 10
+        ok = False if waiting else self._preview.start(source, sink)
+        if not ok and self._preview_restart_tries < 10:
+            QTimer.singleShot(1500, self._restart_preview)
 
     def hideEvent(self, event: QHideEvent) -> None:
         super().hideEvent(event)
@@ -175,10 +191,9 @@ class QMicWidget(QWidget):
 
     def _on_preview_toggled(self, checked: bool) -> None:
         if checked:
-            source, sink = self._pick_preview_endpoints()
-            if not self._preview.start(source, sink):
-                self._preview_btn.blockSignals(True)
-                self._preview_btn.setChecked(False)
-                self._preview_btn.blockSignals(False)
+            # Same retrying path as the post-VC-apply restart: the VC chain
+            # may be mid-rebuild when the user hits the button.
+            self._preview_restart_tries = 0
+            self._restart_preview()
         else:
             self._preview.stop()
