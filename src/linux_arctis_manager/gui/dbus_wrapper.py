@@ -329,6 +329,23 @@ class DbusWrapper(QObject):
         Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async('SetRVCLiveParams', 's', [json.dumps(params)]))).start()
 
     @staticmethod
+    def calibration_start_recording(qt_signal: SignalInstance) -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async('CalibrationStartRecording', '', [], qt_signal))).start()
+
+    @staticmethod
+    def calibration_stop_recording(qt_signal: SignalInstance) -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async('CalibrationStopRecording', '', [], qt_signal))).start()
+
+    @staticmethod
+    def calibration_start_render(refine_params: dict | None, qt_signal: SignalInstance) -> None:
+        payload = json.dumps(refine_params) if refine_params else ''
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async('CalibrationStartRender', 's', [payload], qt_signal))).start()
+
+    @staticmethod
+    def calibration_get_status(qt_signal: SignalInstance) -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async('CalibrationGetStatus', '', [], qt_signal, is_json=True))).start()
+
+    @staticmethod
     def detect_gpu(qt_signal: SignalInstance) -> None:
         Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async('DetectGPU', '', [], qt_signal, is_json=True))).start()
 

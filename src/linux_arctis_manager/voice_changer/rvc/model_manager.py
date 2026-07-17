@@ -13,6 +13,15 @@ RVC_MODELS_FOLDER = Path.home() / '.config' / 'arctis_manager' / 'rvc_models'
 class RVCModel:
     name: str          # display name (stem of the .pth file)
     path: Path         # absolute path to the .pth file
+    has_index: bool = False   # a FAISS .index file sits next to the model
+
+    @staticmethod
+    def index_exists(pth: Path) -> bool:
+        """Same matching rule as the pipeline: '<stem>.index' or any
+        '*.index' whose filename contains the model stem."""
+        if (pth.parent / f'{pth.stem}.index').is_file():
+            return True
+        return any(pth.stem in p.stem for p in pth.parent.glob('*.index'))
 
 
 class RVCModelManager:
@@ -28,7 +37,7 @@ class RVCModelManager:
         if not folder.exists():
             return []
         models = [
-            RVCModel(name=p.stem, path=p)
+            RVCModel(name=p.stem, path=p, has_index=RVCModel.index_exists(p))
             for p in sorted(folder.iterdir())
             if p.suffix == '.pth' and p.is_file()
         ]

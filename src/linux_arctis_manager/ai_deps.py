@@ -116,19 +116,19 @@ def install_ai_deps(backend: str, progress_cb: Callable[[str], None]) -> bool:
         pass
 
     if backend == 'nvidia':
-        packages = ['numpy', 'torch', 'torchaudio']
+        packages = ['numpy', 'torch', 'torchaudio', 'faiss-cpu']
         extra = ['--extra-index-url', 'https://download.pytorch.org/whl/cu124']
         progress_cb('Installing PyTorch (CUDA)...')
     elif backend == 'amd':
-        packages = ['numpy', 'torch', 'torchaudio']
+        packages = ['numpy', 'torch', 'torchaudio', 'faiss-cpu']
         extra = ['--extra-index-url', 'https://download.pytorch.org/whl/rocm6.2']
         progress_cb('Installing PyTorch (ROCm)...')
     elif backend == 'intel':
-        packages = ['numpy', 'openvino']
+        packages = ['numpy', 'openvino', 'faiss-cpu']
         extra = []
         progress_cb('Installing OpenVINO...')
     else:
-        packages = ['numpy', 'torch', 'torchaudio']
+        packages = ['numpy', 'torch', 'torchaudio', 'faiss-cpu']
         extra = []
         progress_cb('Installing PyTorch (CPU)...')
 

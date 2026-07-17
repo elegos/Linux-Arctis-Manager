@@ -14,6 +14,7 @@ class RVCParams:
     filter_radius: int   = 3      # F0 median filter length (odd; <3 = off)
     target_rms:    float = 0.06   # input drive into the model (higher = louder but risks saturation)
     limiter_thr:   float = 0.80   # output soft-limiter knee (1.0 = off)
+    index_rate:    float = 0.0    # FAISS feature-retrieval blend (0 = off; needs a .index file)
 
 
 class RVCBackend(ABC):
