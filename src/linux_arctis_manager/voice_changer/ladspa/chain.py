@@ -10,7 +10,7 @@ from linux_arctis_manager.voice_changer.ladspa.effects import (
 
 logger = logging.getLogger('LADSPAVoiceChanger')
 
-ARCTIS_VC_SINK     = 'Arctis_VC_Sink'
+from linux_arctis_manager.constants import ARCTIS_VC_SINK  # noqa: E402 — single source
 ARCTIS_VC_MIC      = 'Arctis_VC_Mic'
 ARCTIS_VC_MIC_DESC = 'Arctis Manager VC Mic'
 

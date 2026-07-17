@@ -333,7 +333,7 @@ class CoreEngine:
 
     def _update_mic_routing(self) -> None:
         from linux_arctis_manager.mic_router import MicRouter
-        from linux_arctis_manager.voice_changer.rvc.rvc_chain import ARCTIS_VC_SINK
+        from linux_arctis_manager.constants import ARCTIS_VC_SINK
         if self.mic_router is None:
             self.mic_router = MicRouter()
         vc_active = bool(self.vc_manager and getattr(self.vc_manager, '_rvc', None))
