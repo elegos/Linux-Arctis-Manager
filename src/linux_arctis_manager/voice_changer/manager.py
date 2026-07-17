@@ -66,6 +66,7 @@ class VoiceChangerManager:
             filter_radius=settings.rvc_filter_radius,
             target_rms=settings.rvc_target_rms,
             limiter_thr=settings.rvc_limiter_thr,
+            index_rate=settings.rvc_index_rate,
         )
         ok = chain.apply(
             source_id=source_id,

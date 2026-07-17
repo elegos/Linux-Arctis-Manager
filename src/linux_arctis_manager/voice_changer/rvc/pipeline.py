@@ -77,6 +77,39 @@ _SOLA_SEARCH = 960    # 20 ms @ 48 kHz alignment search range
 _VAD_RMS       = 0.0015
 _VAD_HANG_HOPS = 4    # keep gate open ~510 ms after last speech hop
 
+# Relative VAD: a hop must also reach this fraction of the running speech
+# level (peak-hold, slow decay) to count as speech.  Breath after a phrase is
+# real acoustic energy above the absolute floor (~-46 dB) but 15–20 dB below
+# speech; without this it holds the gate open and the RMS-normalised window
+# drives the model to synthesise voice out of the breath — heard as random
+# vocals/mumbling at every phrase end.  0.2 ≈ -14 dB relative: quiet
+# word-onset nasals still pass because their look-ahead hop carries the word
+# body (the gate opens on chunk OR look-ahead level).
+_VAD_REL        = 0.2
+# Speech-level tracker: instant attack, ~1.3 s release (10 speech hops)
+# toward the current level, so a speaker dropping from loud to quiet isn't
+# gated by a stale loud reference.  Only speech-classed hops update it.
+_SPEECH_RMS_RELEASE = 0.9
+
+# Voicedness rescue: a natural phrase-final syllable decays through the
+# relative VAD threshold while still strongly periodic (measured ~0.7
+# normalized autocorrelation on real tails), whereas breath/room noise sits
+# at ~0.2–0.3.  A quiet-but-voiced chunk is speech — without this the
+# relative VAD chops the last ~150 ms of word-final vowels ("Ginny" → "J'nn").
+_VOICED_MIN = 0.45
+
+
+def _voicedness(chunk: np.ndarray, sr: int) -> float:
+    """Normalized autocorrelation peak in the 50–400 Hz pitch band (0..1)."""
+    x = chunk - chunk.mean()
+    n = len(x)
+    if n < sr // 25 or float(np.dot(x, x)) < 1e-8:
+        return 0.0
+    f = np.fft.rfft(x, 2 * n)
+    ac = np.fft.irfft(f * np.conj(f))[:n]
+    lo, hi = sr // 400, min(sr // 50, n - 1)
+    return float(ac[lo:hi].max() / (ac[0] + 1e-9))
+
 # Output-gate envelope release time.  Must bridge plosive closures (50–120 ms
 # of true silence inside words) yet close on real silence before the VAD
 # hangover ends: 60 ms holds mask=1.0 through a 120 ms stop and reaches ~0 in
@@ -166,6 +199,20 @@ class RVCPipeline:
         self._out_buf: np.ndarray = np.empty(0, dtype=np.float32)
         self._vad_hang = 0            # hops of hangover left after last speech
         self._gate_was_open = False   # for fade-out on speech→silence transition
+        # Running speech level (peak-hold with slow decay).  Breath and room
+        # noise after a phrase sit well above the absolute _VAD_RMS floor but
+        # far below actual speech; gating relative to this level keeps the
+        # pipeline from synthesising "voice" out of a breath tail.
+        self._speech_rms = 0.0
+        # F0 continuity reference for the fry/octave-jump clamp; None until
+        # the first voiced frame of an utterance, reset when the gate closes.
+        self._f0_ref: float | None = None
+        # Recent window-median voiced F0 values (post-offset), only from
+        # strongly-voiced windows.  The pitch anchor for the phrase-final F0
+        # floor is the median of this deque: robust against outlier windows
+        # in BOTH directions (an EMA with fast attack got poisoned high by a
+        # single keyboard-transient window and pitched the whole voice up).
+        self._f0_meds: deque[float] = deque(maxlen=15)
         # Output-gate mask for the last _XFADE_OUT samples of the previous hop:
         # the SOLA crossfade re-synthesises that region, so it must be masked
         # with the PREVIOUS hop's envelope or silent boundaries click.
@@ -189,6 +236,10 @@ class RVCPipeline:
         # written by the convert thread, drained by the D-Bus thread).
         self._metrics_lock = threading.Lock()
         self._metrics: deque[dict] = deque(maxlen=200)
+        # FAISS feature-retrieval index (loaded with the model when a .index
+        # file exists next to it; blend controlled by params.index_rate)
+        self._faiss_index = None
+        self._faiss_feats: np.ndarray | None = None
         _DEBUG_DIR.mkdir(parents=True, exist_ok=True)
         logger.info('RVC debug buffers enabled — WAV files → %s', _DEBUG_DIR)
 
@@ -218,8 +269,44 @@ class RVCPipeline:
         self._cold_start = True
         self._ctx_frozen = False
         self._load_rmvpe(device)
+        self._load_faiss_index(path)
         logger.info('RVC pipeline ready on %s (model_sr=%d params=%s)',
                     device, self._model_sr, self._params)
+
+    def _load_faiss_index(self, model_path: Path) -> None:
+        """Load the model's FAISS feature index, if one exists next to it.
+
+        Matching: '<stem>.index' first, then any '*.index' whose filename
+        contains the model stem (RVC WebUI exports 'added_IVF…_<name>_v2.index').
+        The training-set feature matrix is reconstructed once at load; each
+        window's HuBERT features are then blended with their retrieved nearest
+        neighbours (see _run_inference), pulling out-of-distribution input
+        (e.g. creaky phrase endings) toward the model's training distribution.
+        """
+        self._faiss_index = None
+        self._faiss_feats = None
+        # Load whenever a file exists (not only when index_rate > 0) so the
+        # rate can be raised live via update_params without a chain rebuild.
+        stem = model_path.stem
+        folder = model_path.parent
+        candidates = ([folder / f'{stem}.index'] +
+                      sorted(p for p in folder.glob('*.index') if stem in p.stem))
+        index_path = next((p for p in candidates if p.is_file()), None)
+        if index_path is None:
+            logger.info('RVC index: none found for %r — retrieval disabled', stem)
+            return
+        try:
+            import faiss
+            index = faiss.read_index(str(index_path))
+            feats = index.reconstruct_n(0, index.ntotal)
+            self._faiss_index = index
+            self._faiss_feats = feats
+            logger.info('RVC index loaded: %s (%d vectors, %.0f MB)',
+                        index_path.name, index.ntotal, feats.nbytes / 1e6)
+        except ImportError:
+            logger.warning('RVC index found but faiss is not installed — retrieval disabled')
+        except Exception as e:
+            logger.error('RVC index load failed (%s): %s', index_path.name, e)
 
     def update_params(self, params: 'RVCParams') -> None:
         """Swap tuning params live — safe because _params is read once per hop."""
@@ -251,6 +338,8 @@ class RVCPipeline:
         except Exception:
             pass
         self._rmvpe = None
+        self._faiss_index = None
+        self._faiss_feats = None
         self._context_buf = np.empty(0, dtype=np.float32)
         self._new_buf = np.empty(0, dtype=np.float32)
         self._out_buf = np.zeros(_XFADE_OUT, dtype=np.float32)
@@ -305,14 +394,40 @@ class RVCPipeline:
             # speech so quiet phrase tails aren't chopped.
             chunk_rms = float(np.sqrt(np.mean(new_chunk ** 2)))
             la_rms = float(np.sqrt(np.mean(look_ahead ** 2)))
-            if chunk_rms >= _VAD_RMS or la_rms >= _VAD_RMS:
+            vad_thr = max(_VAD_RMS, _VAD_REL * self._speech_rms)
+            level_ok = chunk_rms >= vad_thr or la_rms >= vad_thr
+            # Quiet-but-voiced chunks (decaying phrase-final vowels) are
+            # speech; only test when the level check fails and the chunk is
+            # above the absolute floor.  A phrase tail by definition follows
+            # speech — requiring the gate to have been open keeps resonant
+            # transients in silence (keyboard clicks, paper rustle, whose
+            # mechanical ring can pass the periodicity test) from opening
+            # the gate and being synthesised as vocal blips.
+            voiced_ok = (not level_ok and self._gate_was_open
+                         and chunk_rms >= _VAD_RMS
+                         and _voicedness(new_chunk, sr) >= _VOICED_MIN)
+            if level_ok or voiced_ok:
+                if level_ok:
+                    # Track only hops near the current speech level: rescued
+                    # voiced tails and marginal fade-out hops sit far below it
+                    # by definition, and letting them release the tracker
+                    # drops the threshold under breath level by phrase end.
+                    cur = max(chunk_rms, la_rms)
+                    if cur > self._speech_rms:
+                        self._speech_rms = cur
+                    elif cur >= 0.5 * self._speech_rms:
+                        self._speech_rms = (_SPEECH_RMS_RELEASE * self._speech_rms
+                                            + (1 - _SPEECH_RMS_RELEASE) * cur)
                 self._vad_hang = _VAD_HANG_HOPS
                 gate_open = True
+                hangover_hop = False
             elif self._vad_hang > 0:
                 self._vad_hang -= 1
                 gate_open = True
+                hangover_hop = True
             else:
                 gate_open = False
+                hangover_hop = False
             if not gate_open:
                 with self._metrics_lock:
                     self._metrics.append(
@@ -325,6 +440,7 @@ class RVCPipeline:
                         1.0, 0.0, _XFADE_OUT, dtype=np.float32)
                 self._gate_was_open = False
                 self._cold_start = True
+                self._f0_ref = None
                 self._prev_mask_tail = np.zeros(_XFADE_OUT, dtype=np.float32)
                 # Keep the release envelope decaying through skipped hops
                 self._env_last *= math.exp(-_HOP_FRAMES / (_GATE_RELEASE_S * sr))
@@ -454,7 +570,14 @@ class RVCPipeline:
             env_shifted = ext[start : start + len(env_rel)]
             self._env_tail = env_rel[-n_tail:].copy()
 
-            mask = np.clip(env_shifted / 0.002, 0.0, 1.0) ** 2
+            # Speech hops keep the gentle absolute knee (quiet word-onset
+            # nasals must pass).  Hangover hops carry sub-speech input —
+            # breath, room noise — that the model happily voices; raising the
+            # knee to half the running speech level crushes that hallucinated
+            # tail while a genuinely quiet phrase tail (still speech-classed
+            # by the relative VAD) is untouched.
+            knee = 0.002 if not hangover_hop else max(0.002, 0.5 * self._speech_rms)
+            mask = np.clip(env_shifted / knee, 0.0, 1.0) ** 2
             mask_out = np.repeat(mask, _OUTPUT_SR // sr)
             if len(mask_out) < n_hop_out:
                 mask_out = np.pad(mask_out, (0, n_hop_out - len(mask_out)), mode='edge')
@@ -480,9 +603,10 @@ class RVCPipeline:
             self._cold_start = False
 
             # Slide context forward — but only with chunks that contain actual
-            # speech.  Hangover hops carry near-silence; letting them into the
-            # context would dilute it before the next freeze.
-            if chunk_rms >= _VAD_RMS:
+            # speech (including voiced-rescued quiet tails).  Hangover hops
+            # carry near-silence; letting them into the context would dilute
+            # it before the next freeze.
+            if chunk_rms >= vad_thr or voiced_ok:
                 self._context_buf = np.concatenate([self._context_buf, new_chunk])
                 if len(self._context_buf) > _CONTEXT_FRAMES:
                     self._context_buf = self._context_buf[-_CONTEXT_FRAMES:]
@@ -613,10 +737,38 @@ class RVCPipeline:
         else:
             hop = sr // _FEATURE_RATE   # 160 at 16kHz → 100fps
             f0 = _extract_f0_autocorr(audio, sr, hop)
-        f0 = _fill_f0_gaps(f0)
+        # max_gap 8 (80 ms): phrase-final creaky voice makes RMVPE drop 50–80 ms
+        # of a voiced nasal mid-word ("Ginny") to unvoiced; the NSF then
+        # switches to noise excitation in the middle of the word (heard as a
+        # mumble).  Interpolating across the gap keeps the word voiced; true
+        # stop closures are unaffected audibly because the HuBERT features
+        # still encode the stop.
+        f0 = _fill_f0_gaps(f0, max_gap=8)
         if pitch_offset != 0.0:
             voiced = f0 > 0
             f0[voiced] *= 2.0 ** (pitch_offset / 12.0)
+
+        # Speaker-relative F0 floor.  Phrase-final declination + fry drives the
+        # (post-offset) target F0 well below anything the model saw in
+        # training (~0.5× the speaker's median), and the NSF renders those
+        # frames as irregular pulses — random vocals/mumbling on phrase
+        # endings.  Flooring at 0.8× the running median F0 keeps the tail
+        # in-distribution; perceptually fry is quasi-static anyway.
+        voiced = f0[f0 > 0]
+        # Anchor updates only from strongly-voiced windows (a transient or a
+        # phrase-tail window has few voiced frames and a junk median).
+        if voiced.size >= 20:
+            self._f0_meds.append(float(np.median(voiced)))
+        # Apply the floor only once there is enough evidence of the modal
+        # pitch.  0.9× the modal median: tight enough to keep the NSF stable
+        # on fry (which lives at ~0.6–0.7× modal), loose enough that normal
+        # declination inside phrases is untouched most of the time.
+        # Perceptually fry is quasi-static, so pinning it is inaudible.
+        if voiced.size and len(self._f0_meds) >= 5:
+            anchor = float(np.median(self._f0_meds))
+            floor = max(55.0, 0.9 * anchor)
+            f0 = np.where((f0 > 0) & (f0 < floor), floor, f0)
+
         coarse = _f0_to_coarse(f0)
         return f0.astype(np.float32), coarse
 
@@ -685,6 +837,21 @@ class RVCPipeline:
         vtln_alpha = self._params.vtln_alpha if self._params else 1.0
         hubert_input = _vtln_warp(audio_padded, vtln_alpha)
         feats = self._extract_features(hubert_input)              # [T_f, 768]
+
+        # FAISS retrieval blend (RVC WebUI 'index rate'): replace each feature
+        # frame with a distance-weighted mix of its k nearest training-set
+        # features.  Out-of-distribution input (creaky phrase endings,
+        # transients) snaps to the nearest clean training features, which the
+        # synthesizer renders reliably.
+        index_rate = self._params.index_rate if self._params else 0.0
+        if index_rate > 0.0 and self._faiss_index is not None and self._faiss_feats is not None:
+            q = np.ascontiguousarray(feats, dtype=np.float32)
+            score, ix = self._faiss_index.search(q, k=8)
+            weight = np.square(1.0 / np.maximum(score, 1e-6))
+            weight /= weight.sum(axis=1, keepdims=True)
+            retrieved = np.sum(self._faiss_feats[ix] * np.expand_dims(weight, axis=2), axis=1)
+            feats = (index_rate * retrieved + (1.0 - index_rate) * feats).astype(feats.dtype)
+
         f0, f0_coarse = self._extract_f0(audio_padded, sr, pitch_offset)
 
         # F0 median filter (WebUI 'filter_radius'): kills single-frame pitch
@@ -698,7 +865,26 @@ class RVCPipeline:
             f0_smooth = np.median(windows, axis=1).astype(f0.dtype)
             # Don't let the median smear voiced F0 into unvoiced (zero) frames
             f0 = np.where(f0 > 0, np.where(f0_smooth > 0, f0_smooth, f0), 0.0)
-            f0_coarse = _f0_to_coarse(f0)
+
+        # Continuity clamp: phrase-final vocal fry (and octave errors) make the
+        # tracker emit wild frame-to-frame jumps (measured 84→326→500 Hz inside
+        # one creaky word ending) that the NSF source renders as random vocals/
+        # mumbling.  Real pitch never moves half an octave in 10 ms: any voiced
+        # frame further than that from the running reference is pulled back to
+        # it.  The reference tracks accepted frames (80/20 EMA), so legitimate
+        # fast intonation still passes; it carries across the overlapping
+        # windows via self._f0_ref and resets when the VAD gate closes.
+        ref = self._f0_ref
+        for i in range(len(f0)):
+            if f0[i] <= 0:
+                continue
+            if ref is None:
+                ref = float(f0[i])
+            elif abs(math.log2(f0[i] / ref)) > 0.5:
+                f0[i] = ref
+            ref = 0.8 * ref + 0.2 * float(f0[i])
+        self._f0_ref = ref
+        f0_coarse = _f0_to_coarse(f0)
 
         voiced = f0[f0 > 0]
         if voiced.size:

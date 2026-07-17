@@ -57,6 +57,7 @@ class VCSettings:
     rvc_filter_radius: int    # F0 median filter length (odd; <3 = off)
     rvc_target_rms:    float  # input drive into the model
     rvc_limiter_thr:   float  # output soft-limiter knee (1.0 = off)
+    rvc_index_rate:    float  # FAISS feature-retrieval blend (0 = off)
     rvc_model_params:  dict   # per-model snapshots of the tunables, keyed by model name
 
     def __init__(self) -> None:
@@ -99,6 +100,7 @@ class VCSettings:
         self.rvc_filter_radius = 3
         self.rvc_target_rms    = 0.06
         self.rvc_limiter_thr   = 0.80
+        self.rvc_index_rate    = 0.0
         self.rvc_model_params  = {}
 
     def _to_dict(self) -> dict:
@@ -147,6 +149,7 @@ class VCSettings:
                 'filter_radius': self.rvc_filter_radius,
                 'target_rms':    self.rvc_target_rms,
                 'limiter_thr':   self.rvc_limiter_thr,
+                'index_rate':    self.rvc_index_rate,
                 'model_params':  self.rvc_model_params,
             },
         }
@@ -210,6 +213,7 @@ class VCSettings:
             s.rvc_filter_radius = int(rv.get('filter_radius', 3))
             s.rvc_target_rms    = float(rv.get('target_rms', 0.06))
             s.rvc_limiter_thr   = float(rv.get('limiter_thr', 0.80))
+            s.rvc_index_rate    = float(rv.get('index_rate', 0.0))
             s.rvc_model_params  = dict(rv.get('model_params', {}) or {})
 
             _log.debug('Loaded VC settings: mode=%s enabled=%s', s.mode, s.enabled)

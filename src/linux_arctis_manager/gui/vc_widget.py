@@ -84,6 +84,8 @@ class QVCWidget(QWidget):
     sig_hf_token_saved   = Signal(object)
     sig_rvc_metrics      = Signal(object)
     _sig_sources_loaded  = Signal(object)
+    # Emitted after settings are pushed to the daemon (chain may rebuild).
+    sig_applied          = Signal()
 
     def __init__(self, parent: QWidget, show_title: bool = True) -> None:
         super().__init__(parent)
@@ -635,6 +637,22 @@ class QVCWidget(QWidget):
                        self._apply_timer.start()))
         cl.addLayout(row)
 
+        # FAISS feature-retrieval blend (×100); 0 = off, needs a .index file
+        row, self._rvc_index_sl, self._rvc_index_lbl = _slider_row(
+            'Index rate', 0, 100, 0,
+            lambda v: 'Off' if v == 0 else f'{v/100:.2f}')
+        self._rvc_index_sl.setToolTip(
+            'Blends each voice feature with its nearest neighbours from the\n'
+            "model's training set (needs a .index file next to the .pth).\n"
+            'Higher values pull the timbre toward the training voice and\n'
+            'stabilise out-of-distribution input like creaky word endings.\n'
+            '0 disables retrieval; typical values are 0.30–0.75.'
+        )
+        self._rvc_index_sl.valueChanged.connect(
+            lambda v: (self._rvc_index_lbl.setText('Off' if v == 0 else f'{v/100:.2f}'),
+                       self._apply_timer.start()))
+        cl.addLayout(row)
+
         # Output soft limiter knee (×100); 1.00 = off
         row, self._rvc_lim_sl, self._rvc_lim_lbl = _slider_row(
             'Limiter knee', 50, 100, 80,
@@ -663,6 +681,22 @@ class QVCWidget(QWidget):
         self._rvc_tune_status.setStyleSheet('font-size: 10px; color: gray;')
         tune_row.addWidget(self._rvc_tune_status, 1)
         cl.addLayout(tune_row)
+
+        # Guided calibration: read a short text, hear 3 tunings, pick by ear.
+        calib_row = QHBoxLayout()
+        calib_btn = QPushButton(_T('ui', 'vc_calib_button'))
+        calib_btn.setToolTip(
+            'Read a short text once; the daemon renders it through three\n'
+            'candidate tunings. Listen (original included), pick the best,\n'
+            'optionally refine, then save it for this model.'
+        )
+        calib_btn.clicked.connect(self._open_calibration_wizard)
+        calib_row.addWidget(calib_btn, 1)
+        reset_btn = QPushButton(_T('ui', 'vc_reset_params'))
+        reset_btn.setToolTip('Revert all tuning for this model to the defaults.')
+        reset_btn.clicked.connect(self._reset_model_params)
+        calib_row.addWidget(reset_btn)
+        cl.addLayout(calib_row)
 
         open_folder_btn = QPushButton(_T('ui', 'vc_rvc_open_folder'))
         open_folder_btn.clicked.connect(self._open_models_folder)
@@ -839,7 +873,8 @@ class QVCWidget(QWidget):
         self._rvc_model_combo.blockSignals(True)
         self._rvc_model_combo.clear()
         for m in models:
-            self._rvc_model_combo.addItem(m['name'], m['name'])
+            label = m['name'] + (' (with index)' if m.get('has_index') else '')
+            self._rvc_model_combo.addItem(label, m['name'])
 
         # Honour a post-download pending selection, then fall back to previous selection
         target = self._pending_model_select or current
@@ -979,6 +1014,9 @@ class QVCWidget(QWidget):
         v = int(round(float(mp.get('limiter_thr', 0.80)) * 100))
         _sl(self._rvc_lim_sl, self._rvc_lim_lbl, v,
             lambda x: 'Off' if x >= 100 else f'{x/100:.2f}')
+        v = int(round(float(mp.get('index_rate', 0.0)) * 100))
+        _sl(self._rvc_index_sl, self._rvc_index_lbl, v,
+            lambda x: 'Off' if x == 0 else f'{x/100:.2f}')
 
     def _current_model_params(self) -> dict:
         return {
@@ -989,6 +1027,7 @@ class QVCWidget(QWidget):
             'filter_radius': int(self._rvc_f0filt_combo.currentData() or 0),
             'target_rms':    self._rvc_drive_sl.value() / 100.0,
             'limiter_thr':   self._rvc_lim_sl.value() / 100.0,
+            'index_rate':    self._rvc_index_sl.value() / 100.0,
         }
 
     # ── Auto-tune ──────────────────────────────────────────────────────
@@ -1012,6 +1051,33 @@ class QVCWidget(QWidget):
             self._tune_timer.start()
         else:
             self._finish_tune(persist=self._tune_steps_down > 0)
+
+    def _reset_model_params(self) -> None:
+        """Revert the current model's tuning to the RVCParams defaults."""
+        reply = QMessageBox.question(
+            self, _T('ui', 'vc_reset_params'),
+            _T('ui', 'vc_reset_params_confirm'))
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        from dataclasses import asdict
+
+        from linux_arctis_manager.voice_changer.rvc.backend import RVCParams
+        defaults = {'pitch_offset': 0.0, **asdict(RVCParams())}
+        self._restore_model_params(defaults)
+        self._apply()
+        self._rvc_tune_status.setText(_T('ui', 'vc_reset_params_done'))
+
+    def _open_calibration_wizard(self) -> None:
+        from linux_arctis_manager.gui.vc_calibration_wizard import QVCCalibrationWizard
+        wiz = QVCCalibrationWizard(self)
+        if wiz.exec() and wiz.chosen_params:
+            p = wiz.chosen_params
+            # The wizard's params dict has no pitch_offset (it tunes timbre/
+            # dynamics only); keep the current slider value for it.
+            p.setdefault('pitch_offset', float(self._rvc_pitch_sl.value()))
+            self._restore_model_params(p)
+            self._apply()
+            self._rvc_tune_status.setText(_T('ui', 'vc_calib_saved'))
 
     def _finish_tune(self, persist: bool, message: str = '') -> None:
         self._tune_timer.stop()
@@ -1165,6 +1231,7 @@ class QVCWidget(QWidget):
                 'model_params': self._rvc_model_params,
             },
         })
+        self.sig_applied.emit()
 
     # ── Model management ───────────────────────────────────────────────
 

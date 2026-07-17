@@ -25,7 +25,14 @@ class _SidetonePreview:
 
     def start(self, source_name: str = '', sink_name: str = '') -> bool:
         self.stop()
-        cmd = ['pactl', 'load-module', 'module-loopback', 'latency_msec=5']
+        self._sweep_stale()
+        # dont_move: if our source (e.g. Arctis_VC_Sink.monitor) disappears —
+        # daemon teardown, crash — the loopback must NOT be re-targeted by the
+        # session manager.  Without this it lands on the headset's own monitor
+        # and feeds playback back into the output (audible echo) even after
+        # the daemon is long gone.
+        cmd = ['pactl', 'load-module', 'module-loopback', 'latency_msec=5',
+               'source_dont_move=true', 'sink_dont_move=true']
         if source_name:
             cmd.append(f'source={source_name}')
         if sink_name:
@@ -50,6 +57,28 @@ class _SidetonePreview:
             except Exception as e:
                 logger.warning('sidetone stop error: %s', e)
             self._module_id = None
+
+    _STALE_MARKERS = ('Arctis_VC_Sink.monitor', 'Arctis_Manager_Mic', 'Arctis_NC_Mic')
+
+    def _sweep_stale(self) -> None:
+        """Unload sidetone loopbacks leaked by a previous crashed session.
+
+        The module lives in the PipeWire server, so it survives both GUI and
+        daemon; a leaked one whose source has since disappeared gets re-homed
+        to the headset monitor and echoes all playback.
+        """
+        try:
+            result = subprocess.run(['pactl', 'list', 'modules', 'short'],
+                                    capture_output=True, text=True, timeout=3)
+            for line in result.stdout.splitlines():
+                parts = line.split('\t')
+                if (len(parts) >= 3 and parts[1] == 'module-loopback'
+                        and any(m in parts[2] for m in self._STALE_MARKERS)):
+                    subprocess.run(['pactl', 'unload-module', parts[0]],
+                                   capture_output=True, timeout=3)
+                    logger.info('swept stale sidetone loopback (module %s)', parts[0])
+        except Exception as e:
+            logger.warning('stale sidetone sweep error: %s', e)
 
 
 class QMicWidget(QWidget):
@@ -85,6 +114,23 @@ class QMicWidget(QWidget):
         app = QApplication.instance()
         if app:
             app.aboutToQuit.connect(self._stop_preview)
+
+        # The sidetone loopback is pinned to its source (dont_move); when VC
+        # settings apply, the daemon may rebuild the chain and recreate
+        # Arctis_VC_Sink, orphaning the pinned loopback.  Restart the preview
+        # once the rebuild has settled so the user doesn't have to.
+        self.vc_widget.sig_applied.connect(self._on_vc_applied)
+
+    def _on_vc_applied(self) -> None:
+        if self._preview.active:
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(1500, self._restart_preview)
+
+    def _restart_preview(self) -> None:
+        if not self._preview.active:
+            return
+        source, sink = self._pick_preview_endpoints()
+        self._preview.start(source, sink)
 
     def hideEvent(self, event: QHideEvent) -> None:
         super().hideEvent(event)

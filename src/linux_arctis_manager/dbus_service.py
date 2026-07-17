@@ -432,7 +432,7 @@ class ArctisManagerDbusVCService(ServiceInterface):
         ladspa = ladspa_caps()
         rvc_backends = BackendRegistry.available_backends()
         rvc_models = [
-            {'name': m.name, 'path': str(m.path)}
+            {'name': m.name, 'path': str(m.path), 'has_index': m.has_index}
             for m in RVCModelManager.list_models()
         ]
 
@@ -516,6 +516,7 @@ class ArctisManagerDbusVCService(ServiceInterface):
             s.rvc_filter_radius = int(rv.get('filter_radius', 3))
             s.rvc_target_rms    = float(rv.get('target_rms', 0.06))
             s.rvc_limiter_thr   = float(rv.get('limiter_thr', 0.80))
+            s.rvc_index_rate    = float(rv.get('index_rate', 0.0))
             s.rvc_model_params  = dict(rv.get('model_params', {}) or {})
 
             s.save()
@@ -528,7 +529,8 @@ class ArctisManagerDbusVCService(ServiceInterface):
     @method('GetRVCModels')
     def get_rvc_models(self) -> 's':  # type: ignore
         from linux_arctis_manager.voice_changer.rvc.model_manager import RVCModelManager
-        models = [{'name': m.name, 'path': str(m.path)} for m in RVCModelManager.list_models()]
+        models = [{'name': m.name, 'path': str(m.path), 'has_index': m.has_index}
+                  for m in RVCModelManager.list_models()]
         return json.dumps(models)
 
     @method('GetRVCMetrics')
@@ -555,12 +557,89 @@ class ArctisManagerDbusVCService(ServiceInterface):
                 filter_radius=int(p.get('filter_radius', 3)),
                 target_rms=float(p.get('target_rms', 0.06)),
                 limiter_thr=float(p.get('limiter_thr', 0.80)),
+                index_rate=float(p.get('index_rate', 0.0)),
             )
             vc = getattr(self.core_engine, 'vc_manager', None)
             return bool(vc and vc.update_rvc_params(params))
         except Exception as e:
             self.logger.error('SetRVCLiveParams: %s', e)
             return False
+
+    # ── Guided voice calibration ──────────────────────────────────────
+
+    def _calibration(self):
+        from linux_arctis_manager.voice_changer.rvc.calibration import CalibrationSession
+        if not hasattr(self, '_calib_session') or self._calib_session is None:
+            self._calib_session = CalibrationSession()
+        return self._calib_session
+
+    @method('CalibrationStartRecording')
+    def calibration_start_recording(self) -> 'b':  # type: ignore
+        from linux_arctis_manager.voice_changer.settings import VCSettings
+        # Record from the same source the live VC chain consumes: the NC
+        # output when noise cancellation is active, else the configured
+        # source.  The settings source_id alone can be stale (it is ignored
+        # by the live chain whenever the NC override is in effect).
+        nc = getattr(self.core_engine, 'nc_manager', None)
+        source = (nc.output_source if nc and getattr(nc, 'output_source', None) else '')
+        if not source:
+            source = VCSettings.load().source_id
+        if not source:
+            return False
+        self.logger.info('calibration recording from %r', source)
+        return self._calibration().record_start(source)
+
+    @method('CalibrationStopRecording')
+    def calibration_stop_recording(self) -> 's':  # type: ignore
+        return self._calibration().record_stop()
+
+    @method('CalibrationStartRender')
+    def calibration_start_render(self, refine_params_json: 's') -> 'b':  # type: ignore
+        """Render 3 variants of the last recording.
+
+        refine_params_json: '' for the first round (contrast variants around
+        the current tuning); a params dict of the chosen variant to run a
+        narrower refine round around it.
+        """
+        try:
+            from linux_arctis_manager.voice_changer.rvc.backend import RVCParams
+            from linux_arctis_manager.voice_changer.rvc.calibration import propose_variants
+            from linux_arctis_manager.voice_changer.rvc.model_manager import RVCModelManager
+            from linux_arctis_manager.voice_changer.settings import VCSettings
+
+            s = VCSettings.load()
+            model = next((m for m in RVCModelManager.list_models()
+                          if m.name == s.rvc_model), None)
+            if model is None:
+                self.logger.error('CalibrationStartRender: model %r not found', s.rvc_model)
+                return False
+
+            base = RVCParams(
+                hubert_model=s.rvc_hubert_model, vtln_alpha=s.rvc_vtln_alpha,
+                rms_mix_rate=s.rvc_rms_mix_rate, filter_radius=s.rvc_filter_radius,
+                target_rms=s.rvc_target_rms, limiter_thr=s.rvc_limiter_thr,
+                index_rate=s.rvc_index_rate)
+            refine = None
+            if refine_params_json:
+                p = json.loads(refine_params_json)
+                refine = RVCParams(
+                    hubert_model=str(p.get('hubert_model', base.hubert_model)),
+                    vtln_alpha=float(p.get('vtln_alpha', base.vtln_alpha)),
+                    rms_mix_rate=float(p.get('rms_mix_rate', base.rms_mix_rate)),
+                    filter_radius=int(p.get('filter_radius', base.filter_radius)),
+                    target_rms=float(p.get('target_rms', base.target_rms)),
+                    limiter_thr=float(p.get('limiter_thr', base.limiter_thr)),
+                    index_rate=float(p.get('index_rate', base.index_rate)))
+            variants = propose_variants(base, refine)
+            return self._calibration().render_start(
+                model.path, s.rvc_pitch_offset, variants)
+        except Exception as e:
+            self.logger.error('CalibrationStartRender: %s', e)
+            return False
+
+    @method('CalibrationGetStatus')
+    def calibration_get_status(self) -> 's':  # type: ignore
+        return json.dumps(self._calibration().status())
 
     @signal('InstallProgress')
     def signal_install_progress(self, message: 's') -> 's':  # type: ignore

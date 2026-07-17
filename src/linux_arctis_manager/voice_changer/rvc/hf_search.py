@@ -79,14 +79,21 @@ def list_repo_model_files(repo_id: str) -> list[str]:
 
 def _extract_pth_from_zip(zip_path: Path, dest_folder: Path,
                            progress_cb: Callable[[str], None]) -> list[str]:
-    """Extract .pth files from a zip archive into dest_folder. Returns stem names extracted."""
+    """Extract .pth (and matching .index) files from a zip into dest_folder.
+
+    Returns stem names extracted.  RVC archives usually ship the FAISS
+    feature index as 'added_IVF…_<name>_v2.index'; it is renamed to
+    '<model stem>.index' so the pipeline finds it regardless of how the
+    user later renames the model.
+    """
     extracted: list[str] = []
     with zipfile.ZipFile(zip_path) as zf:
-        pth_members = [
-            n for n in zf.namelist()
-            if n.endswith('.pth') and not Path(n).name.startswith('.')
-            and '__MACOSX' not in n
-        ]
+        def _members(ext: str) -> list[str]:
+            return [n for n in zf.namelist()
+                    if n.endswith(ext) and not Path(n).name.startswith('.')
+                    and '__MACOSX' not in n]
+
+        pth_members = _members('.pth')
         if not pth_members:
             progress_cb('No .pth files found inside zip.')
             return []
@@ -96,6 +103,20 @@ def _extract_pth_from_zip(zip_path: Path, dest_folder: Path,
             with zf.open(member) as src, open(target, 'wb') as dst:
                 dst.write(src.read())
             extracted.append(target.stem)
+
+        index_members = _members('.index')
+        for member in index_members:
+            mname = Path(member).stem
+            # Pair with the extracted model whose stem appears in the index
+            # filename; single-model zips pair unconditionally.
+            stem = next((s for s in extracted if s in mname),
+                        extracted[0] if len(extracted) == 1 else None)
+            if stem is None:
+                continue
+            target = dest_folder / f'{stem}.index'
+            progress_cb(f'Extracting index: {Path(member).name} → {target.name}')
+            with zf.open(member) as src, open(target, 'wb') as dst:
+                dst.write(src.read())
     return extracted
 
 
@@ -170,6 +191,25 @@ def download_model(
                 return False, []
             progress_cb(f'Extracted {len(names)} model(s).')
             return True, names
+
+        # Bare .pth download: also fetch the repo's matching FAISS index, if
+        # any, normalising its name to '<model stem>.index'.
+        try:
+            from huggingface_hub import list_repo_files
+            stem = dest_path.stem
+            all_idx = [f for f in list_repo_files(repo_id, token=token)
+                       if f.endswith('.index')]
+            idx_files = [f for f in all_idx if stem in Path(f).stem]
+            if not idx_files and len(all_idx) == 1:
+                idx_files = all_idx
+            if idx_files:
+                progress_cb(f'Downloading feature index: {Path(idx_files[0]).name}')
+                got = hf_hub_download(repo_id=repo_id, filename=idx_files[0],
+                                      local_dir=dest_folder, token=token)
+                Path(got).rename(dest_folder / f'{stem}.index')
+                progress_cb('Feature index saved.')
+        except Exception as ie:
+            progress_cb(f'No feature index downloaded ({ie}).')
 
         progress_cb(f'Saved: {dest_path.name}')
         return True, [dest_path.stem]
