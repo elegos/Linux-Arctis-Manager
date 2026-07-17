@@ -18,6 +18,7 @@ logger = logging.getLogger('RVCPipeline')
 # them in Audacity to hear exactly what happens at each step.
 # Files land in ~/arctis_rvc_debug/ and are overwritten on each save cycle.
 
+_DEBUG_WAVS = False       # master switch: set True to capture debug WAV stages
 _DEBUG_DIR  = Path.home() / 'arctis_rvc_debug'
 _DEBUG_SECS = 10.0        # rolling window length in seconds
 _SAVE_EVERY = 16          # save to disk every N inference cycles (~2 s)
@@ -240,8 +241,9 @@ class RVCPipeline:
         # file exists next to it; blend controlled by params.index_rate)
         self._faiss_index = None
         self._faiss_feats: np.ndarray | None = None
-        _DEBUG_DIR.mkdir(parents=True, exist_ok=True)
-        logger.info('RVC debug buffers enabled — WAV files → %s', _DEBUG_DIR)
+        if _DEBUG_WAVS:
+            _DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+            logger.info('RVC debug buffers enabled — WAV files → %s', _DEBUG_DIR)
 
     # ── Public ────────────────────────────────────────────────────────────
 
@@ -631,6 +633,8 @@ class RVCPipeline:
     # ── Debug helpers ─────────────────────────────────────────────────────────
 
     def _dbg_push(self, name: str, data: np.ndarray, sr: int) -> None:
+        if not _DEBUG_WAVS:
+            return
         if name not in self._dbg_bufs:
             self._dbg_bufs[name] = []
             self._dbg_total[name] = 0
@@ -643,6 +647,8 @@ class RVCPipeline:
             self._dbg_total[name] -= len(dropped)
 
     def _dbg_flush(self) -> None:
+        if not _DEBUG_WAVS:
+            return
         for name, chunks in self._dbg_bufs.items():
             if not chunks:
                 continue
