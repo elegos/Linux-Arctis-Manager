@@ -128,3 +128,30 @@ You got the idea. And now go map all the settings! 🙃
 ## Questions? Doubts?
 
 Join the discord channel and discuss together! (see the project's website URL for the invitation).
+
+
+## Note on the Arctis 9 (legacy 31-byte protocol)
+
+The Arctis 9 uses the older 31-byte SteelSeries HID protocol (also used by the
+Arctis 7 / Pro), not the 64-byte Nova protocol. A few specifics worth recording
+for future device authors:
+
+- **Single interface.** Unlike Nova devices, the Arctis 9 exposes only USB
+  interface 0 (EP 0x81 IN, no OUT endpoint). Commands are sent via `SET_REPORT`
+  control transfers (`command_interface_index: [0, 0]`) and status is read from
+  the same interface's IN endpoint (`listen_interface_indexes: [0]`).
+- **Kernel driver detach on interface 0.** Because interface 0 is a standard HID
+  interface, the kernel `usbhid` driver claims it. The LAM `CoreEngine` skips
+  interface 0 by default (Nova devices use a vendor interface instead). LAM now
+  detaches interface 0 when `command_interface_index[0] == 0x00`, i.e. when a
+  legacy device actually uses interface 0 as its control interface. Nova configs
+  are unaffected (the condition is a no-op for them).
+- **Protocol reference.** The byte layout was cross-checked against the
+  HeadsetControl project's `steelseries_arctis_9.hpp` (GPL-3.0), which documents
+  the status request `0x20`, the response prefix `0xaa`, battery byte index 3
+  (range 0x64-0x9a), charging byte 4, sidetone byte 8 (0xc0 off - 0xfd max),
+  and chatmix bytes 9/10 (0-19 each).
+- **No Wireshark required.** The protocol was confirmed with a small pyusb
+  probe on Linux (send `0x20` via `SET_REPORT`, read EP 0x81) rather than a
+  Windows Wireshark capture, since HeadsetControl had already reverse-engineered
+  the device.

@@ -544,6 +544,10 @@ class CoreEngine:
 
         endpoint = self.get_command_endpoint_address()
         self.send_command(config.get_update_sequence(value), endpoint, self.device_config.command_interface_index[1])
+        # Optional save-to-flash after the main write (e.g. Arctis 9: [0x90, 0x00]).
+        post = config.get_post_update_sequence()
+        if post:
+            self.send_command(post, endpoint, self.device_config.command_interface_index[1])
 
 
     def send_command(self, command: list[int], endpoint: int, control_interface_index: int = 0) -> None:
@@ -591,7 +595,10 @@ class CoreEngine:
 
         interfaces = list(set([config.command_interface_index[0], *config.listen_interface_indexes]))
         for interface in interfaces:
-            if interface == 0x00:
+            # Legacy SteelSeries devices (e.g. Arctis 9) use interface 0 as the control
+            # interface, so usbhid must be detached there too. Nova devices use a vendor
+            # interface and have no kernel driver on 0, so this is a no-op for them.
+            if interface == 0x00 and config.command_interface_index[0] != 0x00:
                 continue
             if usb_device.is_kernel_driver_active(interface):
                 self.logger.info(f"Kernel driver active on interface {interface}, detaching...")
@@ -607,7 +614,7 @@ class CoreEngine:
 
         interfaces = list(set([config.command_interface_index[0], *config.listen_interface_indexes]))
         for interface in interfaces:
-            if interface == 0x00:
+            if interface == 0x00 and config.command_interface_index[0] != 0x00:
                 continue
             if not usb_device.is_kernel_driver_active(interface):
                 self.logger.info(f"Kernel driver inactive on interface {interface}, re-attaching...")
