@@ -6,4 +6,8 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
-# hidapi and tokio added in E1-S2 when the transport layer is implemented
+tokio = { workspace = true }
+nix = { workspace = true }
+# hidapi wired here to verify it links against libudev; device-path opening
+# will be used in E1-S3 (hot-plug detection).
+hidapi = { workspace = true }

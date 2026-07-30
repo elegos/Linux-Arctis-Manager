@@ -26,9 +26,8 @@ jobs:
           workspaces: daemon
 
       # hidapi (linux-native) and tokio-udev both require libudev at link time.
-      # Not needed for E1-S1 stubs; uncomment when E1-S2 / E1-S3 land.
-      # - name: Install system dependencies
-      #   run: sudo apt-get update && sudo apt-get install -y libudev-dev libhidapi-dev
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev libhidapi-dev
 
       - name: Check formatting
         run: cargo fmt --all -- --check
