@@ -4,6 +4,13 @@
 
 ## Conventions
 
+**Testing policy**
+
+- Every story must ship with unit tests covering its logic. A story without meaningful tests is not done.
+- Unit tests must not touch real hardware or spawn real OS processes. The `lam-hidraw-helper` is mocked in tests (see E2-S6).
+- Integration tests (full stack against a real device) are performed manually. No automated integration test suite.
+- "Meaningful" means the test would catch a real regression, not just assert `true`. Tests that only verify that a function returns without panicking are not sufficient on their own.
+
 **Completing a story** means the feature works end-to-end with no stubs or `TODO` comments left in the code. If a story is blocked mid-implementation because a dependency that was not anticipated turns up, it must **not** be marked done. Instead:
 
 1. Leave the story unchecked.
@@ -33,6 +40,7 @@ This keeps the checklist honest and makes blocked work immediately visible witho
   - [ ] [E2-S3] VID allowlist enforcement
   - [ ] [E2-S4] File descriptor passing
   - [ ] [E2-S5] Installation and `setcap` instructions
+  - [ ] [E2-S6] Test mock for `lam-hidraw-helper`
 - [ ] **[E3] YAML DSL interpreter**
   - [ ] [E3-S1] Base file inheritance (`extends:`)
   - [ ] [E3-S2] Struct serialization and deserialization
@@ -54,6 +62,8 @@ This keeps the checklist honest and makes blocked work immediately visible witho
   - [ ] [E5-S3] AUR package update
   - [ ] [E5-S4] Migration guide from v2
   - [ ] [E5-S5] Python engine cleanup
+  - [ ] [E5-S6] README and docs refresh
+  - [ ] [E5-S7] RPM spec for Fedora and Bazzite *(stretch)*
 - [ ] **[E6] Nova Pro Wireless — full protocol parity**
   - [ ] [E6-S1] Rewrite `nova_pro_wireless.yaml`
   - [ ] [E6-S2] Write `base_arctis_nova_pro_wireless.yaml`
@@ -171,6 +181,9 @@ A minimal standalone binary that holds `CAP_DAC_OVERRIDE` and is the only proces
 - **[E2-S5] Installation and `setcap` instructions**
   Document and script the one-time setup: install the helper binary to `/usr/local/libexec/lam-hidraw-helper`, set ownership to `root:root` with mode `755`, and run `setcap cap_dac_override+eip` on it. Provide an install Makefile target and an AUR PKGBUILD hook.
 
+- **[E2-S6] Test mock for `lam-hidraw-helper`**
+  Provide a test double binary (or a Rust test fixture) that speaks the same Unix socket protocol as the real helper but, instead of opening `/dev/hidraw*`, creates a `socketpair(AF_UNIX, SOCK_SEQPACKET)` and passes one end as the fake fd. The other end is held by the test harness, which can inject raw HID reports (to simulate device-to-host events) and capture writes (to assert the commands the engine sends). No real device is required. The mock is launched as a subprocess before each integration-style test and torn down after. Configure via the `LAM_HELPER_SOCKET` environment variable that the engine already consults at startup.
+
 ---
 
 ## [E3] YAML DSL interpreter
@@ -245,6 +258,12 @@ Makes the engine trivial to install, start, and keep running across reboots with
 
 - **[E5-S5] Python engine cleanup**
   Once `lam-daemon` is functional and the D-Bus interface is validated end-to-end, remove the Python engine layer that it replaces. Specifically: delete `core.py`, `config.py`, `status_parser_fn.py`, `eq_manager.py`, `app_matcher.py`, `cli_tools.py`, `dbus_service.py`, and `constants.py`. Remove the `usb` and `pyserial` dependencies from `pyproject.toml`. Keep `gui/`, `eq_preset.py`, `ai_deps.py`, and the voice changer modules untouched — they remain in Python. Update the `lam-gui` entry point to connect to the session bus (replacing the in-process engine startup it currently does) and remove the `--no-daemon` / `--daemon` CLI flags that are no longer meaningful.
+
+- **[E5-S6] README and docs refresh**
+  Update `README.md` to describe v3: new prerequisites (`lam-hidraw-helper` + `setcap`), installation steps, D-Bus interface overview, supported devices list, and a link to `DEVICE_DSL.md` for adding new devices. Remove or rewrite any section that references the v2 Python engine. Audit `docs/`: retire files that described v2-only concerns (e.g. old architecture notes, the old status-parser reference if present), and confirm that `ARCHITECTURE.md`, `DEVICE_DSL.md`, and `dbus.md` are accurate against the shipped code.
+
+- **[E5-S7] RPM spec for Fedora and Bazzite** *(stretch)*
+  Write an RPM `.spec` file for `lam-daemon` and `lam-hidraw-helper`. Target Fedora 40+ and Bazzite (which uses Fedora RPM infrastructure). The spec must: build from source via `cargo build --release`, install the helper with `%caps(cap_dac_override=eip)` in the `%files` section (Fedora's RPM macros honour this), install the systemd user unit under `%{_userunitdir}`, and declare `Requires: systemd`. Submit to COPR as the initial distribution channel; provide a one-liner install command in the README.
 
 ---
 
