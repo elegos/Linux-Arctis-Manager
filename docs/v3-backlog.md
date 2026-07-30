@@ -54,13 +54,13 @@ This keeps the checklist honest and makes blocked work immediately visible witho
   - [x] [E3-S6] Sync event dispatcher
   - [x] [E3-S7] Sync read (startup bulk poll)
   - [x] [E3-S8] Lifecycle hook executor
-- [ ] **[E4] D-Bus service**
-  - [ ] [E4-S1] `zbus` session bus service
-  - [ ] [E4-S2] `GetStatus` and status signals
-  - [ ] [E4-S3] `GetSettings` and `SetSettings`
-  - [ ] [E4-S4] Device online/offline signals
-  - [ ] [E4-S5] `ReloadConfigs`
-  - [ ] [E4-S6] Version property and mismatch detection
+- [x] **[E4] D-Bus service**
+  - [x] [E4-S1] `zbus` session bus service
+  - [x] [E4-S2] `GetStatus` and status signals
+  - [x] [E4-S3] `GetSettings` and `SetSettings`
+  - [x] [E4-S4] Device online/offline signals
+  - [x] [E4-S5] `ReloadConfigs`
+  - [x] [E4-S6] Version property and mismatch detection
 - [ ] **[E5] systemd user service and packaging**
   - [ ] [E5-S1] systemd user service unit
   - [ ] [E5-S2] Helper installation target

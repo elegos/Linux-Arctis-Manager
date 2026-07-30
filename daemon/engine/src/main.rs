@@ -1,25 +1,29 @@
+mod dbus;
 mod device_session;
 mod engine_error;
 mod hidraw_client;
 mod hotplug;
+mod state;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 
+use device_config::sync_dispatcher::EmitEvent;
 use device_config::DeviceConfig;
 use device_session::DeviceSession;
 use engine_error::EngineError;
 use hotplug::DeviceInfo;
+use state::{AppState, DeviceCommand, DeviceEntry, SignalEvent};
 
 // ── Config loading ────────────────────────────────────────────────────────────
 
 /// Scan `dir` for `*.yaml` files and return successfully parsed configs.
-fn load_configs(dir: &Path) -> Vec<Arc<DeviceConfig>> {
+pub fn load_configs(dir: &Path) -> Vec<Arc<DeviceConfig>> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return vec![];
     };
@@ -50,13 +54,13 @@ fn find_config(configs: &[Arc<DeviceConfig>], pid: u16) -> Option<&Arc<DeviceCon
 }
 
 /// Return the path to the hidraw-helper socket.
-fn helper_sock_path() -> PathBuf {
+pub fn helper_sock_path() -> PathBuf {
     let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(runtime_dir).join("lam-hidraw-helper.sock")
 }
 
 /// Return the directory where device YAML configs are stored.
-fn config_dir() -> PathBuf {
+pub fn config_dir() -> PathBuf {
     std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
@@ -66,10 +70,17 @@ fn config_dir() -> PathBuf {
 
 // ── Per-device task ───────────────────────────────────────────────────────────
 
-/// Initialise and run the event loop for one device.  Logs errors internally
-/// so the task always returns `()`.
-async fn run_device(info: DeviceInfo, config: Arc<DeviceConfig>, helper_sock: PathBuf) {
-    let path_str = info.hidraw_path.to_string_lossy();
+/// Initialise and run the event loop for one device.  Registers the device in
+/// `app_state`, emits hotplug signals, and forwards `EmitEvent`s to the D-Bus
+/// state map.
+async fn run_device(
+    info: DeviceInfo,
+    config: Arc<DeviceConfig>,
+    helper_sock: PathBuf,
+    app_state: Arc<Mutex<AppState>>,
+    signal_tx: broadcast::Sender<SignalEvent>,
+) {
+    let path_str = info.hidraw_path.to_string_lossy().to_string();
     info!("starting session for {path_str}");
 
     let fd = match hidraw_client::request_fd(&helper_sock, &path_str).await {
@@ -80,12 +91,68 @@ async fn run_device(info: DeviceInfo, config: Arc<DeviceConfig>, helper_sock: Pa
         }
     };
 
-    let (event_tx, mut event_rx) = mpsc::channel::<device_config::sync_dispatcher::EmitEvent>(64);
+    // Build friendly name from the variant list.
+    let friendly_name = config
+        .device
+        .as_ref()
+        .and_then(|d| d.variants.as_ref())
+        .and_then(|vs| vs.iter().find(|v| v.product_id == info.pid))
+        .and_then(|v| v.name.clone())
+        .unwrap_or_else(|| path_str.clone());
 
-    // Log emitted sync events (D-Bus forwarding comes in E4).
+    let capabilities: Vec<String> = config
+        .device
+        .as_ref()
+        .and_then(|d| d.capabilities.as_ref())
+        .cloned()
+        .unwrap_or_default();
+
+    // Create the command channel (D-Bus → device task).
+    let (cmd_tx, cmd_rx) = mpsc::channel::<DeviceCommand>(16);
+
+    // Register the device in shared state.
+    {
+        let mut state = app_state.lock().await;
+        state.devices.insert(
+            info.hidraw_path.clone(),
+            DeviceEntry {
+                config: Arc::clone(&config),
+                pid: info.pid,
+                name: friendly_name.clone(),
+                capabilities: capabilities.clone(),
+                status: HashMap::new(),
+                cmd_tx,
+            },
+        );
+    }
+
+    // Notify listeners that a new device is available.
+    let _ = signal_tx.send(SignalEvent::DeviceConnected {
+        pid: info.pid,
+        name: friendly_name,
+        capabilities,
+    });
+
+    let (event_tx, mut event_rx) = mpsc::channel::<EmitEvent>(64);
+
+    // Forward EmitEvents: update the state map and emit StatusChanged signal.
+    let state_for_events = Arc::clone(&app_state);
+    let signal_tx_clone = signal_tx.clone();
+    let hidraw_path_clone = info.hidraw_path.clone();
     tokio::spawn(async move {
         while let Some(ev) = event_rx.recv().await {
             info!(signal = %ev.signal, fields = ?ev.fields, "sync event");
+            {
+                let mut s = state_for_events.lock().await;
+                if let Some(entry) = s.devices.get_mut(&hidraw_path_clone) {
+                    for (field, val) in &ev.fields {
+                        entry
+                            .status
+                            .insert(field.clone(), state::event_value_to_json(val));
+                    }
+                }
+            }
+            let _ = signal_tx_clone.send(SignalEvent::StatusChanged);
         }
     });
 
@@ -94,17 +161,15 @@ async fn run_device(info: DeviceInfo, config: Arc<DeviceConfig>, helper_sock: Pa
     match session.device_init().await {
         Ok(events) => {
             info!("{} init events emitted for {path_str}", events.len());
-            for ev in events {
-                info!(signal = %ev.signal, "init event: {}", ev.signal);
-            }
         }
         Err(e) => {
             error!("device init failed for {path_str}: {e}");
+            cleanup_device(&app_state, &info.hidraw_path, info.pid, &signal_tx).await;
             return;
         }
     }
 
-    if let Err(e) = session.run_event_loop(event_tx).await {
+    if let Err(e) = session.run_event_loop_with_commands(event_tx, cmd_rx).await {
         match e {
             EngineError::Io(ref io_e)
                 if io_e.kind() == std::io::ErrorKind::UnexpectedEof
@@ -115,6 +180,18 @@ async fn run_device(info: DeviceInfo, config: Arc<DeviceConfig>, helper_sock: Pa
             _ => error!("event loop error for {path_str}: {e}"),
         }
     }
+
+    cleanup_device(&app_state, &info.hidraw_path, info.pid, &signal_tx).await;
+}
+
+async fn cleanup_device(
+    app_state: &Arc<Mutex<AppState>>,
+    path: &PathBuf,
+    pid: u16,
+    signal_tx: &broadcast::Sender<SignalEvent>,
+) {
+    app_state.lock().await.devices.remove(path);
+    let _ = signal_tx.send(SignalEvent::DeviceDisconnected { pid });
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -137,7 +214,35 @@ async fn main() {
 
     let helper_sock = helper_sock_path();
 
-    // Enumerate devices already connected at startup.
+    let app_state = Arc::new(Mutex::new(AppState {
+        configs: configs.clone(),
+        devices: HashMap::new(),
+        config_dir: cfg_dir,
+    }));
+
+    let (signal_tx, signal_rx) = broadcast::channel::<SignalEvent>(64);
+
+    // Start D-Bus service.  On failure, continue without it (headless / test env).
+    let _dbus_conn = match dbus::start_dbus_service(Arc::clone(&app_state), signal_rx).await {
+        Ok(c) => {
+            info!("D-Bus service registered");
+            Some(c)
+        }
+        Err(e) => {
+            warn!("D-Bus service unavailable: {e}, continuing without D-Bus");
+            None
+        }
+    };
+
+    run_main_loop(configs, helper_sock, app_state, signal_tx).await;
+}
+
+async fn run_main_loop(
+    configs: Vec<Arc<DeviceConfig>>,
+    helper_sock: PathBuf,
+    app_state: Arc<Mutex<AppState>>,
+    signal_tx: broadcast::Sender<SignalEvent>,
+) {
     let existing = match hotplug::scan_existing(&[]) {
         Ok(devs) => devs,
         Err(e) => {
@@ -155,19 +260,19 @@ async fn main() {
             dev.vid,
             dev.pid
         );
-        match find_config(&configs, dev.pid) {
-            Some(cfg) => {
-                let cfg = Arc::clone(cfg);
-                let sock = helper_sock.clone();
-                let path = dev.hidraw_path.clone();
-                let handle = tokio::spawn(run_device(dev, cfg, sock));
-                tasks.insert(path, handle);
-            }
-            None => info!("no config for PID {:#06x}, skipping", dev.pid),
+        if let Some(cfg) = find_config(&configs, dev.pid) {
+            let cfg = Arc::clone(cfg);
+            let sock = helper_sock.clone();
+            let path = dev.hidraw_path.clone();
+            let state = Arc::clone(&app_state);
+            let stx = signal_tx.clone();
+            let handle = tokio::spawn(run_device(dev, cfg, sock, state, stx));
+            tasks.insert(path, handle);
+        } else {
+            info!("no config for PID {:#06x}, skipping", dev.pid);
         }
     }
 
-    // Watch for hotplug events.
     let (tx, mut rx) = mpsc::channel::<hotplug::HotplugEvent>(16);
     tokio::select! {
         res = hotplug::watch(vec![], tx) => {
@@ -183,15 +288,16 @@ async fn main() {
                             "hotplug add: {} (PID={:#06x})",
                             dev.hidraw_path.display(), dev.pid
                         );
-                        match find_config(&configs, dev.pid) {
-                            Some(cfg) => {
-                                let cfg = Arc::clone(cfg);
-                                let sock = helper_sock.clone();
-                                let path = dev.hidraw_path.clone();
-                                let handle = tokio::spawn(run_device(dev, cfg, sock));
-                                tasks.insert(path, handle);
-                            }
-                            None => info!("no config for PID {:#06x}", dev.pid),
+                        if let Some(cfg) = find_config(&configs, dev.pid) {
+                            let cfg = Arc::clone(cfg);
+                            let sock = helper_sock.clone();
+                            let path = dev.hidraw_path.clone();
+                            let state = Arc::clone(&app_state);
+                            let stx = signal_tx.clone();
+                            let handle = tokio::spawn(run_device(dev, cfg, sock, state, stx));
+                            tasks.insert(path, handle);
+                        } else {
+                            info!("no config for PID {:#06x}", dev.pid);
                         }
                     }
                     hotplug::HotplugEvent::Removed(dev) => {
