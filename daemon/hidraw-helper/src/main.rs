@@ -1,6 +1,7 @@
 mod server;
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use tracing::info;
 
 fn socket_path() -> PathBuf {
@@ -23,5 +24,7 @@ async fn main() {
         env!("CARGO_PKG_VERSION"),
         path.display()
     );
-    server::serve(listener).await;
+
+    let sysfs_base = Arc::new(PathBuf::from("/sys"));
+    server::serve(listener, sysfs_base).await;
 }
