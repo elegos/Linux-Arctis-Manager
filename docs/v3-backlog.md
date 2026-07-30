@@ -56,6 +56,7 @@ This keeps the checklist honest and makes blocked work immediately visible witho
   - [ ] [E4-S3] `GetSettings` and `SetSettings`
   - [ ] [E4-S4] Device online/offline signals
   - [ ] [E4-S5] `ReloadConfigs`
+  - [ ] [E4-S6] Version property and mismatch detection
 - [ ] **[E5] systemd user service and packaging**
   - [ ] [E5-S1] systemd user service unit
   - [ ] [E5-S2] Helper installation target
@@ -237,6 +238,9 @@ Exposes the engine's state and settings to GUI clients and CLI tools on the sess
 
 - **[E4-S5] `ReloadConfigs`**
   Re-read all YAML files from disk without restarting the engine. Useful during development. If a connected device's config changed, re-run the init sequence.
+
+- **[E4-S6] Version property and mismatch detection**
+  Expose a `Version` read-only property on the main D-Bus interface returning the daemon's semver string (sourced from `Cargo.toml` at compile time via `env!("CARGO_PKG_VERSION")`). The GUI already reads this property and shows a warning in the footer when the daemon version differs from the UI version. Verify that the v3 daemon exposes the property under the same interface path and with the same type signature (`s`) as the v2 Python implementation so the existing mismatch UI works without modification.
 
 ---
 
