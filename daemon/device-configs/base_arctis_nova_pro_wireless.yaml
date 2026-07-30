@@ -1,0 +1,422 @@
+transforms:
+  gain_from_device:
+    type: case_int_to_int
+    values: {1: 0, 2: 1}
+
+  timer_enum_to_minutes:
+    type: case_int_to_int
+    values: {0: 0, 1: 1, 2: 5, 3: 10, 4: 15, 5: 30, 6: 60}
+
+  battery_level_to_percent:
+    type: case_int_to_int
+    default: 0
+    values: {0: 0, 1: 12, 2: 25, 3: 37, 4: 50, 5: 62, 6: 75, 7: 87, 8: 100}
+
+  radio_connection_to_label:
+    type: case_int_to_str
+    default: UNKNOWN
+    values: {1: NOT_PAIRED_NOT_SEARCHING, 2: NOT_PAIRED_SEARCHING, 4: PAIRED_NOT_CONNECTED, 8: PAIRED_CONNECTED}
+
+  charging_status_to_label:
+    type: case_int_to_str
+    default: UNKNOWN
+    values: {1: UNKNOWN_OR_HEADSET_NOT_CONNECTED, 2: PLUGGED_IN_CHARGING, 4: PLUGGED_IN_NOT_CHARGING, 8: DISCHARGING}
+
+  headset_batt_status_to_label:
+    type: case_int_to_str
+    default: UNKNOWN
+    values: {1: DISCONNECTED, 2: CHARGING, 4: CHARGED, 8: DISCHARGING}
+
+structs:
+  save_to_flash:
+    - {name: report_id, type: uint8, constant: 0x06}
+    - {name: command,   type: uint8, constant: 0x09}
+
+  set_sonar_present:
+    - {name: report_id,  type: uint8, constant: 0x06}
+    - {name: command,    type: uint8, constant: 0x8D}
+    - {name: is_present, type: uint8, range: [0, 1]}
+
+  software_chatmix_status:
+    - {name: report_id, type: uint8, constant: 0x06}
+    - {name: command,   type: uint8, constant: 0x49}
+    - {name: status,    type: uint8, range: [0, 1]}
+
+  high_gain:
+    - {name: report_id,   type: uint8, constant: 0x06}
+    - {name: command,     type: uint8, constant: 0x27}
+    - {name: device_gain, type: uint8, range: [0, 1]}
+
+  mic_volume:
+    - {name: report_id,  type: uint8, constant: 0x06}
+    - {name: command,    type: uint8, constant: 0x37}
+    - {name: mic_volume, type: uint8, range: [1, 10]}
+
+  sidetone:
+    - {name: report_id, type: uint8, constant: 0x06}
+    - {name: command,   type: uint8, constant: 0x39}
+    - {name: sidetone,  type: uint8, range: [0, 3]}
+
+  line_out_mode:
+    - {name: report_id,     type: uint8, constant: 0x06}
+    - {name: command,       type: uint8, constant: 0x43}
+    - {name: line_out_mode, type: uint8, range: [1, 2]}
+
+  stream_mix:
+    - {name: report_id,   type: uint8, constant: 0x06}
+    - {name: command,     type: uint8, constant: 0x47}
+    - {name: stream_main, type: uint8, range: [0, 100]}
+    - {name: unused,      type: uint8, constant: 0x00}
+    - {name: stream_aux,  type: uint8, range: [0, 100]}
+    - {name: stream_mic,  type: uint8, range: [0, 100]}
+
+  custom_eq:
+    - {name: report_id, type: uint8,   constant: 0x06}
+    - {name: command,   type: uint8,   constant: 0x33}
+    - {name: gain1,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain2,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain3,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain4,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain5,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain6,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain7,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain8,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain9,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain10,    type: float32, range: [-10.0, 10.0]}
+
+  selected_eq_preset:
+    - {name: report_id, type: uint8, constant: 0x06}
+    - {name: command,   type: uint8, constant: 0x2E}
+    - {name: eq_preset, type: uint8, range: [0, 18]}
+
+  dim_timer:
+    - {name: report_id, type: uint8, constant: 0x06}
+    - {name: command,   type: uint8, constant: 0x83}
+    - {name: dim_timer, type: uint8, range: [0, 60]}
+
+  oled_brightness:
+    - {name: report_id,      type: uint8, constant: 0x06}
+    - {name: command,        type: uint8, constant: 0x85}
+    - {name: oled_brightness, type: uint8, range: [1, 10]}
+
+  home_screen_type:
+    - {name: report_id,       type: uint8, constant: 0x06}
+    - {name: command,         type: uint8, constant: 0x89}
+    - {name: home_screen_type, type: uint8, range: [0, 1]}
+
+  bluetooth_startup:
+    - {name: report_id,       type: uint8, constant: 0x06}
+    - {name: command,         type: uint8, constant: 0xB2}
+    - {name: bt_power_default, type: uint8, range: [0, 1]}
+
+  bt_call_default:
+    - {name: report_id,      type: uint8, constant: 0x06}
+    - {name: command,        type: uint8, constant: 0xB3}
+    - {name: bt_call_default, type: uint8, range: [0, 2]}
+
+  muted_mic_brightness:
+    - {name: report_id,          type: uint8, constant: 0x06}
+    - {name: command,            type: uint8, constant: 0xBF}
+    - {name: muted_mic_brightness, type: uint8, range: [1, 10]}
+
+  power_inactivity_timer:
+    - {name: report_id,             type: uint8, constant: 0x06}
+    - {name: command,               type: uint8, constant: 0xC1}
+    - {name: power_inactivity_timer, type: uint8, range: [0, 60]}
+
+  wireless_mode:
+    - {name: report_id,    type: uint8, constant: 0x06}
+    - {name: command,      type: uint8, constant: 0xC3}
+    - {name: wireless_mode, type: uint8, range: [0, 1]}
+
+  audio_settings:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x06}
+      - {name: command,   type: uint8, constant: 0x20}
+    incoming:
+      - {name: report_id,     type: uint8, constant: 0x06}
+      - {name: command,       type: uint8, constant: 0x20}
+      - {name: audio_input,   type: uint8, range: [0, 3]}
+      - {name: volume,        type: uint8, range: [0, 56]}
+      - {name: device_gain,   type: uint8, range: [1, 2]}
+      - {name: surround,      type: uint8, range: [0, 1]}
+      - {name: eq_preset,     type: uint8, range: [0, 18]}
+      - {name: custom_eq_band1,  type: uint8, range: [0, 40]}
+      - {name: custom_eq_band2,  type: uint8, range: [0, 40]}
+      - {name: custom_eq_band3,  type: uint8, range: [0, 40]}
+      - {name: custom_eq_band4,  type: uint8, range: [0, 40]}
+      - {name: custom_eq_band5,  type: uint8, range: [0, 40]}
+      - {name: custom_eq_band6,  type: uint8, range: [0, 40]}
+      - {name: custom_eq_band7,  type: uint8, range: [0, 40]}
+      - {name: custom_eq_band8,  type: uint8, range: [0, 40]}
+      - {name: custom_eq_band9,  type: uint8, range: [0, 40]}
+      - {name: custom_eq_band10, type: uint8, range: [0, 40]}
+      - {name: mic_volume,    type: uint8, range: [0, 10]}
+      - {name: sidetone,      type: uint8, range: [0, 3]}
+      - {name: line_out_mode, type: uint8, range: [1, 2]}
+      - {name: chatmix_game,  type: uint8, range: [0, 100]}
+      - {name: chatmix_chat,  type: uint8, range: [0, 100]}
+      - {name: stream_main,   type: uint8, range: [0, 100]}
+      - {name: stream_unused, type: uint8}
+      - {name: stream_aux,    type: uint8, range: [0, 100]}
+      - {name: stream_mic,    type: uint8, range: [0, 100]}
+
+  ux_settings:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x06}
+      - {name: command,   type: uint8, constant: 0x80}
+    incoming:
+      - {name: report_id,          type: uint8, constant: 0x06}
+      - {name: command,            type: uint8, constant: 0x80}
+      - {name: dim_timer,          type: uint8, range: [0, 6]}
+      - {name: oled_brightness,    type: uint8, range: [1, 10]}
+      - {name: idle_brightness,    type: uint8, range: [1, 10]}
+      - {name: home_screen_type,   type: uint8, range: [0, 1]}
+      - {name: home_screen_mic_mute, type: uint8, range: [0, 1]}
+      - {name: sonar_present,      type: uint8, range: [0, 1]}
+
+  wireless_settings:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x06}
+      - {name: command,   type: uint8, constant: 0xB0}
+    incoming:
+      - {name: report_id,              type: uint8, constant: 0x06}
+      - {name: command,                type: uint8, constant: 0xB0}
+      - {name: bt_power_default,       type: uint8, range: [0, 1]}
+      - {name: bt_call_default,        type: uint8, range: [0, 2]}
+      - {name: bt_connection_mode,     type: uint8, range: [1, 4]}
+      - {name: bt_connection_status,   type: uint8, range: [1, 8]}
+      - {name: headset_batt_level,     type: uint8, range: [0, 8]}
+      - {name: charger_batt_level,     type: uint8, range: [0, 8]}
+      - {name: transparent_level,      type: uint8, range: [1, 10]}
+      - {name: mic_muted,              type: uint8, range: [0, 1]}
+      - {name: transparency_mode,      type: uint8, range: [0, 2]}
+      - {name: muted_mic_brightness,   type: uint8, range: [1, 10]}
+      - {name: power_inactivity_timer, type: uint8, range: [0, 6]}
+      - {name: wireless_mode,          type: uint8, range: [0, 1]}
+      - {name: radio_connection_status, type: uint8}
+      - {name: headset_batt_status,    type: uint8}
+
+  battery_status:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x06}
+      - {name: command,   type: uint8, constant: 0xB7}
+    incoming:
+      - {name: report_id,         type: uint8, constant: 0x06}
+      - {name: command,           type: uint8, constant: 0xB7}
+      - {name: headset_batt_level, type: uint8, range: [0, 8]}
+      - {name: charger_batt_level, type: uint8, range: [0, 8]}
+      - {name: charging_status,   type: uint8}
+
+apis:
+  save_to_flash:
+    write: {transport: HID_IO, chunk_size: 64}
+
+  set_sonar_present:
+    write: {transport: HID_IO, chunk_size: 64}
+
+  software_chatmix_status:
+    write: {transport: HID_IO, chunk_size: 64}
+
+  high_gain:
+    write:
+      transport: HID_IO
+      chunk_size: 64
+      payload_transform: "builtin:high_gain_write"
+
+  mic_volume:
+    write: {transport: HID_IO, chunk_size: 64}
+
+  sidetone:
+    write: {transport: HID_IO, chunk_size: 64}
+
+  line_out_mode:
+    write: {transport: HID_IO, chunk_size: 64}
+
+  stream_mix:
+    write: {transport: HID_IO, chunk_size: 64}
+
+  custom_eq:
+    write:
+      transport: HID_IO
+      chunk_size: 64
+      payload_transform: "builtin:custom_eq_gains"
+
+  selected_eq_preset:
+    write: {transport: HID_IO, chunk_size: 64}
+
+  dim_timer:
+    write:
+      transport: HID_IO
+      chunk_size: 64
+      payload_transform: "builtin:dim_timer_write"
+
+  oled_brightness:
+    write: {transport: HID_IO, chunk_size: 64}
+
+  home_screen_type:
+    write: {transport: HID_IO, chunk_size: 64}
+
+  bluetooth_startup:
+    write: {transport: HID_IO, chunk_size: 64}
+
+  bt_call_default:
+    write: {transport: HID_IO, chunk_size: 64}
+
+  muted_mic_brightness:
+    write: {transport: HID_IO, chunk_size: 64}
+
+  power_inactivity_timer:
+    write:
+      transport: HID_IO
+      chunk_size: 64
+      payload_transform: "builtin:power_timer_write"
+
+  wireless_mode:
+    write: {transport: HID_IO, chunk_size: 64}
+
+  audio_settings:
+    read: {transport: HID_IO, chunk_size: 64}
+
+  ux_settings:
+    read: {transport: HID_IO, chunk_size: 64}
+
+  wireless_settings:
+    read: {transport: HID_IO, chunk_size: 64}
+
+  battery_status:
+    read: {transport: HID_IO, chunk_size: 64}
+
+sync_events:
+  0x27:
+    emit: high_gain_changed
+    fields:
+      - {name: device_gain, byte: 2, transform: gain_from_device}
+
+  0x2E:
+    emit: eq_preset_changed
+    fields:
+      - {name: eq_preset, byte: 2}
+
+  0x37:
+    emit: mic_volume_changed
+    fields:
+      - {name: mic_volume, byte: 2}
+
+  0x39:
+    emit: sidetone_changed
+    fields:
+      - {name: sidetone, byte: 2}
+
+  0x43:
+    emit: line_out_mode_changed
+    fields:
+      - {name: line_out_mode, byte: 2}
+
+  0x45:
+    emit: chatmix_changed
+    fields:
+      - {name: chatmix_game, byte: 2}
+      - {name: chatmix_chat, byte: 3}
+
+  0x47:
+    emit: stream_mix_changed
+    fields:
+      - {name: stream_main, byte: 2}
+      - {name: stream_aux,  byte: 4}
+      - {name: stream_mic,  byte: 5}
+
+  0x83:
+    emit: dim_timer_changed
+    fields:
+      - {name: dim_timer, byte: 2, transform: timer_enum_to_minutes}
+
+  0x85:
+    emit: oled_brightness_changed
+    fields:
+      - {name: oled_brightness, byte: 2}
+
+  0x89:
+    emit: home_screen_type_changed
+    fields:
+      - {name: home_screen_type, byte: 2}
+
+  0xB2:
+    emit: bluetooth_startup_changed
+    fields:
+      - {name: bt_power_default, byte: 2}
+
+  0xB3:
+    emit: bt_call_default_changed
+    fields:
+      - {name: bt_call_default, byte: 2}
+
+  0xB5:
+    emit: wireless_connection_changed
+    fields:
+      - {name: radio_connection_status, byte: 4, transform: radio_connection_to_label}
+    side_effects:
+      - call: sync_all
+
+  0xB7:
+    emit: battery_changed
+    fields:
+      - {name: headset_batt_level, byte: 2, transform: battery_level_to_percent}
+      - {name: charger_batt_level, byte: 3, transform: battery_level_to_percent}
+      - {name: charging_status,    byte: 4, transform: charging_status_to_label}
+
+  0xBF:
+    emit: muted_mic_brightness_changed
+    fields:
+      - {name: muted_mic_brightness, byte: 2}
+
+  0xC1:
+    emit: power_inactivity_timer_changed
+    fields:
+      - {name: power_inactivity_timer, byte: 2, transform: timer_enum_to_minutes}
+
+  0xC3:
+    emit: wireless_mode_changed
+    fields:
+      - {name: wireless_mode, byte: 2}
+
+sync_read:
+  - struct: audio_settings
+    maps:
+      - {emit: high_gain_changed,    field: device_gain,   transform: gain_from_device}
+      - {emit: eq_preset_changed,    field: eq_preset}
+      - {emit: mic_volume_changed,   field: mic_volume}
+      - {emit: sidetone_changed,     field: sidetone}
+      - {emit: line_out_mode_changed, field: line_out_mode}
+      - emit: stream_mix_changed
+        fields: [stream_main, stream_aux, stream_mic]
+      - emit: chatmix_changed
+        fields: [chatmix_game, chatmix_chat]
+
+  - struct: ux_settings
+    maps:
+      - {emit: dim_timer_changed,       field: dim_timer,       transform: timer_enum_to_minutes}
+      - {emit: oled_brightness_changed, field: oled_brightness}
+      - {emit: home_screen_type_changed, field: home_screen_type}
+
+  - struct: wireless_settings
+    maps:
+      - {emit: bluetooth_startup_changed,       field: bt_power_default}
+      - {emit: bt_call_default_changed,          field: bt_call_default}
+      - {emit: muted_mic_brightness_changed,     field: muted_mic_brightness}
+      - {emit: power_inactivity_timer_changed,   field: power_inactivity_timer, transform: timer_enum_to_minutes}
+      - {emit: wireless_mode_changed,            field: wireless_mode}
+      - {emit: wireless_connection_changed,      field: radio_connection_status, transform: radio_connection_to_label}
+      - {emit: battery_changed,                  field: headset_batt_level, transform: battery_level_to_percent}
+      - {emit: headset_batt_status_changed,      field: headset_batt_status, transform: headset_batt_status_to_label}
+
+lifecycle:
+  init:
+    - call: enable_sonar
+    - call: enable_chatmix
+  post_init:
+    - call: send_init_wireless_connection_battery_status
+  shutdown:
+    - call: disable_chatmix
+    - call: disable_sonar
+    - call: save_to_flash
