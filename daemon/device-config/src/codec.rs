@@ -598,7 +598,7 @@ mod tests {
                 const_field("command", FieldType::Uint8, 0x09),
             ],
         );
-        let codec = Codec::new(&structs, &no_consts());
+        let codec = Codec::new(&structs, no_consts());
         let bytes = codec.serialize("cmd", &HashMap::new()).unwrap();
         assert_eq!(bytes, [0x06, 0x09]);
     }
@@ -612,7 +612,7 @@ mod tests {
                 field("gain", FieldType::Uint8),
             ],
         );
-        let codec = Codec::new(&structs, &no_consts());
+        let codec = Codec::new(&structs, no_consts());
         let mut values = HashMap::new();
         values.insert("gain".to_string(), FieldValue::U8(0x75));
         assert_eq!(codec.serialize("set_gain", &values).unwrap(), [0x06, 0x75]);
@@ -621,7 +621,7 @@ mod tests {
     #[test]
     fn serialize_uint16_big_endian() {
         let structs = single_struct("s", vec![field("v", FieldType::Uint16)]);
-        let codec = Codec::new(&structs, &no_consts());
+        let codec = Codec::new(&structs, no_consts());
         let mut values = HashMap::new();
         values.insert("v".to_string(), FieldValue::U16(0x1234));
         assert_eq!(codec.serialize("s", &values).unwrap(), [0x12, 0x34]);
@@ -630,7 +630,7 @@ mod tests {
     #[test]
     fn serialize_float32() {
         let structs = single_struct("s", vec![field("gain", FieldType::Float32)]);
-        let codec = Codec::new(&structs, &no_consts());
+        let codec = Codec::new(&structs, no_consts());
         let mut values = HashMap::new();
         values.insert("gain".to_string(), FieldValue::F32(1.0f32));
         let bytes = codec.serialize("s", &values).unwrap();
@@ -640,7 +640,7 @@ mod tests {
     #[test]
     fn serialize_missing_field_error() {
         let structs = single_struct("s", vec![field("x", FieldType::Uint8)]);
-        let codec = Codec::new(&structs, &no_consts());
+        let codec = Codec::new(&structs, no_consts());
         let err = codec.serialize("s", &HashMap::new()).unwrap_err();
         assert!(matches!(err, CodecError::MissingField { .. }));
     }
@@ -657,7 +657,7 @@ mod tests {
                 field("status", FieldType::Uint8),
             ],
         );
-        let codec = Codec::new(&structs, &no_consts());
+        let codec = Codec::new(&structs, no_consts());
         let result = codec.deserialize("battery", &[0x06, 50, 2]).unwrap();
         assert_eq!(result["level"], FieldValue::U8(50));
         assert_eq!(result["status"], FieldValue::U8(2));
@@ -670,7 +670,7 @@ mod tests {
     #[test]
     fn deserialize_uint16_big_endian() {
         let structs = single_struct("s", vec![field("v", FieldType::Uint16)]);
-        let codec = Codec::new(&structs, &no_consts());
+        let codec = Codec::new(&structs, no_consts());
         let result = codec.deserialize("s", &[0xAB, 0xCD]).unwrap();
         assert_eq!(result["v"], FieldValue::U16(0xABCD));
     }
@@ -678,7 +678,7 @@ mod tests {
     #[test]
     fn deserialize_buffer_too_short() {
         let structs = single_struct("s", vec![field("v", FieldType::Uint16)]);
-        let codec = Codec::new(&structs, &no_consts());
+        let codec = Codec::new(&structs, no_consts());
         let err = codec.deserialize("s", &[0xAB]).unwrap_err();
         assert!(matches!(err, CodecError::BufferTooShort { .. }));
     }
@@ -702,7 +702,7 @@ mod tests {
                 ],
             },
         );
-        let codec = Codec::new(&structs, &no_consts());
+        let codec = Codec::new(&structs, no_consts());
 
         // Outgoing: 2 bytes
         let tx = codec.serialize("cmd", &HashMap::new()).unwrap();
@@ -718,7 +718,7 @@ mod tests {
     #[test]
     fn constant_mismatch_rejected_on_read() {
         let structs = single_struct("s", vec![const_field("id", FieldType::Uint8, 0x06)]);
-        let codec = Codec::new(&structs, &no_consts());
+        let codec = Codec::new(&structs, no_consts());
         let err = codec.deserialize("s", &[0xFF]).unwrap_err();
         assert!(matches!(err, CodecError::ConstantMismatch { .. }));
     }
@@ -726,7 +726,7 @@ mod tests {
     #[test]
     fn range_constraint_enforced_on_read() {
         let structs = single_struct("s", vec![range_field("level", FieldType::Uint8, 0.0, 8.0)]);
-        let codec = Codec::new(&structs, &no_consts());
+        let codec = Codec::new(&structs, no_consts());
         // 9 is out of [0, 8]
         assert!(matches!(
             codec.deserialize("s", &[9]).unwrap_err(),
@@ -745,7 +745,7 @@ mod tests {
             "s",
             vec![values_field("status", FieldType::Uint8, &[1, 2, 4, 8])],
         );
-        let codec = Codec::new(&structs, &no_consts());
+        let codec = Codec::new(&structs, no_consts());
         // 3 is not in the list
         assert!(matches!(
             codec.deserialize("s", &[3]).unwrap_err(),
@@ -779,7 +779,7 @@ mod tests {
                 },
             ]),
         );
-        let codec = Codec::new(&structs, &no_consts());
+        let codec = Codec::new(&structs, no_consts());
 
         let mut values = HashMap::new();
         values.insert("g1".to_string(), FieldValue::U8(10));
@@ -796,7 +796,7 @@ mod tests {
     #[test]
     fn repeat_field_deserializes_to_array() {
         let structs = single_struct("s", vec![repeat_field("data", FieldType::Uint8, 3)]);
-        let codec = Codec::new(&structs, &no_consts());
+        let codec = Codec::new(&structs, no_consts());
         let result = codec.deserialize("s", &[10, 20, 30]).unwrap();
         assert_eq!(
             result["data"],
@@ -811,7 +811,7 @@ mod tests {
     #[test]
     fn repeat_field_serializes_array() {
         let structs = single_struct("s", vec![repeat_field("data", FieldType::Uint8, 3)]);
-        let codec = Codec::new(&structs, &no_consts());
+        let codec = Codec::new(&structs, no_consts());
         let mut values = HashMap::new();
         values.insert(
             "data".to_string(),
@@ -829,7 +829,7 @@ mod tests {
     #[test]
     fn bytearray_field_roundtrip() {
         let structs = single_struct("s", vec![bytearray_field("payload", 4)]);
-        let codec = Codec::new(&structs, &no_consts());
+        let codec = Codec::new(&structs, no_consts());
         let mut values = HashMap::new();
         values.insert(
             "payload".to_string(),
@@ -878,7 +878,7 @@ mod tests {
     #[test]
     fn unknown_struct_error() {
         let structs = HashMap::new();
-        let codec = Codec::new(&structs, &no_consts());
+        let codec = Codec::new(&structs, no_consts());
         assert!(matches!(
             codec.serialize("nope", &HashMap::new()).unwrap_err(),
             CodecError::UnknownStruct(_)

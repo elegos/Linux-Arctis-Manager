@@ -83,7 +83,7 @@ async fn handle_mock_conn(
 mod tests {
     use super::*;
     use std::io::{IoSliceMut, Read, Write};
-    use std::os::unix::io::{FromRawFd, IntoRawFd, RawFd};
+    use std::os::unix::io::{FromRawFd, RawFd};
     use tempfile::TempDir;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::UnixStream;
