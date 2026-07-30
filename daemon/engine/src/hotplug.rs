@@ -16,6 +16,8 @@ pub struct DeviceInfo {
     pub hidraw_path: PathBuf,
     pub vid: u16,
     pub pid: u16,
+    /// USB interface number from udev's `ID_USB_INTERFACE_NUM`, if available.
+    pub interface_num: Option<u8>,
 }
 
 #[derive(Debug)]
@@ -58,6 +60,7 @@ pub async fn watch(
                     hidraw_path: node.to_owned(),
                     vid,
                     pid,
+                    interface_num: usb_interface_num(&dev),
                 };
                 match event.event_type() {
                     EventType::Add => {
@@ -97,6 +100,7 @@ pub fn scan_existing(pid_allowlist: &[u16]) -> std::io::Result<Vec<DeviceInfo>> 
                     hidraw_path: path,
                     vid,
                     pid,
+                    interface_num: usb_interface_num(&dev),
                 })
             } else {
                 None
@@ -115,6 +119,11 @@ fn vid_pid(dev: &Device) -> Option<(u16, u16)> {
     let vid = u16::from_str_radix(vid_str, 16).ok()?;
     let pid = u16::from_str_radix(pid_str, 16).ok()?;
     Some((vid, pid))
+}
+
+fn usb_interface_num(dev: &Device) -> Option<u8> {
+    let s = dev.property_value("ID_USB_INTERFACE_NUM")?.to_str()?;
+    u8::from_str_radix(s.trim(), 16).ok()
 }
 
 #[cfg(test)]
