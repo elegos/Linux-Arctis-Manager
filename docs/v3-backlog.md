@@ -72,13 +72,13 @@ This keeps the checklist honest and makes blocked work immediately visible witho
 - [ ] **[E6] Nova Pro Wireless — full protocol parity**
   - [x] [E6-S1] Rewrite `nova_pro_wireless.yaml`
   - [x] [E6-S2] Write `base_arctis_nova_pro_wireless.yaml`
-  - [ ] [E6-S3] 10-band custom EQ
-  - [ ] [E6-S4] EQ preset selection
-  - [ ] [E6-S5] Line out mode and stream mix
-  - [ ] [E6-S6] OLED settings (brightness, dim timer, home screen type)
-  - [ ] [E6-S7] Bluetooth startup default and call behavior
-  - [ ] [E6-S8] Fix status parsing gaps
-  - [ ] [E6-S9] Save to flash
+  - [x] [E6-S3] 10-band custom EQ
+  - [x] [E6-S4] EQ preset selection
+  - [x] [E6-S5] Line out mode and stream mix
+  - [x] [E6-S6] OLED settings (brightness, dim timer, home screen type)
+  - [x] [E6-S7] Bluetooth startup default and call behavior
+  - [x] [E6-S8] Fix status parsing gaps
+  - [x] [E6-S9] Save to flash
 - [ ] **[E7] Multi-device support**
   - [ ] [E7-S1] Spec-to-YAML conversion script
   - [ ] [E7-S2] Arctis Nova 7 family
