@@ -24,7 +24,7 @@ v3 replaces the Python engine with a Rust daemon while keeping the Python GUI an
 │  └──────────────────┘                                     │    │
 │                                                           │    │
 │  ┌────────────────────────────────────────────────────────┴──┐ │
-│  │  arctis-engine  (Rust, systemd user service)              │ │
+│  │  lam-daemon  (Rust, systemd user service)              │ │
 │  │                                                           │ │
 │  │  ┌─────────────┐  ┌──────────────┐  ┌─────────────────┐  │ │
 │  │  │ Device      │  │ Config       │  │ D-Bus server    │  │ │
@@ -43,7 +43,7 @@ v3 replaces the Python engine with a Rust daemon while keeping the Python GUI an
 └─────────────────────────────│─────────────────────────────────┘
                               │ fd (opened by helper)
 ┌─────────────────────────────▼─────────────────────────────────┐
-│  arctis-hid-opener  (tiny setcap binary, ~100 LOC)            │
+│  lam-hidraw-helper  (tiny setcap binary, ~100 LOC)            │
 │  Validates VID+PID → opens /dev/hidraw* → passes fd via socket│
 └─────────────────────────────┬─────────────────────────────────┘
                               │
@@ -65,16 +65,16 @@ Linux does not expose a capability scoped to HID devices specifically. The two v
 - **udev rules** matching VID+PID → set group ownership on device nodes.
 - **Privileged helper** with `CAP_DAC_OVERRIDE` that opens device nodes on behalf of the engine.
 
-v3 uses the **privileged helper** approach (`arctis-hid-opener`) to avoid requiring udev rules during installation and to centralise the privilege surface.
+v3 uses the **privileged helper** approach (`lam-hidraw-helper`) to avoid requiring udev rules during installation and to centralise the privilege surface.
 
-### `arctis-hid-opener`
+### `lam-hidraw-helper`
 
 A minimal binary (~100 lines of Rust or C) installed with:
 
 ```
-chown root:root /usr/local/libexec/arctis-hid-opener
-chmod 755       /usr/local/libexec/arctis-hid-opener
-setcap cap_dac_override+eip /usr/local/libexec/arctis-hid-opener
+chown root:root /usr/local/libexec/lam-hidraw-helper
+chmod 755       /usr/local/libexec/lam-hidraw-helper
+setcap cap_dac_override+eip /usr/local/libexec/lam-hidraw-helper
 ```
 
 `setcap` stores the capability in an extended attribute on the inode. Replacing the binary creates a new inode that does **not** inherit the attribute; regaining the capability requires root to re-run `setcap`. A non-root attacker who replaces the binary cannot escalate privileges through it.
@@ -89,9 +89,9 @@ The helper enforces two invariants before opening any device node:
 The engine itself runs with no elevated privileges as a systemd user service:
 
 ```ini
-# ~/.config/systemd/user/arctis-engine.service
+# ~/.config/systemd/user/lam-daemon.service
 [Service]
-ExecStart=/usr/local/bin/arctis-engine
+ExecStart=/usr/local/bin/lam-daemon
 Restart=on-failure
 ```
 
