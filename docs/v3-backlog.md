@@ -35,7 +35,7 @@ This keeps the checklist honest and makes blocked work immediately visible witho
   - [ ] [E1-S5] Async event loop
   - [ ] [E1-S6] Structured logging and error handling
 - [ ] **[E2] Privileged HID helper (`lam-hidraw-helper`)**
-  - [ ] [E2-S1] Unix domain socket server
+  - [x] [E2-S1] Unix domain socket server
   - [ ] [E2-S2] Peer credential validation
   - [ ] [E2-S3] VID allowlist enforcement
   - [ ] [E2-S4] File descriptor passing
