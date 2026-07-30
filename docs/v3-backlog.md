@@ -49,8 +49,8 @@ This keeps the checklist honest and makes blocked work immediately visible witho
   - [x] [E3-S1] Base file inheritance (`extends:`)
   - [x] [E3-S2] Struct serialization and deserialization
   - [x] [E3-S3] API execution
-  - [ ] [E3-S4] Transform evaluation
-  - [ ] [E3-S5] Builtin transforms
+  - [x] [E3-S4] Transform evaluation
+  - [x] [E3-S5] Builtin transforms
   - [ ] [E3-S6] Sync event dispatcher
   - [ ] [E3-S7] Sync read (startup bulk poll)
   - [ ] [E3-S8] Lifecycle hook executor
