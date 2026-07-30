@@ -1,0 +1,23 @@
+extends: base_arctis_nova_pro_wireless
+
+device:
+  name: "SteelSeries Arctis Nova Pro Wireless"
+  vendor_id: 0x1038
+  variants:
+    - product_id: 0x12E0
+      name: "Arctis Nova Pro Wireless"
+    - product_id: 0x12E5
+      name: "Arctis Nova Pro Wireless X"
+  hid:
+    command_interface:
+      interface: 4
+    sync_interface:
+      interface: 4
+  capabilities:
+    - battery
+    - bluetooth
+    - chatmix
+    - custom_eq
+    - microphone
+    - noise_cancelling
+    - wireless
