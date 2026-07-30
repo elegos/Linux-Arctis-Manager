@@ -191,7 +191,7 @@ fn open_hidraw(path: &Path) -> std::io::Result<std::fs::File> {
 // Sends `fd` as SCM_RIGHTS ancillary data, using the acceptance byte 0x01 as
 // the required data payload. The caller must drop `fd` after this returns; the
 // kernel duplicates it into the receiving process during sendmsg.
-fn send_fd(socket: &UnixStream, fd: RawFd) -> std::io::Result<()> {
+pub fn send_fd(socket: &UnixStream, fd: RawFd) -> std::io::Result<()> {
     let data = [0x01u8];
     let iov = [IoSlice::new(&data)];
     let cmsg = [nix::sys::socket::ControlMessage::ScmRights(&[fd])];

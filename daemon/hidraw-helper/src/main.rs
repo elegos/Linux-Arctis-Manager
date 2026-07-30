@@ -1,5 +1,4 @@
-mod server;
-
+use lam_hidraw_helper::server;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::info;
