@@ -17,6 +17,7 @@ use tokio::sync::mpsc;
 use tracing::warn;
 
 use crate::engine_error::EngineError;
+use crate::state::DeviceCommand;
 
 // ── DeviceSession ─────────────────────────────────────────────────────────────
 
@@ -108,6 +109,7 @@ impl DeviceSession {
         dispatcher.dispatch(report).map_err(EngineError::Dispatch)
     }
 
+    #[allow(dead_code)] // public API retained for callers that don't need command support
     /// Read sync reports in a loop and forward `EmitEvent`s to `tx`.
     /// Returns `Ok(())` when `tx` is dropped (engine shutting down) or when
     /// the device sends EOF.  Returns `Err` on unrecoverable transport errors.
@@ -144,6 +146,61 @@ impl DeviceSession {
                 for effect in dr.side_effects {
                     if let Err(e) = self.dispatch_call_by_name(&effect.call, None).await {
                         warn!("side effect '{}' failed: {e}", effect.call);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Like `run_event_loop` but also handles `DeviceCommand`s from the D-Bus
+    /// layer.  Returns `Ok(())` on clean shutdown or `Err` on transport failure.
+    pub async fn run_event_loop_with_commands(
+        &mut self,
+        tx: mpsc::Sender<EmitEvent>,
+        mut cmd_rx: mpsc::Receiver<DeviceCommand>,
+    ) -> Result<(), EngineError> {
+        loop {
+            tokio::select! {
+                read_result = self.transport.read_interrupt(Duration::from_millis(5000)) => {
+                    let report = match read_result {
+                        Ok(r) if r.is_empty() => return Ok(()), // EOF
+                        Ok(r) => r,
+                        Err(ReadError::Timeout) => continue,
+                        Err(ReadError::Io(e)) => return Err(EngineError::Io(e)),
+                    };
+
+                    let result = {
+                        let dispatcher = SyncDispatcher::new(&self.config);
+                        match dispatcher.dispatch(&report) {
+                            Ok(r) => r,
+                            Err(e) => {
+                                warn!("malformed sync report: {e}");
+                                continue;
+                            }
+                        }
+                    };
+
+                    if let Some(dr) = result {
+                        if let Some(emit) = dr.emit {
+                            if tx.send(emit).await.is_err() {
+                                return Ok(()); // receiver dropped
+                            }
+                        }
+                        for effect in dr.side_effects {
+                            if let Err(e) = self.dispatch_call_by_name(&effect.call, None).await {
+                                warn!("side effect '{}' failed: {e}", effect.call);
+                            }
+                        }
+                    }
+                }
+                cmd_opt = cmd_rx.recv() => {
+                    match cmd_opt {
+                        Some(DeviceCommand::WriteApi { api_name, values }) => {
+                            if let Err(e) = self.send_api_write(&api_name, &values).await {
+                                warn!("D-Bus command '{api_name}' failed: {e}");
+                            }
+                        }
+                        None => return Ok(()), // all senders dropped
                     }
                 }
             }
