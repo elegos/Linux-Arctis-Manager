@@ -28,7 +28,7 @@ This keeps the checklist honest and makes blocked work immediately visible witho
 ## Epics and Stories
 
 - [ ] **[E1] Rust engine foundation**
-  - [ ] [E1-S1] Cargo workspace
+  - [x] [E1-S1] Cargo workspace
   - [ ] [E1-S2] HID transport layer
   - [ ] [E1-S3] USB hot-plug detection
   - [ ] [E1-S4] Device init sequence executor
@@ -148,9 +148,13 @@ The Rust engine replaces `core.py` as the process that owns HID communication, d
 
 - **[E1-S2] HID transport layer**
   Implement an async HID transport using the `hidapi` crate with the `hidraw` backend. Expose two operations on an open file descriptor: `write(report: &[u8])` and `read() -> Vec<u8>` with a configurable timeout. Support both `HID_IO` (64-byte interrupt reports) and `HID_FEATURE` (up to 1024 bytes) chunk types.
+  Wire `hidapi = { workspace = true }` into `hid-transport/Cargo.toml` and uncomment the `libudev-dev` install step in `.github/workflows/rust-ci.yaml`.
+  > Requires system package: `libudev-dev` (Debian/Ubuntu), `systemd-devel` (Fedora), `udev` (Arch).
 
 - **[E1-S3] USB hot-plug detection**
   Use `tokio-udev` to subscribe to kernel `add`/`remove` udev events. On `add`, check VID against the SteelSeries allowlist (`0x1038`) and PID against the loaded device configs; if matched, trigger device initialisation. On `remove`, trigger device shutdown and clear state.
+  Wire `tokio-udev = { workspace = true }` into `engine/Cargo.toml`.
+  > Requires system package: same `libudev-dev` / `systemd-devel` / `udev` as E1-S2.
 
 - **[E1-S4] Device init sequence executor**
   Parse the `device_init` byte sequence from the device config and send each command to the device over HID, respecting `time_between_commands_ms` between writes. Support the `init_sleep_ms` delay before the sequence starts (some devices need time after USB enumeration).
