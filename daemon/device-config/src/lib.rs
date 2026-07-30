@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+pub mod api_executor;
 pub mod codec;
 
 // ── Error ────────────────────────────────────────────────────────────────────
