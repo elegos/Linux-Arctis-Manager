@@ -1,0 +1,15 @@
+[Unit]
+Description=Linux Arctis Manager daemon
+Documentation=https://github.com/Mic92/linux-arctis-manager
+Requires=lam-hidraw-helper.service
+After=lam-hidraw-helper.service
+
+[Service]
+Type=simple
+ExecStart=@BINDIR@/lam-daemon
+Restart=on-failure
+RestartSec=5
+Environment=RUST_LOG=warn
+
+[Install]
+WantedBy=default.target

@@ -22,21 +22,30 @@ use state::{AppState, DeviceCommand, DeviceEntry, SignalEvent};
 
 // ── Config loading ────────────────────────────────────────────────────────────
 
-/// Scan `dir` for `*.yaml` files and return successfully parsed configs.
-pub fn load_configs(dir: &Path) -> Vec<Arc<DeviceConfig>> {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return vec![];
-    };
-    let search_dirs = [dir];
+/// System-level data directory baked in at compile time via `LAM_DATADIR`.
+/// `None` when building without `make install` (dev builds, unit tests).
+const SYSTEM_DATADIR: Option<&str> = option_env!("LAM_DATADIR");
+
+/// Load `*.yaml` files from every directory in `dirs`.
+/// All dirs are passed as search paths to the DSL loader so that `extends:`
+/// references can cross directory boundaries (e.g. a user override that extends
+/// a system base file).  Earlier entries in `dirs` have higher priority: when
+/// `find_config` walks the Vec it stops at the first PID match.
+pub fn load_configs_from_dirs(dirs: &[&Path]) -> Vec<Arc<DeviceConfig>> {
     let mut configs = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
+    for &dir in dirs {
+        let Ok(entries) = std::fs::read_dir(dir) else {
             continue;
-        }
-        match device_config::load(&path, &search_dirs) {
-            Ok(cfg) => configs.push(Arc::new(cfg)),
-            Err(e) => warn!("skipping {}: {e}", path.display()),
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
+                continue;
+            }
+            match device_config::load(&path, dirs) {
+                Ok(cfg) => configs.push(Arc::new(cfg)),
+                Err(e) => warn!("skipping {}: {e}", path.display()),
+            }
         }
     }
     configs
@@ -59,13 +68,28 @@ pub fn helper_sock_path() -> PathBuf {
     PathBuf::from(runtime_dir).join("lam-hidraw-helper.sock")
 }
 
-/// Return the directory where device YAML configs are stored.
-pub fn config_dir() -> PathBuf {
+/// Return the user-level directory where device YAML configs are stored.
+pub fn user_config_dir() -> PathBuf {
     std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
         .unwrap_or_else(|| PathBuf::from(".config"))
         .join("arctis_manager/devices")
+}
+
+/// Return the system-level config directory compiled in at build time, if any.
+pub fn system_config_dir() -> Option<PathBuf> {
+    SYSTEM_DATADIR.map(|d| PathBuf::from(d).join("devices"))
+}
+
+/// Build the ordered list of config search directories.
+/// User dir is first (highest priority); system dir is appended when compiled in.
+pub fn config_dirs() -> Vec<PathBuf> {
+    let mut dirs = vec![user_config_dir()];
+    if let Some(sys) = system_config_dir() {
+        dirs.push(sys);
+    }
+    dirs
 }
 
 // ── Per-device task ───────────────────────────────────────────────────────────
@@ -204,10 +228,18 @@ async fn main() {
 
     info!("lam-daemon {}", env!("CARGO_PKG_VERSION"));
 
-    let cfg_dir = config_dir();
-    let configs = load_configs(&cfg_dir);
+    let cfg_dirs = config_dirs();
+    let dir_refs: Vec<&Path> = cfg_dirs.iter().map(PathBuf::as_path).collect();
+    let configs = load_configs_from_dirs(&dir_refs);
     if configs.is_empty() {
-        warn!("no device configs found in {}", cfg_dir.display());
+        warn!(
+            "no device configs found in [{}]",
+            cfg_dirs
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
     } else {
         info!("loaded {} device config(s)", configs.len());
     }
@@ -217,7 +249,7 @@ async fn main() {
     let app_state = Arc::new(Mutex::new(AppState {
         configs: configs.clone(),
         devices: HashMap::new(),
-        config_dir: cfg_dir,
+        config_dirs: cfg_dirs,
     }));
 
     let (signal_tx, signal_rx) = broadcast::channel::<SignalEvent>(64);

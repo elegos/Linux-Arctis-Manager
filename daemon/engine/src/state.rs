@@ -15,7 +15,8 @@ use tokio::sync::mpsc;
 pub struct AppState {
     pub configs: Vec<Arc<DeviceConfig>>,
     pub devices: HashMap<PathBuf, DeviceEntry>,
-    pub config_dir: PathBuf,
+    /// Directories to search for device configs, in priority order (first = highest).
+    pub config_dirs: Vec<PathBuf>,
 }
 
 pub struct DeviceEntry {

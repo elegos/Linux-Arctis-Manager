@@ -3,7 +3,6 @@
 // via `Arc<Mutex<AppState>>`.
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::Arc;
 
 use device_config::codec::FieldValue;
@@ -113,11 +112,13 @@ struct ConfigInterface {
 #[interface(name = "name.giacomofurlan.ArctisManager.Next.Config")]
 impl ConfigInterface {
     async fn reload_configs(&self) -> bool {
-        let dir = {
+        let dirs = {
             let state = self.state.lock().await;
-            state.config_dir.clone()
+            state.config_dirs.clone()
         };
-        let new_configs = reload_configs_from_dir(&dir);
+        let dir_refs: Vec<&std::path::Path> =
+            dirs.iter().map(std::path::PathBuf::as_path).collect();
+        let new_configs = crate::load_configs_from_dirs(&dir_refs);
         let mut state = self.state.lock().await;
         state.configs = new_configs;
         true
@@ -209,27 +210,6 @@ pub async fn start_dbus_service(
     });
 
     Ok(conn)
-}
-
-// ── Config reload ─────────────────────────────────────────────────────────────
-
-fn reload_configs_from_dir(dir: &Path) -> Vec<Arc<DeviceConfig>> {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return vec![];
-    };
-    let search_dirs = [dir];
-    let mut configs = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
-            continue;
-        }
-        match device_config::load(&path, &search_dirs) {
-            Ok(cfg) => configs.push(Arc::new(cfg)),
-            Err(e) => warn!("skipping {}: {e}", path.display()),
-        }
-    }
-    configs
 }
 
 // ── JSON helpers ──────────────────────────────────────────────────────────────
@@ -444,7 +424,7 @@ mod tests {
         let state = AppState {
             configs: vec![],
             devices: HashMap::new(),
-            config_dir: PathBuf::from("/tmp"),
+            config_dirs: vec![PathBuf::from("/tmp")],
         };
         assert_eq!(build_status_json(&state), "{}");
     }
@@ -465,7 +445,7 @@ mod tests {
         let state = AppState {
             configs: vec![],
             devices,
-            config_dir: PathBuf::from("/tmp"),
+            config_dirs: vec![PathBuf::from("/tmp")],
         };
         let json: JsonValue = serde_json::from_str(&build_status_json(&state)).unwrap();
         assert_eq!(json["battery"]["value"], 80);
