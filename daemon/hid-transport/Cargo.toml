@@ -1,0 +1,9 @@
+[package]
+name = "hid-transport"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+# hidapi and tokio added in E1-S2 when the transport layer is implemented
