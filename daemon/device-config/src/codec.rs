@@ -23,7 +23,7 @@ pub enum FieldValue {
 }
 
 impl FieldValue {
-    fn as_f64(&self) -> Option<f64> {
+    pub fn as_f64(&self) -> Option<f64> {
         match self {
             Self::U8(v) => Some(*v as f64),
             Self::U16(v) => Some(*v as f64),
@@ -33,7 +33,7 @@ impl FieldValue {
         }
     }
 
-    fn as_u64(&self) -> Option<u64> {
+    pub fn as_u64(&self) -> Option<u64> {
         match self {
             Self::U8(v) => Some(*v as u64),
             Self::U16(v) => Some(*v as u64),
