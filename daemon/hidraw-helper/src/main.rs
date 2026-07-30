@@ -25,6 +25,5 @@ async fn main() {
         path.display()
     );
 
-    let sysfs_base = Arc::new(PathBuf::from("/sys"));
-    server::serve(listener, sysfs_base).await;
+    server::serve(listener, Arc::new(server::HelperConfig::system())).await;
 }

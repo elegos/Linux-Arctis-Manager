@@ -1,4 +1,6 @@
+use std::io::IoSlice;
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -10,7 +12,22 @@ const STEELSERIES_VID: u16 = 0x1038;
 // Protocol
 // Engine → Helper : <hidraw_path>\n   (max 255 bytes, newline-terminated)
 // Helper → Engine : 0x00              (rejected — any check failed)
-//                   0x01              (accepted — fd follows via SCM_RIGHTS, E2-S4)
+//                   0x01 + SCM_RIGHTS (accepted — fd attached as ancillary data)
+
+pub struct HelperConfig {
+    pub sysfs_base: PathBuf,
+    /// Root of the device filesystem; `/dev` in production, a temp dir in tests.
+    pub dev_root: PathBuf,
+}
+
+impl HelperConfig {
+    pub fn system() -> Self {
+        Self {
+            sysfs_base: PathBuf::from("/sys"),
+            dev_root: PathBuf::from("/dev"),
+        }
+    }
+}
 
 pub fn bind_socket(path: &Path) -> std::io::Result<UnixListener> {
     let _ = std::fs::remove_file(path);
@@ -19,12 +36,12 @@ pub fn bind_socket(path: &Path) -> std::io::Result<UnixListener> {
     Ok(listener)
 }
 
-pub async fn serve(listener: UnixListener, sysfs_base: Arc<PathBuf>) {
+pub async fn serve(listener: UnixListener, config: Arc<HelperConfig>) {
     loop {
         match listener.accept().await {
             Ok((stream, _)) => {
-                let sysfs = Arc::clone(&sysfs_base);
-                if let Err(e) = handle_connection(stream, &sysfs).await {
+                let cfg = Arc::clone(&config);
+                if let Err(e) = handle_connection(stream, &cfg).await {
                     error!("connection error: {e}");
                 }
             }
@@ -35,7 +52,7 @@ pub async fn serve(listener: UnixListener, sysfs_base: Arc<PathBuf>) {
     }
 }
 
-async fn handle_connection(mut stream: UnixStream, sysfs_base: &Path) -> std::io::Result<()> {
+async fn handle_connection(mut stream: UnixStream, config: &HelperConfig) -> std::io::Result<()> {
     let own_uid = nix::unistd::getuid().as_raw();
     let peer_uid = stream.peer_cred()?.uid();
 
@@ -63,7 +80,7 @@ async fn handle_connection(mut stream: UnixStream, sysfs_base: &Path) -> std::io
         }
     };
 
-    let vid = match read_vid(sysfs_base, hidraw_name) {
+    let vid = match read_vid(&config.sysfs_base, hidraw_name) {
         Ok(v) => v,
         Err(e) => {
             warn!("cannot read VID for {hidraw_name}: {e}");
@@ -78,7 +95,7 @@ async fn handle_connection(mut stream: UnixStream, sysfs_base: &Path) -> std::io
         return Ok(());
     }
 
-    let hid_path = match hid_device_path(sysfs_base, hidraw_name) {
+    let hid_path = match hid_device_path(&config.sysfs_base, hidraw_name) {
         Ok(p) => p,
         Err(e) => {
             warn!("cannot resolve HID device path for {hidraw_name}: {e}");
@@ -93,10 +110,22 @@ async fn handle_connection(mut stream: UnixStream, sysfs_base: &Path) -> std::io
         return Ok(());
     }
 
-    info!("VID {vid:#06x} allowed for {hidraw_name}");
-    stream.write_all(&[0x01]).await?;
+    let device_path = config.dev_root.join(hidraw_name);
+    let hidraw_file = match open_hidraw(&device_path) {
+        Ok(f) => f,
+        Err(e) => {
+            warn!("cannot open {}: {e}", device_path.display());
+            stream.write_all(&[0x00]).await?;
+            return Ok(());
+        }
+    };
 
-    // file descriptor passing — E2-S4
+    if let Err(e) = send_fd(&stream, hidraw_file.as_raw_fd()) {
+        warn!("sendmsg failed for {hidraw_name}: {e}");
+        return Err(e);
+    }
+
+    info!("fd for {hidraw_name} passed to engine (VID {vid:#06x})");
     Ok(())
 }
 
@@ -126,8 +155,6 @@ fn vid_is_allowed(vid: u16) -> bool {
     vid == STEELSERIES_VID
 }
 
-// Resolves the symlink /sys/class/hidraw/<name>/device to the real HID function
-// path in the device tree, which is needed to navigate to the parent USB device.
 fn hid_device_path(sysfs_base: &Path, hidraw_name: &str) -> std::io::Result<PathBuf> {
     let symlink = sysfs_base
         .join("class/hidraw")
@@ -139,16 +166,10 @@ fn hid_device_path(sysfs_base: &Path, hidraw_name: &str) -> std::io::Result<Path
 // Checks whether the USB device that owns the HID function has at least one
 // interface with bInterfaceClass == 01 (USB Audio). Keyboards and mice are
 // pure HID devices and do not have an audio interface; headsets do.
-//
-// Path expected: <usb-device>/<usb-interface>/<hid-function>/
-// Navigates two levels up to reach <usb-device>, then scans its children.
 pub fn has_audio_interface(hid_dev: &Path) -> std::io::Result<bool> {
-    let usb_dev = hid_dev
-        .parent() // USB interface dir
-        .and_then(Path::parent) // USB device dir
-        .ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::NotFound, "unexpected sysfs layout")
-        })?;
+    let usb_dev = hid_dev.parent().and_then(Path::parent).ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::NotFound, "unexpected sysfs layout")
+    })?;
     for entry in std::fs::read_dir(usb_dev)? {
         let class_file = entry?.path().join("bInterfaceClass");
         if let Ok(class) = std::fs::read_to_string(class_file) {
@@ -160,15 +181,41 @@ pub fn has_audio_interface(hid_dev: &Path) -> std::io::Result<bool> {
     Ok(false)
 }
 
+fn open_hidraw(path: &Path) -> std::io::Result<std::fs::File> {
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+}
+
+// Sends `fd` as SCM_RIGHTS ancillary data, using the acceptance byte 0x01 as
+// the required data payload. The caller must drop `fd` after this returns; the
+// kernel duplicates it into the receiving process during sendmsg.
+fn send_fd(socket: &UnixStream, fd: RawFd) -> std::io::Result<()> {
+    let data = [0x01u8];
+    let iov = [IoSlice::new(&data)];
+    let cmsg = [nix::sys::socket::ControlMessage::ScmRights(&[fd])];
+    nix::sys::socket::sendmsg::<()>(
+        socket.as_raw_fd(),
+        &iov,
+        &cmsg,
+        nix::sys::socket::MsgFlags::empty(),
+        None,
+    )
+    .map(|_| ())
+    .map_err(|e| std::io::Error::from_raw_os_error(e as i32))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{IoSliceMut, Read};
     use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::io::FromRawFd;
     use tempfile::TempDir;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::UnixStream;
 
-    // Minimal fake sysfs for read_vid unit tests (no symlinks needed).
     fn fake_sysfs_simple(dir: &TempDir, hidraw_name: &str, vid: u16) {
         let dev_dir = dir
             .path()
@@ -179,11 +226,7 @@ mod tests {
         std::fs::write(dev_dir.join("idVendor"), format!("{vid:#06x}\n")).unwrap();
     }
 
-    // Full fake sysfs for integration tests: symlink + audio interface sibling.
-    // Mirrors the real sysfs structure:
-    //   usb_dev/hid_iface/hid_fn/  ← HID function (idVendor lives here)
-    //   usb_dev/audio_iface/       ← sibling interface with bInterfaceClass = 01
-    //   class/hidraw/<name>/device → symlink to usb_dev/hid_iface/hid_fn
+    // Full fake sysfs: symlinked device tree + audio interface sibling.
     fn fake_sysfs_headset(dir: &TempDir, hidraw_name: &str, vid: u16) {
         let hid_fn = dir.path().join("usb_dev/hid_iface/hid_fn");
         std::fs::create_dir_all(&hid_fn).unwrap();
@@ -198,7 +241,6 @@ mod tests {
         std::os::unix::fs::symlink(&hid_fn, hidraw_dir.join("device")).unwrap();
     }
 
-    // Full fake sysfs without audio interface (simulates a keyboard).
     fn fake_sysfs_keyboard(dir: &TempDir, hidraw_name: &str, vid: u16) {
         let hid_fn = dir.path().join("usb_dev/hid_iface/hid_fn");
         std::fs::create_dir_all(&hid_fn).unwrap();
@@ -207,6 +249,11 @@ mod tests {
         let hidraw_dir = dir.path().join("class/hidraw").join(hidraw_name);
         std::fs::create_dir_all(&hidraw_dir).unwrap();
         std::os::unix::fs::symlink(&hid_fn, hidraw_dir.join("device")).unwrap();
+    }
+
+    // Creates a writable fake device file at dev_dir/hidraw_name.
+    fn fake_device(dev_dir: &TempDir, hidraw_name: &str) {
+        std::fs::write(dev_dir.path().join(hidraw_name), b"").unwrap();
     }
 
     // --- pure logic ---
@@ -247,8 +294,8 @@ mod tests {
 
     #[test]
     fn other_vids_are_rejected() {
-        assert!(!vid_is_allowed(0x046d)); // Logitech
-        assert!(!vid_is_allowed(0x045e)); // Microsoft
+        assert!(!vid_is_allowed(0x046d));
+        assert!(!vid_is_allowed(0x045e));
         assert!(!vid_is_allowed(0x0000));
     }
 
@@ -299,6 +346,68 @@ mod tests {
         assert!(!has_audio_interface(&hid_fn).unwrap());
     }
 
+    // --- fd passing ---
+
+    #[tokio::test]
+    async fn fd_is_transferred_over_unix_socket() {
+        use nix::sys::socket::{ControlMessageOwned, MsgFlags};
+
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), b"hello").unwrap();
+
+        let (sender, receiver) = tokio::net::UnixStream::pair().unwrap();
+
+        let src = std::fs::File::open(tmp.path()).unwrap();
+        send_fd(&sender, src.as_raw_fd()).unwrap();
+        drop(src);
+
+        // iov holds &mut data_buf; keep them in an inner block so the borrow
+        // is released before we assert on data_buf and use received_fd.
+        let mut data_buf = [0u8; 1];
+        let received_fd = {
+            let mut iov = [IoSliceMut::new(&mut data_buf)];
+            let mut cmsg_buf = nix::cmsg_space!(RawFd);
+            let msg = nix::sys::socket::recvmsg::<()>(
+                receiver.as_raw_fd(),
+                &mut iov,
+                Some(&mut cmsg_buf),
+                MsgFlags::empty(),
+            )
+            .unwrap();
+            msg.cmsgs()
+                .unwrap()
+                .find_map(|cmsg| {
+                    if let ControlMessageOwned::ScmRights(fds) = cmsg {
+                        fds.first().copied()
+                    } else {
+                        None
+                    }
+                })
+                .expect("no fd received")
+        }; // iov and msg drop here, releasing &mut data_buf
+
+        assert_eq!(data_buf[0], 0x01);
+
+        let mut received_file = unsafe { std::fs::File::from_raw_fd(received_fd) };
+        let mut content = String::new();
+        received_file.read_to_string(&mut content).unwrap();
+        assert_eq!(content, "hello");
+    }
+
+    #[test]
+    fn open_hidraw_succeeds_on_existing_file() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("hidraw0");
+        std::fs::write(&path, b"").unwrap();
+        assert!(open_hidraw(&path).is_ok());
+    }
+
+    #[test]
+    fn open_hidraw_fails_on_missing_file() {
+        let dir = TempDir::new().unwrap();
+        assert!(open_hidraw(&dir.path().join("hidraw99")).is_err());
+    }
+
     // --- socket setup ---
 
     #[tokio::test]
@@ -329,20 +438,42 @@ mod tests {
 
     // --- full-stack integration ---
 
-    async fn start_server(sock_dir: &TempDir, sysfs_dir: &TempDir) -> PathBuf {
+    async fn start_server(sock_dir: &TempDir, sysfs_dir: &TempDir, dev_dir: &TempDir) -> PathBuf {
         let sock_path = sock_dir.path().join("helper.sock");
         let listener = bind_socket(&sock_path).unwrap();
-        let sysfs = Arc::new(sysfs_dir.path().to_path_buf());
-        tokio::spawn(async move { serve(listener, sysfs).await });
+        let config = Arc::new(HelperConfig {
+            sysfs_base: sysfs_dir.path().to_path_buf(),
+            dev_root: dev_dir.path().to_path_buf(),
+        });
+        tokio::spawn(async move { serve(listener, config).await });
         sock_path
+    }
+
+    #[tokio::test]
+    async fn server_accepts_steelseries_headset_and_passes_fd() {
+        let sock_dir = TempDir::new().unwrap();
+        let sysfs_dir = TempDir::new().unwrap();
+        let dev_dir = TempDir::new().unwrap();
+        fake_sysfs_headset(&sysfs_dir, "hidraw0", 0x1038);
+        fake_device(&dev_dir, "hidraw0");
+        let sock_path = start_server(&sock_dir, &sysfs_dir, &dev_dir).await;
+
+        let mut client = UnixStream::connect(&sock_path).await.unwrap();
+        client.write_all(b"/dev/hidraw0\n").await.unwrap();
+
+        // Read the acceptance byte from the data portion of sendmsg.
+        let mut resp = [0u8; 1];
+        client.read_exact(&mut resp).await.unwrap();
+        assert_eq!(resp[0], 0x01);
     }
 
     #[tokio::test]
     async fn server_rejects_unknown_vid() {
         let sock_dir = TempDir::new().unwrap();
         let sysfs_dir = TempDir::new().unwrap();
-        fake_sysfs_headset(&sysfs_dir, "hidraw0", 0x046d); // Logitech headset
-        let sock_path = start_server(&sock_dir, &sysfs_dir).await;
+        let dev_dir = TempDir::new().unwrap();
+        fake_sysfs_headset(&sysfs_dir, "hidraw0", 0x046d);
+        let sock_path = start_server(&sock_dir, &sysfs_dir, &dev_dir).await;
 
         let mut client = UnixStream::connect(&sock_path).await.unwrap();
         client.write_all(b"/dev/hidraw0\n").await.unwrap();
@@ -352,25 +483,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn server_accepts_steelseries_headset() {
-        let sock_dir = TempDir::new().unwrap();
-        let sysfs_dir = TempDir::new().unwrap();
-        fake_sysfs_headset(&sysfs_dir, "hidraw0", 0x1038);
-        let sock_path = start_server(&sock_dir, &sysfs_dir).await;
-
-        let mut client = UnixStream::connect(&sock_path).await.unwrap();
-        client.write_all(b"/dev/hidraw0\n").await.unwrap();
-        let mut resp = [0u8; 1];
-        client.read_exact(&mut resp).await.unwrap();
-        assert_eq!(resp[0], 0x01);
-    }
-
-    #[tokio::test]
     async fn server_rejects_steelseries_keyboard() {
         let sock_dir = TempDir::new().unwrap();
         let sysfs_dir = TempDir::new().unwrap();
-        fake_sysfs_keyboard(&sysfs_dir, "hidraw0", 0x1038); // SteelSeries but no audio
-        let sock_path = start_server(&sock_dir, &sysfs_dir).await;
+        let dev_dir = TempDir::new().unwrap();
+        fake_sysfs_keyboard(&sysfs_dir, "hidraw0", 0x1038);
+        let sock_path = start_server(&sock_dir, &sysfs_dir, &dev_dir).await;
 
         let mut client = UnixStream::connect(&sock_path).await.unwrap();
         client.write_all(b"/dev/hidraw0\n").await.unwrap();
@@ -383,7 +501,8 @@ mod tests {
     async fn server_rejects_non_hidraw_path() {
         let sock_dir = TempDir::new().unwrap();
         let sysfs_dir = TempDir::new().unwrap();
-        let sock_path = start_server(&sock_dir, &sysfs_dir).await;
+        let dev_dir = TempDir::new().unwrap();
+        let sock_path = start_server(&sock_dir, &sysfs_dir, &dev_dir).await;
 
         let mut client = UnixStream::connect(&sock_path).await.unwrap();
         client.write_all(b"/dev/input/event0\n").await.unwrap();
