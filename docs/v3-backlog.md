@@ -34,7 +34,7 @@ This keeps the checklist honest and makes blocked work immediately visible witho
 - [ ] **[E1] Rust engine foundation**
   - [x] [E1-S1] Cargo workspace
   - [x] [E1-S2] HID transport layer
-  - [ ] [E1-S3] USB hot-plug detection
+  - [x] [E1-S3] USB hot-plug detection
   - [ ] [E1-S4] Device init sequence executor
   - [ ] [E1-S5] Async event loop
   - [ ] [E1-S6] Structured logging and error handling
