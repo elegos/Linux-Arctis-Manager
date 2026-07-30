@@ -56,7 +56,7 @@
   - [ ] [E7-S5] Arctis 7+ family
   - [ ] [E7-S6] Bootloader and upgrade PID registration
   - [ ] [E7-S7] Device compatibility matrix
-- [ ] **[E8] OLED display**
+- [ ] **[E8] OLED display** *(stretch)*
   - [ ] [E8-S1] `draw_bitmap` API
   - [ ] [E8-S2] `reload_display` API
   - [ ] [E8-S3] `transform_image_to_column_packed` builtin
@@ -92,7 +92,7 @@ flowchart LR
     E5["E5\npackaging & service"]
     E6["E6\nNova Pro parity"]
     E7["E7\nmulti-device"]
-    E8["E8\nOLED display"]
+    E8["E8\nOLED display ★"]:::stretch
     E9["E9\nhardware NC ★"]:::stretch
     E10["E10\nvoice changer ★"]:::stretch
 
@@ -107,7 +107,7 @@ flowchart LR
     E6 --> E9
     E6 --> E10
 
-    class E1,E2,E3,E4,E5,E6,E7,E8 core
+    class E1,E2,E3,E4,E5,E6,E7 core
 ```
 
 ---
@@ -296,7 +296,7 @@ Extend coverage to all Arctis headset families present in the official spec, sta
 
 ---
 
-## [E8] OLED display
+## [E8] OLED display *(stretch)*
 
 Exposes the GameDAC OLED (128×64, monochromatic) as a writable surface via D-Bus. Available only on devices that declare the `oled_draw` capability.
 
