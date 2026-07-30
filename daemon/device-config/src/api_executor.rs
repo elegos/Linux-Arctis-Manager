@@ -50,10 +50,12 @@ impl From<CodecError> for ApiError {
 
 // ── Pending operations ────────────────────────────────────────────────────────
 
-/// Serialised and padded bytes ready to transmit for a write API call.
+/// Serialised and padded byte payloads ready to transmit for a write API call.
+/// Most API calls produce exactly one payload; multi-packet APIs (e.g. draw_bitmap)
+/// produce more than one, each of which must be sent as a separate HID report.
 #[derive(Debug)]
 pub struct WriteOp {
-    pub bytes: Vec<u8>,
+    pub payloads: Vec<Vec<u8>>,
     pub transport: Transport,
 }
 
@@ -70,7 +72,9 @@ pub struct ReadOp {
 
 // ── ApiExecutor ───────────────────────────────────────────────────────────────
 
-pub type BuiltinFn = Box<dyn Fn(&[u8]) -> Vec<u8> + Send + Sync>;
+/// A registered payload transform.  Returns one packet for single-chunk APIs,
+/// or multiple packets for APIs like `draw_bitmap` that require a split send.
+pub type BuiltinFn = Box<dyn Fn(&[u8]) -> Vec<Vec<u8>> + Send + Sync>;
 
 static EMPTY_APIS: OnceLock<HashMap<String, ApiDef>> = OnceLock::new();
 
@@ -100,7 +104,7 @@ impl<'a> ApiExecutor<'a> {
     pub fn register_builtin(
         &mut self,
         name: impl Into<String>,
-        f: impl Fn(&[u8]) -> Vec<u8> + Send + Sync + 'static,
+        f: impl Fn(&[u8]) -> Vec<Vec<u8>> + Send + Sync + 'static,
     ) {
         self.builtins.insert(name.into(), Box::new(f));
     }
@@ -113,11 +117,13 @@ impl<'a> ApiExecutor<'a> {
         values: &HashMap<String, FieldValue>,
     ) -> Result<WriteOp, ApiError> {
         let op = self.write_op(api_name)?;
-        let mut bytes = self.codec.serialize(api_name, values)?;
-        self.apply_transform(&mut bytes, &op.payload_transform)?;
-        pad(&mut bytes, op.chunk_size as usize);
+        let bytes = self.codec.serialize(api_name, values)?;
+        let mut payloads = self.apply_transform(bytes, &op.payload_transform)?;
+        for p in &mut payloads {
+            pad(p, op.chunk_size as usize);
+        }
         Ok(WriteOp {
-            bytes,
+            payloads,
             transport: op.transport.clone(),
         })
     }
@@ -166,15 +172,20 @@ impl<'a> ApiExecutor<'a> {
             .ok_or_else(|| ApiError::NoReadOp(api_name.to_string()))
     }
 
-    fn apply_transform(&self, bytes: &mut Vec<u8>, name: &Option<String>) -> Result<(), ApiError> {
+    fn apply_transform(
+        &self,
+        bytes: Vec<u8>,
+        name: &Option<String>,
+    ) -> Result<Vec<Vec<u8>>, ApiError> {
         if let Some(n) = name {
             let f = self
                 .builtins
                 .get(n.as_str())
                 .ok_or_else(|| ApiError::UnknownTransform(n.clone()))?;
-            *bytes = f(bytes);
+            Ok(f(&bytes))
+        } else {
+            Ok(vec![bytes])
         }
-        Ok(())
     }
 }
 
@@ -209,9 +220,10 @@ apis:
         let op = exec
             .prepare_write("save_to_flash", &HashMap::new())
             .unwrap();
-        assert_eq!(op.bytes.len(), 8);
-        assert_eq!(&op.bytes[..2], [0x06, 0x09]);
-        assert_eq!(&op.bytes[2..], [0u8; 6]);
+        assert_eq!(op.payloads.len(), 1);
+        assert_eq!(op.payloads[0].len(), 8);
+        assert_eq!(&op.payloads[0][..2], [0x06, 0x09]);
+        assert_eq!(&op.payloads[0][2..], [0u8; 6]);
         assert_eq!(op.transport, Transport::HidIo);
     }
 
@@ -230,8 +242,8 @@ apis:
         let mut values = HashMap::new();
         values.insert("gain".to_string(), FieldValue::U8(0x42));
         let op = exec.prepare_write("set_gain", &values).unwrap();
-        assert_eq!(op.bytes[0], 0x06);
-        assert_eq!(op.bytes[1], 0x42);
+        assert_eq!(op.payloads[0][0], 0x06);
+        assert_eq!(op.payloads[0][1], 0x42);
     }
 
     #[test]
@@ -248,11 +260,13 @@ apis:
       payload_transform: "builtin:double_all"
 "#);
         let mut exec = ApiExecutor::new(&c);
-        exec.register_builtin("builtin:double_all", |b| b.iter().map(|x| x * 2).collect());
+        exec.register_builtin("builtin:double_all", |b| {
+            vec![b.iter().map(|x| x * 2).collect()]
+        });
         let mut values = HashMap::new();
         values.insert("val".to_string(), FieldValue::U8(3));
         let op = exec.prepare_write("cmd", &values).unwrap();
-        assert_eq!(op.bytes[0], 6, "transform doubled the byte");
+        assert_eq!(op.payloads[0][0], 6, "transform doubled the byte");
     }
 
     #[test]
@@ -343,7 +357,7 @@ apis:
         );
         let op = exec.prepare_write("draw_bitmap", &values).unwrap();
         assert_eq!(op.transport, Transport::HidFeature);
-        assert_eq!(op.bytes, [0xDE, 0xAD, 0xBE, 0xEF]);
+        assert_eq!(op.payloads[0], [0xDE, 0xAD, 0xBE, 0xEF]);
     }
 
     #[test]
