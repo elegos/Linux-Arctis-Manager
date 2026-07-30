@@ -18,3 +18,9 @@ futures = { workspace = true }
 zbus = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+nix = { workspace = true }
+serde_yaml = { workspace = true }
+
+[dev-dependencies]
+lam-hidraw-helper = { workspace = true }
+tempfile = "3"

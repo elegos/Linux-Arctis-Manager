@@ -36,3 +36,4 @@ serde_yaml = "0.9"
 # internal crates
 device-config = { path = "device-config" }
 hid-transport = { path = "hid-transport" }
+lam-hidraw-helper = { path = "hidraw-helper" }
