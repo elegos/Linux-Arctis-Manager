@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 pub mod api_executor;
 pub mod builtins;
 pub mod codec;
+pub mod lifecycle_executor;
 pub mod sync_dispatcher;
 pub mod sync_reader;
 pub mod transform_eval;
