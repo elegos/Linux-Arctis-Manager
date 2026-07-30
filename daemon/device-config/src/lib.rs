@@ -710,3 +710,63 @@ structs:
         assert!(matches!(err, LoadError::BaseNotFound { .. }));
     }
 }
+
+#[cfg(test)]
+mod nova_yaml_tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn nova_pro_wireless_yaml_parses() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("device-configs");
+        let nova = dir.join("nova_pro_wireless.yaml");
+        if !nova.exists() {
+            return; // skip when not present (CI without device-configs)
+        }
+        let cfg = load(&nova, &[dir.as_path()]).expect("nova_pro_wireless.yaml must parse");
+        let structs = cfg.structs.as_ref().expect("structs");
+        let apis = cfg.apis.as_ref().expect("apis");
+        let transforms = cfg.transforms.as_ref().expect("transforms");
+        let sync_events = cfg.sync_events.as_ref().expect("sync_events");
+        let sync_read = cfg.sync_read.as_ref().expect("sync_read");
+        let device = cfg.device.as_ref().expect("device");
+
+        // base structs
+        assert!(structs.contains_key("save_to_flash"));
+        assert!(structs.contains_key("audio_settings"));
+        assert!(structs.contains_key("wireless_settings"));
+        assert!(structs.contains_key("custom_eq"));
+
+        // write APIs present
+        assert!(apis.contains_key("high_gain"));
+        assert!(apis.contains_key("custom_eq"));
+        assert!(apis.contains_key("dim_timer"));
+
+        // read APIs present
+        assert!(apis.contains_key("audio_settings"));
+        assert!(apis.contains_key("wireless_settings"));
+
+        // transforms
+        assert!(transforms.contains_key("gain_from_device"));
+        assert!(transforms.contains_key("timer_enum_to_minutes"));
+        assert!(transforms.contains_key("battery_level_to_percent"));
+
+        // sync events
+        assert!(sync_events.contains_key(&0x27));
+        assert!(sync_events.contains_key(&0xB5));
+        assert!(sync_events.contains_key(&0xB7));
+
+        // sync_read entries
+        let structs_read: Vec<&str> = sync_read.iter().map(|e| e.struct_name.as_str()).collect();
+        assert!(structs_read.contains(&"audio_settings"));
+        assert!(structs_read.contains(&"wireless_settings"));
+
+        // device section
+        let variants = device.variants.as_ref().expect("variants");
+        assert!(variants.iter().any(|v| v.product_id == 0x12E0));
+        assert_eq!(device.vendor_id, Some(0x1038));
+    }
+}

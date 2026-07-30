@@ -70,8 +70,8 @@ This keeps the checklist honest and makes blocked work immediately visible witho
   - [ ] [E5-S6] README and docs refresh
   - [ ] [E5-S7] RPM spec for Fedora and Bazzite *(stretch)*
 - [ ] **[E6] Nova Pro Wireless — full protocol parity**
-  - [ ] [E6-S1] Rewrite `nova_pro_wireless.yaml`
-  - [ ] [E6-S2] Write `base_arctis_nova_pro_wireless.yaml`
+  - [x] [E6-S1] Rewrite `nova_pro_wireless.yaml`
+  - [x] [E6-S2] Write `base_arctis_nova_pro_wireless.yaml`
   - [ ] [E6-S3] 10-band custom EQ
   - [ ] [E6-S4] EQ preset selection
   - [ ] [E6-S5] Line out mode and stream mix
