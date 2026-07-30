@@ -31,13 +31,13 @@ This keeps the checklist honest and makes blocked work immediately visible witho
 
 ## Epics and Stories
 
-- [ ] **[E1] Rust engine foundation**
+- [x] **[E1] Rust engine foundation**
   - [x] [E1-S1] Cargo workspace
   - [x] [E1-S2] HID transport layer
   - [x] [E1-S3] USB hot-plug detection
-  - [ ] [E1-S4] Device init sequence executor
-  - [ ] [E1-S5] Async event loop
-  - [ ] [E1-S6] Structured logging and error handling
+  - [x] [E1-S4] Device init sequence executor
+  - [x] [E1-S5] Async event loop
+  - [x] [E1-S6] Structured logging and error handling
 - [ ] **[E2] Privileged HID helper (`lam-hidraw-helper`)**
   - [x] [E2-S1] Unix domain socket server
   - [x] [E2-S2] Peer credential validation
