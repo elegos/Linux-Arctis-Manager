@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 pub mod api_executor;
 pub mod builtins;
 pub mod codec;
+pub mod sync_dispatcher;
 pub mod transform_eval;
 
 // ── Error ────────────────────────────────────────────────────────────────────
