@@ -76,6 +76,42 @@
 
 ---
 
+## Dependency graph
+
+E5-S1–S4 (packaging basics) and E6 are parallel after E4. E5-S5 (Python cleanup) is gated on E6 being validated on real hardware, shown as a dashed edge.
+
+```mermaid
+flowchart LR
+    classDef core  fill:#cce5ff,stroke:#004085,color:#000
+    classDef stretch fill:#fff3cd,stroke:#b8860b,color:#000
+
+    E2["E2\nlam-hidraw-helper"]
+    E1["E1\nRust engine"]
+    E3["E3\nYAML DSL interpreter"]
+    E4["E4\nD-Bus service"]
+    E5["E5\npackaging & service"]
+    E6["E6\nNova Pro parity"]
+    E7["E7\nmulti-device"]
+    E8["E8\nOLED display"]
+    E9["E9\nhardware NC ★"]:::stretch
+    E10["E10\nvoice changer ★"]:::stretch
+
+    E2 --> E1
+    E1 --> E3
+    E3 --> E4
+    E4 --> E5
+    E4 --> E6
+    E6 -.->|"S5 cleanup only"| E5
+    E6 --> E7
+    E6 --> E8
+    E6 --> E9
+    E6 --> E10
+
+    class E1,E2,E3,E4,E5,E6,E7,E8 core
+```
+
+---
+
 ## [E1] Rust engine foundation
 
 The Rust engine replaces `core.py` as the process that owns HID communication, device state, and the main event loop. Everything else (GUI, voice changer, PipeWire management) continues to run in Python and communicates with the engine via D-Bus.
