@@ -78,6 +78,21 @@ async fn handle_connection(mut stream: UnixStream, sysfs_base: &Path) -> std::io
         return Ok(());
     }
 
+    let hid_path = match hid_device_path(sysfs_base, hidraw_name) {
+        Ok(p) => p,
+        Err(e) => {
+            warn!("cannot resolve HID device path for {hidraw_name}: {e}");
+            stream.write_all(&[0x00]).await?;
+            return Ok(());
+        }
+    };
+
+    if !has_audio_interface(&hid_path).unwrap_or(false) {
+        warn!("rejected {hidraw_name}: no USB audio interface on parent device");
+        stream.write_all(&[0x00]).await?;
+        return Ok(());
+    }
+
     info!("VID {vid:#06x} allowed for {hidraw_name}");
     stream.write_all(&[0x01]).await?;
 
@@ -111,15 +126,50 @@ fn vid_is_allowed(vid: u16) -> bool {
     vid == STEELSERIES_VID
 }
 
+// Resolves the symlink /sys/class/hidraw/<name>/device to the real HID function
+// path in the device tree, which is needed to navigate to the parent USB device.
+fn hid_device_path(sysfs_base: &Path, hidraw_name: &str) -> std::io::Result<PathBuf> {
+    let symlink = sysfs_base
+        .join("class/hidraw")
+        .join(hidraw_name)
+        .join("device");
+    std::fs::canonicalize(symlink)
+}
+
+// Checks whether the USB device that owns the HID function has at least one
+// interface with bInterfaceClass == 01 (USB Audio). Keyboards and mice are
+// pure HID devices and do not have an audio interface; headsets do.
+//
+// Path expected: <usb-device>/<usb-interface>/<hid-function>/
+// Navigates two levels up to reach <usb-device>, then scans its children.
+pub fn has_audio_interface(hid_dev: &Path) -> std::io::Result<bool> {
+    let usb_dev = hid_dev
+        .parent() // USB interface dir
+        .and_then(Path::parent) // USB device dir
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "unexpected sysfs layout")
+        })?;
+    for entry in std::fs::read_dir(usb_dev)? {
+        let class_file = entry?.path().join("bInterfaceClass");
+        if let Ok(class) = std::fs::read_to_string(class_file) {
+            if class.trim() == "01" {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
     use tempfile::TempDir;
-    use tokio::io::AsyncReadExt;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::UnixStream;
 
-    fn fake_sysfs(dir: &TempDir, hidraw_name: &str, vid: u16) {
+    // Minimal fake sysfs for read_vid unit tests (no symlinks needed).
+    fn fake_sysfs_simple(dir: &TempDir, hidraw_name: &str, vid: u16) {
         let dev_dir = dir
             .path()
             .join("class/hidraw")
@@ -127,6 +177,36 @@ mod tests {
             .join("device");
         std::fs::create_dir_all(&dev_dir).unwrap();
         std::fs::write(dev_dir.join("idVendor"), format!("{vid:#06x}\n")).unwrap();
+    }
+
+    // Full fake sysfs for integration tests: symlink + audio interface sibling.
+    // Mirrors the real sysfs structure:
+    //   usb_dev/hid_iface/hid_fn/  ← HID function (idVendor lives here)
+    //   usb_dev/audio_iface/       ← sibling interface with bInterfaceClass = 01
+    //   class/hidraw/<name>/device → symlink to usb_dev/hid_iface/hid_fn
+    fn fake_sysfs_headset(dir: &TempDir, hidraw_name: &str, vid: u16) {
+        let hid_fn = dir.path().join("usb_dev/hid_iface/hid_fn");
+        std::fs::create_dir_all(&hid_fn).unwrap();
+        std::fs::write(hid_fn.join("idVendor"), format!("{vid:#06x}\n")).unwrap();
+
+        let audio_iface = dir.path().join("usb_dev/audio_iface");
+        std::fs::create_dir_all(&audio_iface).unwrap();
+        std::fs::write(audio_iface.join("bInterfaceClass"), "01\n").unwrap();
+
+        let hidraw_dir = dir.path().join("class/hidraw").join(hidraw_name);
+        std::fs::create_dir_all(&hidraw_dir).unwrap();
+        std::os::unix::fs::symlink(&hid_fn, hidraw_dir.join("device")).unwrap();
+    }
+
+    // Full fake sysfs without audio interface (simulates a keyboard).
+    fn fake_sysfs_keyboard(dir: &TempDir, hidraw_name: &str, vid: u16) {
+        let hid_fn = dir.path().join("usb_dev/hid_iface/hid_fn");
+        std::fs::create_dir_all(&hid_fn).unwrap();
+        std::fs::write(hid_fn.join("idVendor"), format!("{vid:#06x}\n")).unwrap();
+
+        let hidraw_dir = dir.path().join("class/hidraw").join(hidraw_name);
+        std::fs::create_dir_all(&hidraw_dir).unwrap();
+        std::os::unix::fs::symlink(&hid_fn, hidraw_dir.join("device")).unwrap();
     }
 
     // --- pure logic ---
@@ -175,7 +255,7 @@ mod tests {
     #[test]
     fn read_vid_parses_hex_with_prefix() {
         let dir = TempDir::new().unwrap();
-        fake_sysfs(&dir, "hidraw0", 0x1038);
+        fake_sysfs_simple(&dir, "hidraw0", 0x1038);
         assert_eq!(read_vid(dir.path(), "hidraw0").unwrap(), 0x1038);
     }
 
@@ -201,6 +281,22 @@ mod tests {
         std::fs::create_dir_all(&dev_dir).unwrap();
         std::fs::write(dev_dir.join("idVendor"), "not-a-number\n").unwrap();
         assert!(read_vid(dir.path(), "hidraw0").is_err());
+    }
+
+    #[test]
+    fn headset_with_audio_interface_is_detected() {
+        let dir = TempDir::new().unwrap();
+        fake_sysfs_headset(&dir, "hidraw0", 0x1038);
+        let hid_fn = dir.path().join("usb_dev/hid_iface/hid_fn");
+        assert!(has_audio_interface(&hid_fn).unwrap());
+    }
+
+    #[test]
+    fn keyboard_without_audio_interface_is_not_detected() {
+        let dir = TempDir::new().unwrap();
+        fake_sysfs_keyboard(&dir, "hidraw0", 0x1038);
+        let hid_fn = dir.path().join("usb_dev/hid_iface/hid_fn");
+        assert!(!has_audio_interface(&hid_fn).unwrap());
     }
 
     // --- socket setup ---
@@ -231,7 +327,7 @@ mod tests {
         assert!(path.exists());
     }
 
-    // --- VID allowlist integration ---
+    // --- full-stack integration ---
 
     async fn start_server(sock_dir: &TempDir, sysfs_dir: &TempDir) -> PathBuf {
         let sock_path = sock_dir.path().join("helper.sock");
@@ -245,30 +341,42 @@ mod tests {
     async fn server_rejects_unknown_vid() {
         let sock_dir = TempDir::new().unwrap();
         let sysfs_dir = TempDir::new().unwrap();
-        fake_sysfs(&sysfs_dir, "hidraw0", 0x046d); // Logitech
+        fake_sysfs_headset(&sysfs_dir, "hidraw0", 0x046d); // Logitech headset
         let sock_path = start_server(&sock_dir, &sysfs_dir).await;
 
         let mut client = UnixStream::connect(&sock_path).await.unwrap();
         client.write_all(b"/dev/hidraw0\n").await.unwrap();
-
         let mut resp = [0u8; 1];
         client.read_exact(&mut resp).await.unwrap();
         assert_eq!(resp[0], 0x00);
     }
 
     #[tokio::test]
-    async fn server_accepts_steelseries_vid() {
+    async fn server_accepts_steelseries_headset() {
         let sock_dir = TempDir::new().unwrap();
         let sysfs_dir = TempDir::new().unwrap();
-        fake_sysfs(&sysfs_dir, "hidraw0", 0x1038);
+        fake_sysfs_headset(&sysfs_dir, "hidraw0", 0x1038);
         let sock_path = start_server(&sock_dir, &sysfs_dir).await;
 
         let mut client = UnixStream::connect(&sock_path).await.unwrap();
         client.write_all(b"/dev/hidraw0\n").await.unwrap();
-
         let mut resp = [0u8; 1];
         client.read_exact(&mut resp).await.unwrap();
         assert_eq!(resp[0], 0x01);
+    }
+
+    #[tokio::test]
+    async fn server_rejects_steelseries_keyboard() {
+        let sock_dir = TempDir::new().unwrap();
+        let sysfs_dir = TempDir::new().unwrap();
+        fake_sysfs_keyboard(&sysfs_dir, "hidraw0", 0x1038); // SteelSeries but no audio
+        let sock_path = start_server(&sock_dir, &sysfs_dir).await;
+
+        let mut client = UnixStream::connect(&sock_path).await.unwrap();
+        client.write_all(b"/dev/hidraw0\n").await.unwrap();
+        let mut resp = [0u8; 1];
+        client.read_exact(&mut resp).await.unwrap();
+        assert_eq!(resp[0], 0x00);
     }
 
     #[tokio::test]
@@ -279,7 +387,6 @@ mod tests {
 
         let mut client = UnixStream::connect(&sock_path).await.unwrap();
         client.write_all(b"/dev/input/event0\n").await.unwrap();
-
         let mut resp = [0u8; 1];
         client.read_exact(&mut resp).await.unwrap();
         assert_eq!(resp[0], 0x00);
