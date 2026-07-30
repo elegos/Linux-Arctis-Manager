@@ -1,7 +1,7 @@
-# AUR post-install script for linux-arctis-manager
-# Applies CAP_DAC_OVERRIDE to lam-hidraw-helper after every install or upgrade.
-# setcap stores the capability in the inode xattr; it must be reapplied after
-# each package upgrade because the new binary has a new inode.
+# Arch Linux / AUR post-install script for linux-arctis-manager.
+# Reapplies CAP_DAC_OVERRIDE to lam-hidraw-helper after every install/upgrade
+# because setcap is stored in the inode xattr and is lost when the file is
+# replaced by a new package version.
 
 _apply_caps() {
     chown root:root /usr/local/libexec/lam-hidraw-helper
@@ -10,19 +10,20 @@ _apply_caps() {
 
 post_install() {
     _apply_caps
-    echo ">>> lam-hidraw-helper: CAP_DAC_OVERRIDE capability applied."
-    echo ">>> Enable the user service:"
-    echo ">>>   systemctl --user enable --now lam-daemon"
+    echo ">>> CAP_DAC_OVERRIDE applied to lam-hidraw-helper."
+    echo ">>> Enable the user services:"
+    echo ">>>   systemctl --user daemon-reload"
+    echo ">>>   systemctl --user enable --now lam-hidraw-helper.service lam-daemon.service"
 }
 
 post_upgrade() {
     _apply_caps
-    echo ">>> lam-hidraw-helper: CAP_DAC_OVERRIDE reapplied after upgrade."
-    echo ">>> Restart the daemon if it is running:"
-    echo ">>>   systemctl --user restart lam-daemon"
+    echo ">>> CAP_DAC_OVERRIDE reapplied after upgrade."
+    echo ">>> Restart the running services:"
+    echo ">>>   systemctl --user restart lam-hidraw-helper.service lam-daemon.service"
 }
 
 pre_remove() {
-    systemctl --user stop lam-daemon 2>/dev/null || true
-    systemctl --user disable lam-daemon 2>/dev/null || true
+    systemctl --user stop    lam-daemon.service lam-hidraw-helper.service 2>/dev/null || true
+    systemctl --user disable lam-daemon.service lam-hidraw-helper.service 2>/dev/null || true
 }
