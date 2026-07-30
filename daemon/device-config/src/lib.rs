@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+pub mod codec;
+
 // ── Error ────────────────────────────────────────────────────────────────────
 
 #[derive(Debug)]

@@ -47,7 +47,7 @@ This keeps the checklist honest and makes blocked work immediately visible witho
   - [x] [E2-S6] Test mock for `lam-hidraw-helper`
 - [ ] **[E3] YAML DSL interpreter**
   - [x] [E3-S1] Base file inheritance (`extends:`)
-  - [ ] [E3-S2] Struct serialization and deserialization
+  - [x] [E3-S2] Struct serialization and deserialization
   - [ ] [E3-S3] API execution
   - [ ] [E3-S4] Transform evaluation
   - [ ] [E3-S5] Builtin transforms
