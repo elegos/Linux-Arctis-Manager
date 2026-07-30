@@ -4,6 +4,10 @@
 
 ## Conventions
 
+**Static checks before every commit**
+
+Run `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test --all` (in that order) before committing any Rust change. A commit that breaks any of these three is not acceptable.
+
 **Testing policy**
 
 - Every story must ship with unit tests covering its logic. A story without meaningful tests is not done.
@@ -36,7 +40,7 @@ This keeps the checklist honest and makes blocked work immediately visible witho
   - [ ] [E1-S6] Structured logging and error handling
 - [ ] **[E2] Privileged HID helper (`lam-hidraw-helper`)**
   - [x] [E2-S1] Unix domain socket server
-  - [ ] [E2-S2] Peer credential validation
+  - [x] [E2-S2] Peer credential validation
   - [ ] [E2-S3] VID allowlist enforcement
   - [ ] [E2-S4] File descriptor passing
   - [ ] [E2-S5] Installation and `setcap` instructions
