@@ -407,7 +407,9 @@ sync_read:
       - {emit: power_inactivity_timer_changed,   field: power_inactivity_timer, transform: timer_enum_to_minutes}
       - {emit: wireless_mode_changed,            field: wireless_mode}
       - {emit: wireless_connection_changed,      field: radio_connection_status, transform: radio_connection_to_label}
-      - {emit: battery_changed,                  field: headset_batt_level, transform: battery_level_to_percent}
+      - emit: battery_changed
+        fields: [headset_batt_level, charger_batt_level]
+        transform: battery_level_to_percent
       - {emit: headset_batt_status_changed,      field: headset_batt_status, transform: headset_batt_status_to_label}
 
 lifecycle:

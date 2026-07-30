@@ -12,6 +12,67 @@ pub fn gains_to_firmware_values(bytes: &[u8]) -> Vec<u8> {
         .collect()
 }
 
+/// Full-payload transform for `custom_eq` write: passes `report_id` and `command`
+/// through unchanged, then converts 10 × float32 gains (bytes 2–41) to 10 × uint8
+/// firmware values using [`gains_to_firmware_values`].
+///
+/// Input:  `[report_id, command, gain1_bytes[4], …, gain10_bytes[4], …]` (42+ bytes).
+/// Output: one packet `[report_id, command, fw_val1, …, fw_val10]`.
+pub fn custom_eq_gains_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
+    if bytes.len() < 2 {
+        return vec![bytes.to_vec()];
+    }
+    let mut out = Vec::with_capacity(12);
+    out.push(bytes[0]);
+    out.push(bytes[1]);
+    out.extend_from_slice(&gains_to_firmware_values(&bytes[2..]));
+    vec![out]
+}
+
+/// Full-payload transform for `high_gain` write.
+/// Maps byte 2: 0 (disabled / low gain) → 1, 1 (enabled / high gain) → 2.
+pub fn high_gain_write_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
+    let mut out = bytes.to_vec();
+    if out.len() >= 3 {
+        out[2] = match out[2] {
+            0 => 1,
+            1 => 2,
+            v => v,
+        };
+    }
+    vec![out]
+}
+
+/// Full-payload transform for `dim_timer` write.
+/// Converts byte 2 from user-facing minutes (0, 1, 5, 10, 15, 30, 60) to the
+/// firmware enum value (0–6).  Unknown minute values map to 0 (never).
+pub fn dim_timer_write_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
+    let mut out = bytes.to_vec();
+    if out.len() >= 3 {
+        out[2] = minutes_to_timer_enum(out[2]);
+    }
+    vec![out]
+}
+
+/// Full-payload transform for `power_inactivity_timer` write.
+/// Uses the same minute → enum mapping as [`dim_timer_write_payload`].
+pub fn power_timer_write_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
+    dim_timer_write_payload(bytes)
+}
+
+fn minutes_to_timer_enum(minutes: u8) -> u8 {
+    match minutes {
+        0 => 0,
+        1 => 1,
+        5 => 2,
+        10 => 3,
+        15 => 4,
+        30 => 5,
+        60 => 6,
+        _ => 0,
+    }
+}
+
 /// Converts a row-major 1-bit packed bitmap (MSB-first, `ceil(width/8) × height`
 /// bytes) into column-packed LSB-y-flipped format (`width × ceil(height/8)` bytes).
 ///
@@ -230,5 +291,101 @@ mod tests {
         let result = bitmap_sub_payload(&input);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0][5], 32); // hp unchanged (32 is already multiple of 8)
+    }
+
+    // ── custom_eq_gains_payload ───────────────────────────────────────────────
+
+    #[test]
+    fn custom_eq_gains_payload_preserves_header_and_converts_gains() {
+        // header: report_id=0x06, command=0x33
+        // gains: 0 dB × 10 → firmware 20 each
+        let db = [0.0_f32; 10];
+        let mut input = vec![0x06u8, 0x33];
+        for &v in &db {
+            input.extend_from_slice(&v.to_le_bytes());
+        }
+        let result = custom_eq_gains_payload(&input);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0][0], 0x06);
+        assert_eq!(result[0][1], 0x33);
+        assert_eq!(&result[0][2..], &[20u8; 10]);
+    }
+
+    #[test]
+    fn custom_eq_gains_payload_converts_known_mix() {
+        // -10 dB → 0, +10 dB → 40
+        let db: [f32; 10] = [-10.0, 10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let mut input = vec![0x06u8, 0x33];
+        for &v in &db {
+            input.extend_from_slice(&v.to_le_bytes());
+        }
+        let result = custom_eq_gains_payload(&input);
+        assert_eq!(result[0][2], 0); // -10 dB
+        assert_eq!(result[0][3], 40); // +10 dB
+        assert_eq!(&result[0][4..12], &[20u8; 8]); // 0 dB × 8
+    }
+
+    #[test]
+    fn custom_eq_gains_payload_too_short_passthrough() {
+        let input = vec![0x06u8];
+        let result = custom_eq_gains_payload(&input);
+        assert_eq!(result, vec![vec![0x06u8]]);
+    }
+
+    // ── high_gain_write_payload ───────────────────────────────────────────────
+
+    #[test]
+    fn high_gain_write_payload_maps_disabled_to_low_gain() {
+        let input = vec![0x06u8, 0x27, 0]; // enabled=0
+        let result = high_gain_write_payload(&input);
+        assert_eq!(result[0][2], 1); // device low_gain
+    }
+
+    #[test]
+    fn high_gain_write_payload_maps_enabled_to_high_gain() {
+        let input = vec![0x06u8, 0x27, 1]; // enabled=1
+        let result = high_gain_write_payload(&input);
+        assert_eq!(result[0][2], 2); // device high_gain
+    }
+
+    #[test]
+    fn high_gain_write_payload_preserves_header() {
+        let input = vec![0x06u8, 0x27, 0, 0xFF];
+        let result = high_gain_write_payload(&input);
+        assert_eq!(result[0][0], 0x06);
+        assert_eq!(result[0][1], 0x27);
+        assert_eq!(result[0][3], 0xFF); // trailing bytes preserved
+    }
+
+    // ── dim_timer_write_payload / power_timer_write_payload ───────────────────
+
+    #[test]
+    fn dim_timer_write_payload_all_minute_values() {
+        let cases = [(0, 0), (1, 1), (5, 2), (10, 3), (15, 4), (30, 5), (60, 6)];
+        for (minutes, expected_enum) in cases {
+            let input = vec![0x06u8, 0x83, minutes];
+            let result = dim_timer_write_payload(&input);
+            assert_eq!(
+                result[0][2], expected_enum,
+                "{minutes} minutes should map to enum {expected_enum}"
+            );
+        }
+    }
+
+    #[test]
+    fn dim_timer_write_payload_unknown_minutes_maps_to_never() {
+        let input = vec![0x06u8, 0x83, 45]; // not a valid minute value
+        let result = dim_timer_write_payload(&input);
+        assert_eq!(result[0][2], 0); // fallback to never
+    }
+
+    #[test]
+    fn power_timer_write_payload_same_as_dim_timer() {
+        let cases = [(0, 0), (30, 5), (60, 6)];
+        for (minutes, expected_enum) in cases {
+            let input = vec![0x06u8, 0xC1, minutes];
+            let result = power_timer_write_payload(&input);
+            assert_eq!(result[0][2], expected_enum);
+        }
     }
 }
