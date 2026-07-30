@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "engine",
+    "hidraw-helper",
     "device-config",
     "hid-transport",
 ]
