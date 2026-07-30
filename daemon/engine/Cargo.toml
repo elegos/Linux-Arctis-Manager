@@ -1,0 +1,18 @@
+[package]
+name = "lam-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "lam-daemon"
+path = "src/main.rs"
+
+[dependencies]
+device-config = { workspace = true }
+hid-transport = { workspace = true }
+tokio = { workspace = true }
+zbus = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

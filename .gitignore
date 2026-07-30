@@ -11,3 +11,6 @@ wheels/
 
 # Code coverage reports
 .coverage
+
+# Rust build artifacts
+daemon/target/
