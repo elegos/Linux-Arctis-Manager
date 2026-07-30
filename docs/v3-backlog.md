@@ -43,7 +43,7 @@ This keeps the checklist honest and makes blocked work immediately visible witho
   - [x] [E2-S2] Peer credential validation
   - [x] [E2-S3] VID allowlist enforcement
   - [x] [E2-S4] File descriptor passing
-  - [ ] [E2-S5] Installation and `setcap` instructions
+  - [x] [E2-S5] Installation and `setcap` instructions
   - [ ] [E2-S6] Test mock for `lam-hidraw-helper`
 - [ ] **[E3] YAML DSL interpreter**
   - [ ] [E3-S1] Base file inheritance (`extends:`)

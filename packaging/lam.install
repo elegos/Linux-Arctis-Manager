@@ -1,0 +1,28 @@
+# AUR post-install script for linux-arctis-manager
+# Applies CAP_DAC_OVERRIDE to lam-hidraw-helper after every install or upgrade.
+# setcap stores the capability in the inode xattr; it must be reapplied after
+# each package upgrade because the new binary has a new inode.
+
+_apply_caps() {
+    chown root:root /usr/local/libexec/lam-hidraw-helper
+    setcap cap_dac_override+eip /usr/local/libexec/lam-hidraw-helper
+}
+
+post_install() {
+    _apply_caps
+    echo ">>> lam-hidraw-helper: CAP_DAC_OVERRIDE capability applied."
+    echo ">>> Enable the user service:"
+    echo ">>>   systemctl --user enable --now lam-daemon"
+}
+
+post_upgrade() {
+    _apply_caps
+    echo ">>> lam-hidraw-helper: CAP_DAC_OVERRIDE reapplied after upgrade."
+    echo ">>> Restart the daemon if it is running:"
+    echo ">>>   systemctl --user restart lam-daemon"
+}
+
+pre_remove() {
+    systemctl --user stop lam-daemon 2>/dev/null || true
+    systemctl --user disable lam-daemon 2>/dev/null || true
+}
