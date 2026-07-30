@@ -8,6 +8,7 @@ pub mod api_executor;
 pub mod builtins;
 pub mod codec;
 pub mod sync_dispatcher;
+pub mod sync_reader;
 pub mod transform_eval;
 
 // ── Error ────────────────────────────────────────────────────────────────────
