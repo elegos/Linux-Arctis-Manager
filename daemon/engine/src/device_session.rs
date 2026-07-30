@@ -261,13 +261,22 @@ impl DeviceSession {
         }
     }
 
+    #[cfg(test)]
+    pub async fn write_api_direct(
+        &mut self,
+        api_name: &str,
+        values: HashMap<String, FieldValue>,
+    ) -> Result<(), EngineError> {
+        self.send_api_write(api_name, &values).await
+    }
+
     async fn send_api_write(
         &mut self,
         api_name: &str,
         values: &HashMap<String, FieldValue>,
     ) -> Result<(), EngineError> {
         let op = {
-            let api = ApiExecutor::new(&self.config);
+            let api = make_api_executor(&self.config);
             api.prepare_write(api_name, values)
                 .map_err(EngineError::Api)?
         };
@@ -324,6 +333,19 @@ impl DeviceSession {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+fn make_api_executor(config: &DeviceConfig) -> ApiExecutor<'_> {
+    use device_config::builtins::{
+        custom_eq_gains_payload, dim_timer_write_payload, high_gain_write_payload,
+        power_timer_write_payload,
+    };
+    let mut exec = ApiExecutor::new(config);
+    exec.register_builtin("builtin:custom_eq_gains", custom_eq_gains_payload);
+    exec.register_builtin("builtin:high_gain_write", high_gain_write_payload);
+    exec.register_builtin("builtin:dim_timer_write", dim_timer_write_payload);
+    exec.register_builtin("builtin:power_timer_write", power_timer_write_payload);
+    exec
+}
 
 fn lifecycle_calls<'a>(
     config: &'a DeviceConfig,
@@ -680,6 +702,339 @@ sync_events:
 
         drop(event_rx);
         drop(peer);
+        let _ = tokio::time::timeout(Duration::from_millis(500), task).await;
+    }
+
+    // ── E6-S3: custom EQ write (builtin:custom_eq_gains) ─────────────────────
+
+    #[tokio::test]
+    async fn write_custom_eq_converts_float_gains_to_firmware_bytes() {
+        let (engine_fd, peer_fd) = make_pair();
+        let config = cfg(r#"
+structs:
+  custom_eq:
+    - {name: report_id, type: uint8,   constant: 0x06}
+    - {name: command,   type: uint8,   constant: 0x33}
+    - {name: gain1,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain2,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain3,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain4,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain5,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain6,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain7,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain8,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain9,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain10,    type: float32, range: [-10.0, 10.0]}
+apis:
+  custom_eq:
+    write:
+      transport: HID_IO
+      chunk_size: 64
+      payload_transform: "builtin:custom_eq_gains"
+"#);
+        let mut values = HashMap::new();
+        for i in 1..=10u8 {
+            values.insert(format!("gain{i}"), FieldValue::F32(0.0));
+        }
+        let task = tokio::spawn(async move {
+            let mut s = DeviceSession::new(config, engine_fd);
+            s.write_api_direct("custom_eq", values).await
+        });
+
+        let mut peer = HidTransport::from_fd(peer_fd);
+        // bytes[0]=0x06 (report_id), bytes[1]=0x33 (command), bytes[2..12]=20 each
+        let received = peer
+            .read_interrupt(Duration::from_millis(500))
+            .await
+            .expect("read failed");
+        task.await.unwrap().unwrap();
+
+        assert_eq!(received[0], 0x06);
+        assert_eq!(received[1], 0x33);
+        assert_eq!(
+            &received[2..12],
+            &[20u8; 10],
+            "all 0 dB gains → firmware 20"
+        );
+    }
+
+    // ── E6-S4: EQ preset selection ────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn write_selected_eq_preset_sends_correct_bytes() {
+        let (engine_fd, peer_fd) = make_pair();
+        let config = cfg(r#"
+structs:
+  selected_eq_preset:
+    - {name: report_id, type: uint8, constant: 0x06}
+    - {name: command,   type: uint8, constant: 0x2E}
+    - {name: eq_preset, type: uint8, range: [0, 18]}
+apis:
+  selected_eq_preset:
+    write: {transport: HID_IO, chunk_size: 8}
+"#);
+        let mut values = HashMap::new();
+        values.insert("eq_preset".to_string(), FieldValue::U8(4));
+        let task = tokio::spawn(async move {
+            let mut s = DeviceSession::new(config, engine_fd);
+            s.write_api_direct("selected_eq_preset", values).await
+        });
+
+        let mut peer = HidTransport::from_fd(peer_fd);
+        let received = peer
+            .read_interrupt(Duration::from_millis(500))
+            .await
+            .unwrap();
+        task.await.unwrap().unwrap();
+
+        assert_eq!(received[0], 0x06);
+        assert_eq!(received[1], 0x2E);
+        assert_eq!(received[2], 4);
+    }
+
+    // ── E6-S5: line out mode and stream mix ───────────────────────────────────
+
+    #[tokio::test]
+    async fn write_line_out_mode_sends_correct_bytes() {
+        let (engine_fd, peer_fd) = make_pair();
+        let config = cfg(r#"
+structs:
+  line_out_mode:
+    - {name: report_id,     type: uint8, constant: 0x06}
+    - {name: command,       type: uint8, constant: 0x43}
+    - {name: line_out_mode, type: uint8, range: [1, 2]}
+apis:
+  line_out_mode:
+    write: {transport: HID_IO, chunk_size: 8}
+"#);
+        let mut values = HashMap::new();
+        values.insert("line_out_mode".to_string(), FieldValue::U8(2));
+        let task = tokio::spawn(async move {
+            let mut s = DeviceSession::new(config, engine_fd);
+            s.write_api_direct("line_out_mode", values).await
+        });
+
+        let mut peer = HidTransport::from_fd(peer_fd);
+        let received = peer
+            .read_interrupt(Duration::from_millis(500))
+            .await
+            .unwrap();
+        task.await.unwrap().unwrap();
+
+        assert_eq!(&received[..3], &[0x06, 0x43, 2]);
+    }
+
+    #[tokio::test]
+    async fn write_stream_mix_inserts_unused_byte_and_correct_values() {
+        let (engine_fd, peer_fd) = make_pair();
+        let config = cfg(r#"
+structs:
+  stream_mix:
+    - {name: report_id,   type: uint8, constant: 0x06}
+    - {name: command,     type: uint8, constant: 0x47}
+    - {name: stream_main, type: uint8, range: [0, 100]}
+    - {name: unused,      type: uint8, constant: 0x00}
+    - {name: stream_aux,  type: uint8, range: [0, 100]}
+    - {name: stream_mic,  type: uint8, range: [0, 100]}
+apis:
+  stream_mix:
+    write: {transport: HID_IO, chunk_size: 8}
+"#);
+        let mut values = HashMap::new();
+        values.insert("stream_main".to_string(), FieldValue::U8(70));
+        values.insert("stream_aux".to_string(), FieldValue::U8(30));
+        values.insert("stream_mic".to_string(), FieldValue::U8(50));
+        let task = tokio::spawn(async move {
+            let mut s = DeviceSession::new(config, engine_fd);
+            s.write_api_direct("stream_mix", values).await
+        });
+
+        let mut peer = HidTransport::from_fd(peer_fd);
+        let received = peer
+            .read_interrupt(Duration::from_millis(500))
+            .await
+            .unwrap();
+        task.await.unwrap().unwrap();
+
+        assert_eq!(received[0], 0x06);
+        assert_eq!(received[1], 0x47);
+        assert_eq!(received[2], 70, "stream_main");
+        assert_eq!(received[3], 0x00, "unused byte zero");
+        assert_eq!(received[4], 30, "stream_aux");
+        assert_eq!(received[5], 50, "stream_mic");
+    }
+
+    // ── E6-S6: OLED / dim timer ───────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn write_dim_timer_maps_minutes_to_firmware_enum() {
+        let (engine_fd, peer_fd) = make_pair();
+        let config = cfg(r#"
+structs:
+  dim_timer:
+    - {name: report_id, type: uint8, constant: 0x06}
+    - {name: command,   type: uint8, constant: 0x83}
+    - {name: dim_timer, type: uint8, range: [0, 60]}
+apis:
+  dim_timer:
+    write:
+      transport: HID_IO
+      chunk_size: 8
+      payload_transform: "builtin:dim_timer_write"
+"#);
+        let mut values = HashMap::new();
+        values.insert("dim_timer".to_string(), FieldValue::U8(30)); // 30 minutes → enum 5
+        let task = tokio::spawn(async move {
+            let mut s = DeviceSession::new(config, engine_fd);
+            s.write_api_direct("dim_timer", values).await
+        });
+
+        let mut peer = HidTransport::from_fd(peer_fd);
+        let received = peer
+            .read_interrupt(Duration::from_millis(500))
+            .await
+            .unwrap();
+        task.await.unwrap().unwrap();
+
+        assert_eq!(received[0], 0x06);
+        assert_eq!(received[1], 0x83);
+        assert_eq!(received[2], 5, "30 minutes → device enum 5");
+    }
+
+    #[tokio::test]
+    async fn write_oled_brightness_sends_level_directly() {
+        let (engine_fd, peer_fd) = make_pair();
+        let config = cfg(r#"
+structs:
+  oled_brightness:
+    - {name: report_id,       type: uint8, constant: 0x06}
+    - {name: command,         type: uint8, constant: 0x85}
+    - {name: oled_brightness, type: uint8, range: [1, 10]}
+apis:
+  oled_brightness:
+    write: {transport: HID_IO, chunk_size: 8}
+"#);
+        let mut values = HashMap::new();
+        values.insert("oled_brightness".to_string(), FieldValue::U8(7));
+        let task = tokio::spawn(async move {
+            let mut s = DeviceSession::new(config, engine_fd);
+            s.write_api_direct("oled_brightness", values).await
+        });
+
+        let mut peer = HidTransport::from_fd(peer_fd);
+        let received = peer
+            .read_interrupt(Duration::from_millis(500))
+            .await
+            .unwrap();
+        task.await.unwrap().unwrap();
+
+        assert_eq!(&received[..3], &[0x06, 0x85, 7]);
+    }
+
+    // ── E6-S7: Bluetooth startup and call behavior ────────────────────────────
+
+    #[tokio::test]
+    async fn write_bluetooth_startup_sends_correct_bytes() {
+        let (engine_fd, peer_fd) = make_pair();
+        let config = cfg(r#"
+structs:
+  bluetooth_startup:
+    - {name: report_id,        type: uint8, constant: 0x06}
+    - {name: command,          type: uint8, constant: 0xB2}
+    - {name: bt_power_default, type: uint8, range: [0, 1]}
+apis:
+  bluetooth_startup:
+    write: {transport: HID_IO, chunk_size: 8}
+"#);
+        let mut values = HashMap::new();
+        values.insert("bt_power_default".to_string(), FieldValue::U8(1));
+        let task = tokio::spawn(async move {
+            let mut s = DeviceSession::new(config, engine_fd);
+            s.write_api_direct("bluetooth_startup", values).await
+        });
+
+        let mut peer = HidTransport::from_fd(peer_fd);
+        let received = peer
+            .read_interrupt(Duration::from_millis(500))
+            .await
+            .unwrap();
+        task.await.unwrap().unwrap();
+
+        assert_eq!(&received[..3], &[0x06, 0xB2, 1]);
+    }
+
+    #[tokio::test]
+    async fn write_bt_call_default_sends_correct_bytes() {
+        let (engine_fd, peer_fd) = make_pair();
+        let config = cfg(r#"
+structs:
+  bt_call_default:
+    - {name: report_id,       type: uint8, constant: 0x06}
+    - {name: command,         type: uint8, constant: 0xB3}
+    - {name: bt_call_default, type: uint8, range: [0, 2]}
+apis:
+  bt_call_default:
+    write: {transport: HID_IO, chunk_size: 8}
+"#);
+        let mut values = HashMap::new();
+        values.insert("bt_call_default".to_string(), FieldValue::U8(2));
+        let task = tokio::spawn(async move {
+            let mut s = DeviceSession::new(config, engine_fd);
+            s.write_api_direct("bt_call_default", values).await
+        });
+
+        let mut peer = HidTransport::from_fd(peer_fd);
+        let received = peer
+            .read_interrupt(Duration::from_millis(500))
+            .await
+            .unwrap();
+        task.await.unwrap().unwrap();
+
+        assert_eq!(&received[..3], &[0x06, 0xB3, 2]);
+    }
+
+    // ── E6-S9: save_to_flash via shutdown lifecycle ───────────────────────────
+
+    #[tokio::test]
+    async fn shutdown_lifecycle_sends_save_to_flash() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("device-configs");
+        let nova_path = dir.join("nova_pro_wireless.yaml");
+        if !nova_path.exists() {
+            return; // skip when device-configs not present
+        }
+        let config = device_config::load(&nova_path, &[dir.as_path()])
+            .expect("nova_pro_wireless.yaml must load");
+
+        let (engine_fd, peer_fd) = make_pair();
+        let task = tokio::spawn(async move {
+            let mut s = DeviceSession::new(config, engine_fd);
+            s.run_lifecycle_hook("shutdown").await
+        });
+
+        let mut peer = HidTransport::from_fd(peer_fd);
+        // shutdown: disable_chatmix (0x49 0x00), disable_sonar (0x8D 0x00), save_to_flash (0x09)
+        let mut save_found = false;
+        for _ in 0..3 {
+            let received = tokio::time::timeout(
+                Duration::from_millis(500),
+                peer.read_interrupt(Duration::from_millis(500)),
+            )
+            .await
+            .expect("timed out waiting for shutdown command")
+            .expect("read failed");
+            if received[0] == 0x06 && received[1] == 0x09 {
+                save_found = true;
+                break;
+            }
+        }
+        assert!(
+            save_found,
+            "save_to_flash (0x06 0x09) must be sent during shutdown"
+        );
+
         let _ = tokio::time::timeout(Duration::from_millis(500), task).await;
     }
 }
