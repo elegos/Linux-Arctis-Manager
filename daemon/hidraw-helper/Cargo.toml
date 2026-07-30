@@ -5,9 +5,17 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
+[lib]
+name = "lam_hidraw_helper"
+path = "src/lib.rs"
+
 [[bin]]
 name = "lam-hidraw-helper"
 path = "src/main.rs"
+
+[[bin]]
+name = "lam-hidraw-helper-mock"
+path = "src/mock_main.rs"
 
 [dependencies]
 tokio = { workspace = true }
