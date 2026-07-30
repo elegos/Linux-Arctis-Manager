@@ -141,11 +141,18 @@ fn hidraw_name_from_path(dev_path: &str) -> Option<&str> {
 }
 
 pub fn read_vid(sysfs_base: &Path, hidraw_name: &str) -> std::io::Result<u16> {
-    let vid_path = sysfs_base
-        .join("class/hidraw")
-        .join(hidraw_name)
-        .join("device/idVendor");
-    let raw = std::fs::read_to_string(vid_path)?;
+    // The device symlink resolves to the HID function node; idVendor lives two
+    // levels up at the USB device (HID function → USB interface → USB device).
+    let hid_dev = std::fs::canonicalize(
+        sysfs_base
+            .join("class/hidraw")
+            .join(hidraw_name)
+            .join("device"),
+    )?;
+    let usb_dev = hid_dev.parent().and_then(Path::parent).ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::NotFound, "unexpected sysfs layout")
+    })?;
+    let raw = std::fs::read_to_string(usb_dev.join("idVendor"))?;
     let hex = raw.trim().trim_start_matches("0x");
     u16::from_str_radix(hex, 16)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
@@ -217,20 +224,21 @@ mod tests {
     use tokio::net::UnixStream;
 
     fn fake_sysfs_simple(dir: &TempDir, hidraw_name: &str, vid: u16) {
-        let dev_dir = dir
-            .path()
-            .join("class/hidraw")
-            .join(hidraw_name)
-            .join("device");
-        std::fs::create_dir_all(&dev_dir).unwrap();
-        std::fs::write(dev_dir.join("idVendor"), format!("{vid:#06x}\n")).unwrap();
+        // Mirror real sysfs: device symlink → hid_fn; idVendor at USB device level.
+        let hid_fn = dir.path().join("usb_dev/hid_iface/hid_fn");
+        std::fs::create_dir_all(&hid_fn).unwrap();
+        std::fs::write(dir.path().join("usb_dev/idVendor"), format!("{vid:#06x}\n")).unwrap();
+        let hidraw_dir = dir.path().join("class/hidraw").join(hidraw_name);
+        std::fs::create_dir_all(&hidraw_dir).unwrap();
+        std::os::unix::fs::symlink(&hid_fn, hidraw_dir.join("device")).unwrap();
     }
 
     // Full fake sysfs: symlinked device tree + audio interface sibling.
     fn fake_sysfs_headset(dir: &TempDir, hidraw_name: &str, vid: u16) {
         let hid_fn = dir.path().join("usb_dev/hid_iface/hid_fn");
         std::fs::create_dir_all(&hid_fn).unwrap();
-        std::fs::write(hid_fn.join("idVendor"), format!("{vid:#06x}\n")).unwrap();
+        // idVendor at USB device level (grandparent of hid_fn).
+        std::fs::write(dir.path().join("usb_dev/idVendor"), format!("{vid:#06x}\n")).unwrap();
 
         let audio_iface = dir.path().join("usb_dev/audio_iface");
         std::fs::create_dir_all(&audio_iface).unwrap();
@@ -244,7 +252,8 @@ mod tests {
     fn fake_sysfs_keyboard(dir: &TempDir, hidraw_name: &str, vid: u16) {
         let hid_fn = dir.path().join("usb_dev/hid_iface/hid_fn");
         std::fs::create_dir_all(&hid_fn).unwrap();
-        std::fs::write(hid_fn.join("idVendor"), format!("{vid:#06x}\n")).unwrap();
+        // idVendor at USB device level (grandparent of hid_fn).
+        std::fs::write(dir.path().join("usb_dev/idVendor"), format!("{vid:#06x}\n")).unwrap();
 
         let hidraw_dir = dir.path().join("class/hidraw").join(hidraw_name);
         std::fs::create_dir_all(&hidraw_dir).unwrap();
@@ -309,9 +318,12 @@ mod tests {
     #[test]
     fn read_vid_parses_hex_without_prefix() {
         let dir = TempDir::new().unwrap();
-        let dev_dir = dir.path().join("class/hidraw/hidraw0/device");
-        std::fs::create_dir_all(&dev_dir).unwrap();
-        std::fs::write(dev_dir.join("idVendor"), "1038\n").unwrap();
+        let hid_fn = dir.path().join("usb_dev/hid_iface/hid_fn");
+        std::fs::create_dir_all(&hid_fn).unwrap();
+        std::fs::write(dir.path().join("usb_dev/idVendor"), "1038\n").unwrap();
+        let hidraw_dir = dir.path().join("class/hidraw/hidraw0");
+        std::fs::create_dir_all(&hidraw_dir).unwrap();
+        std::os::unix::fs::symlink(&hid_fn, hidraw_dir.join("device")).unwrap();
         assert_eq!(read_vid(dir.path(), "hidraw0").unwrap(), 0x1038);
     }
 
@@ -324,9 +336,12 @@ mod tests {
     #[test]
     fn read_vid_errors_on_invalid_content() {
         let dir = TempDir::new().unwrap();
-        let dev_dir = dir.path().join("class/hidraw/hidraw0/device");
-        std::fs::create_dir_all(&dev_dir).unwrap();
-        std::fs::write(dev_dir.join("idVendor"), "not-a-number\n").unwrap();
+        let hid_fn = dir.path().join("usb_dev/hid_iface/hid_fn");
+        std::fs::create_dir_all(&hid_fn).unwrap();
+        std::fs::write(dir.path().join("usb_dev/idVendor"), "not-a-number\n").unwrap();
+        let hidraw_dir = dir.path().join("class/hidraw/hidraw0");
+        std::fs::create_dir_all(&hidraw_dir).unwrap();
+        std::os::unix::fs::symlink(&hid_fn, hidraw_dir.join("device")).unwrap();
         assert!(read_vid(dir.path(), "hidraw0").is_err());
     }
 

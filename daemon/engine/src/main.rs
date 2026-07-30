@@ -1,3 +1,4 @@
+mod audio;
 mod dbus;
 mod device_session;
 mod engine_error;
@@ -9,11 +10,14 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use std::time::Duration;
+
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 
-use device_config::sync_dispatcher::EmitEvent;
+use device_config::codec::FieldValue;
+use device_config::sync_dispatcher::{EmitEvent, EventValue};
 use device_config::DeviceConfig;
 use device_session::DeviceSession;
 use engine_error::EngineError;
@@ -30,7 +34,7 @@ const SYSTEM_DATADIR: Option<&str> = option_env!("LAM_DATADIR");
 /// All dirs are passed as search paths to the DSL loader so that `extends:`
 /// references can cross directory boundaries (e.g. a user override that extends
 /// a system base file).  Earlier entries in `dirs` have higher priority: when
-/// `find_config` walks the Vec it stops at the first PID match.
+/// `find_config` stops at the first PID (and interface, when available) match.
 pub fn load_configs_from_dirs(dirs: &[&Path]) -> Vec<Arc<DeviceConfig>> {
     let mut configs = Vec::new();
     for &dir in dirs {
@@ -51,14 +55,35 @@ pub fn load_configs_from_dirs(dirs: &[&Path]) -> Vec<Arc<DeviceConfig>> {
     configs
 }
 
-/// Return the first config whose `device.variants` includes `pid`.
-fn find_config(configs: &[Arc<DeviceConfig>], pid: u16) -> Option<&Arc<DeviceConfig>> {
+/// Return the first config whose PID matches `pid`.
+/// When `interface_num` is provided and the config specifies a command interface,
+/// the interface numbers must also match (filters out non-command HID interfaces).
+fn find_config(
+    configs: &[Arc<DeviceConfig>],
+    pid: u16,
+    interface_num: Option<u8>,
+) -> Option<&Arc<DeviceConfig>> {
     configs.iter().find(|c| {
-        c.device
+        let pid_ok = c
+            .device
             .as_ref()
             .and_then(|d| d.variants.as_ref())
             .map(|vs| vs.iter().any(|v| v.product_id == pid))
-            .unwrap_or(false)
+            .unwrap_or(false);
+        if !pid_ok {
+            return false;
+        }
+        if let (Some(iface), Some(hid)) = (
+            interface_num,
+            c.device.as_ref().and_then(|d| d.hid.as_ref()),
+        ) {
+            if let Some(cmd) = &hid.command_interface {
+                if cmd.interface != iface {
+                    return false;
+                }
+            }
+        }
+        true
     })
 }
 
@@ -97,6 +122,10 @@ pub fn config_dirs() -> Vec<PathBuf> {
 /// Initialise and run the event loop for one device.  Registers the device in
 /// `app_state`, emits hotplug signals, and forwards `EmitEvent`s to the D-Bus
 /// state map.
+///
+/// Runs a reconnect loop: if the headset is off when the daemon starts, or
+/// powers off while running, the loop retries `device_init` automatically.
+/// The task runs until aborted by the hotplug Removed handler (dongle removed).
 async fn run_device(
     info: DeviceInfo,
     config: Arc<DeviceConfig>,
@@ -105,17 +134,8 @@ async fn run_device(
     signal_tx: broadcast::Sender<SignalEvent>,
 ) {
     let path_str = info.hidraw_path.to_string_lossy().to_string();
-    info!("starting session for {path_str}");
+    info!("monitoring {path_str} (PID={:#06x})", info.pid);
 
-    let fd = match hidraw_client::request_fd(&helper_sock, &path_str).await {
-        Ok(fd) => fd,
-        Err(e) => {
-            error!("failed to get fd for {path_str}: {e}");
-            return;
-        }
-    };
-
-    // Build friendly name from the variant list.
     let friendly_name = config
         .device
         .as_ref()
@@ -131,13 +151,12 @@ async fn run_device(
         .cloned()
         .unwrap_or_default();
 
-    // Create the command channel (D-Bus → device task).
-    let (cmd_tx, cmd_rx) = mpsc::channel::<DeviceCommand>(16);
-
-    // Register the device in shared state.
+    // Register the device once (the dongle is present).  A placeholder
+    // cmd_tx is used until the first successful session replaces it.
+    let (placeholder_tx, _) = mpsc::channel::<DeviceCommand>(1);
     {
-        let mut state = app_state.lock().await;
-        state.devices.insert(
+        let mut s = app_state.lock().await;
+        s.devices.insert(
             info.hidraw_path.clone(),
             DeviceEntry {
                 config: Arc::clone(&config),
@@ -145,67 +164,176 @@ async fn run_device(
                 name: friendly_name.clone(),
                 capabilities: capabilities.clone(),
                 status: HashMap::new(),
-                cmd_tx,
+                cmd_tx: placeholder_tx,
             },
         );
     }
-
-    // Notify listeners that a new device is available.
     let _ = signal_tx.send(SignalEvent::DeviceConnected {
         pid: info.pid,
-        name: friendly_name,
+        name: friendly_name.clone(),
         capabilities,
     });
 
-    let (event_tx, mut event_rx) = mpsc::channel::<EmitEvent>(64);
+    // Reconnection loop: retries whenever the headset is powered off or
+    // disconnects.  Exits only when the task is aborted (dongle removed).
+    loop {
+        let fd = match hidraw_client::request_fd(&helper_sock, &path_str).await {
+            Ok(fd) => fd,
+            Err(e) => {
+                warn!("fd request failed for {path_str}: {e}");
+                tokio::time::sleep(Duration::from_secs(3)).await;
+                continue;
+            }
+        };
 
-    // Forward EmitEvents: update the state map and emit StatusChanged signal.
-    let state_for_events = Arc::clone(&app_state);
-    let signal_tx_clone = signal_tx.clone();
-    let hidraw_path_clone = info.hidraw_path.clone();
-    tokio::spawn(async move {
-        while let Some(ev) = event_rx.recv().await {
-            info!(signal = %ev.signal, fields = ?ev.fields, "sync event");
-            {
-                let mut s = state_for_events.lock().await;
-                if let Some(entry) = s.devices.get_mut(&hidraw_path_clone) {
+        let mut session = DeviceSession::new((*config).clone(), fd);
+
+        let init_events = match session.device_init().await {
+            Ok(events) => {
+                info!("headset connected: {friendly_name}");
+                events
+            }
+            Err(e) => {
+                info!("headset not ready on {path_str} ({e}), retrying");
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                continue;
+            }
+        };
+
+        // Populate the status map with the initial snapshot and signal D-Bus.
+        {
+            let mut s = app_state.lock().await;
+            if let Some(entry) = s.devices.get_mut(&info.hidraw_path) {
+                for ev in &init_events {
                     for (field, val) in &ev.fields {
-                        entry
-                            .status
-                            .insert(field.clone(), state::event_value_to_json(val));
+                        entry.status.insert(field.clone(), state::event_value_to_json(val));
                     }
                 }
             }
-            let _ = signal_tx_clone.send(SignalEvent::StatusChanged);
         }
-    });
+        let _ = signal_tx.send(SignalEvent::StatusChanged);
 
-    let mut session = DeviceSession::new((*config).clone(), fd);
+        // Create virtual audio sinks and apply the initial chatmix balance.
+        // Wrapped in Arc<Mutex> so the event-forwarding task can drive the
+        // audio lifecycle directly from radio_connection_status events.
+        let audio_shared = Arc::new(Mutex::new(
+            match audio::setup_sinks().await {
+                Ok(setup) => {
+                    if let (Some(game), Some(chat)) = chatmix_from_events(&init_events) {
+                        audio::set_chatmix(game, chat).await;
+                    }
+                    Some(setup)
+                }
+                Err(e) => {
+                    warn!("audio setup failed for {path_str}: {e}");
+                    None
+                }
+            },
+        ));
 
-    match session.device_init().await {
-        Ok(events) => {
-            info!("{} init events emitted for {path_str}", events.len());
+        // Fresh command channel per session.
+        let (cmd_tx, cmd_rx) = mpsc::channel::<DeviceCommand>(16);
+        {
+            let mut s = app_state.lock().await;
+            if let Some(entry) = s.devices.get_mut(&info.hidraw_path) {
+                entry.cmd_tx = cmd_tx;
+            }
         }
-        Err(e) => {
-            error!("device init failed for {path_str}: {e}");
-            cleanup_device(&app_state, &info.hidraw_path, info.pid, &signal_tx).await;
-            return;
-        }
-    }
 
-    if let Err(e) = session.run_event_loop_with_commands(event_tx, cmd_rx).await {
-        match e {
-            EngineError::Io(ref io_e)
+        let (event_tx, mut event_rx) = mpsc::channel::<EmitEvent>(64);
+
+        // Forward EmitEvents to the state map; manage audio lifecycle from
+        // radio_connection_status; apply chatmix on slider changes.
+        let state_for_events = Arc::clone(&app_state);
+        let signal_tx_clone = signal_tx.clone();
+        let hidraw_path_clone = info.hidraw_path.clone();
+        let audio_for_task = Arc::clone(&audio_shared);
+        tokio::spawn(async move {
+            while let Some(ev) = event_rx.recv().await {
+                info!(signal = %ev.signal, fields = ?ev.fields, "sync event");
+                let mut chatmix_changed = false;
+                let mut radio_status: Option<String> = None;
+                {
+                    let mut s = state_for_events.lock().await;
+                    if let Some(entry) = s.devices.get_mut(&hidraw_path_clone) {
+                        for (field, val) in &ev.fields {
+                            entry.status.insert(field.clone(), state::event_value_to_json(val));
+                            match field.as_str() {
+                                "chatmix_game" | "chatmix_chat" => chatmix_changed = true,
+                                "radio_connection_status" => {
+                                    if let EventValue::Str(s) = val {
+                                        radio_status = Some(s.clone());
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                let _ = signal_tx_clone.send(SignalEvent::StatusChanged);
+
+                // Drive audio sink lifecycle from the wireless connection event.
+                // Guards are never held across .await — take/set value, drop, then await.
+                if let Some(ref status) = radio_status {
+                    if status.contains("NOT_CONNECTED") || status == "DISCONNECTED" {
+                        let setup = audio_for_task.lock().await.take();
+                        if let Some(s) = setup {
+                            info!("headset wireless off: removing virtual sinks");
+                            audio::teardown_sinks(s).await;
+                        }
+                    } else if status == "PAIRED_CONNECTED" || status == "CONNECTED" {
+                        let needs = audio_for_task.lock().await.is_none();
+                        if needs {
+                            match audio::setup_sinks().await {
+                                Ok(s) => {
+                                    info!("headset wireless on: virtual sinks created");
+                                    *audio_for_task.lock().await = Some(s);
+                                }
+                                Err(e) => warn!("audio setup on reconnect failed: {e}"),
+                            }
+                        }
+                    }
+                }
+
+                if chatmix_changed {
+                    let (game, chat) = {
+                        let s = state_for_events.lock().await;
+                        let e = s.devices.get(&hidraw_path_clone);
+                        let g = e
+                            .and_then(|e| e.status.get("chatmix_game"))
+                            .and_then(|v| v["value"].as_u64())
+                            .map(|v| v as u8);
+                        let c = e
+                            .and_then(|e| e.status.get("chatmix_chat"))
+                            .and_then(|v| v["value"].as_u64())
+                            .map(|v| v as u8);
+                        (g, c)
+                    };
+                    if let (Some(g), Some(c)) = (game, chat) {
+                        audio::set_chatmix(g, c).await;
+                    }
+                }
+            }
+        });
+
+        match session.run_event_loop_with_commands(event_tx, cmd_rx).await {
+            Err(EngineError::Io(ref io_e))
                 if io_e.kind() == std::io::ErrorKind::UnexpectedEof
                     || io_e.kind() == std::io::ErrorKind::BrokenPipe =>
             {
-                info!("device {path_str} disconnected");
+                info!("headset disconnected: {friendly_name}");
             }
-            _ => error!("event loop error for {path_str}: {e}"),
+            Err(e) => error!("event loop error for {path_str}: {e}"),
+            Ok(()) => info!("headset disconnected: {friendly_name}"),
         }
-    }
 
-    cleanup_device(&app_state, &info.hidraw_path, info.pid, &signal_tx).await;
+        // Tear down any sinks still alive (e.g. hidraw EOF while headset was on).
+        if let Some(setup) = audio_shared.lock().await.take() {
+            audio::teardown_sinks(setup).await;
+        }
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
 }
 
 async fn cleanup_device(
@@ -216,6 +344,24 @@ async fn cleanup_device(
 ) {
     app_state.lock().await.devices.remove(path);
     let _ = signal_tx.send(SignalEvent::DeviceDisconnected { pid });
+}
+
+/// Extract the initial chatmix_game and chatmix_chat values from device init events.
+fn chatmix_from_events(events: &[EmitEvent]) -> (Option<u8>, Option<u8>) {
+    let mut game = None;
+    let mut chat = None;
+    for ev in events {
+        for (field, val) in &ev.fields {
+            if let EventValue::Field(FieldValue::U8(v)) = val {
+                match field.as_str() {
+                    "chatmix_game" => game = Some(*v),
+                    "chatmix_chat" => chat = Some(*v),
+                    _ => {}
+                }
+            }
+        }
+    }
+    (game, chat)
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -292,7 +438,7 @@ async fn run_main_loop(
             dev.vid,
             dev.pid
         );
-        if let Some(cfg) = find_config(&configs, dev.pid) {
+        if let Some(cfg) = find_config(&configs, dev.pid, dev.interface_num) {
             let cfg = Arc::clone(cfg);
             let sock = helper_sock.clone();
             let path = dev.hidraw_path.clone();
@@ -320,7 +466,7 @@ async fn run_main_loop(
                             "hotplug add: {} (PID={:#06x})",
                             dev.hidraw_path.display(), dev.pid
                         );
-                        if let Some(cfg) = find_config(&configs, dev.pid) {
+                        if let Some(cfg) = find_config(&configs, dev.pid, dev.interface_num) {
                             let cfg = Arc::clone(cfg);
                             let sock = helper_sock.clone();
                             let path = dev.hidraw_path.clone();
@@ -340,6 +486,8 @@ async fn run_main_loop(
                         if let Some(handle) = tasks.remove(&dev.hidraw_path) {
                             handle.abort();
                         }
+                        // run_device loops forever; clean up state here on dongle removal.
+                        cleanup_device(&app_state, &dev.hidraw_path, dev.pid, &signal_tx).await;
                     }
                 }
             }
