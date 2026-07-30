@@ -2,6 +2,22 @@
 
 ---
 
+## Conventions
+
+**Completing a story** means the feature works end-to-end with no stubs or `TODO` comments left in the code. If a story is blocked mid-implementation because a dependency that was not anticipated turns up, it must **not** be marked done. Instead:
+
+1. Leave the story unchecked.
+2. Add a note directly under it in the checklist:
+   ```
+   - [ ] [EX-SY] Story title
+     > Blocked: depends on [EZ-SW] — <one line explaining what is missing>
+   ```
+3. Resolve the block as soon as the dependency is completed, then close the story.
+
+This keeps the checklist honest and makes blocked work immediately visible without digging through code or commit history.
+
+---
+
 ## Epics and Stories
 
 - [ ] **[E1] Rust engine foundation**
