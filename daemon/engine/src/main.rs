@@ -56,21 +56,28 @@ pub fn load_configs_from_dirs(dirs: &[&Path]) -> Vec<Arc<DeviceConfig>> {
 }
 
 /// Return the first config whose PID matches `pid`.
-/// When `interface_num` is provided and the config specifies a command interface,
-/// the interface numbers must also match (filters out non-command HID interfaces).
+///
+/// When `interface_num` is provided, a config that specifies a matching
+/// `command_interface` is preferred.  If no exact match exists (e.g. when the
+/// headset is off and only a non-command interface is enumerated by udev), the
+/// check falls back to PID-only so that the reconnect loop can still start and
+/// will succeed once the headset powers on.
 fn find_config(
     configs: &[Arc<DeviceConfig>],
     pid: u16,
     interface_num: Option<u8>,
 ) -> Option<&Arc<DeviceConfig>> {
-    configs.iter().find(|c| {
-        let pid_ok = c
-            .device
+    let pid_matches = |c: &&Arc<DeviceConfig>| {
+        c.device
             .as_ref()
             .and_then(|d| d.variants.as_ref())
             .map(|vs| vs.iter().any(|v| v.product_id == pid))
-            .unwrap_or(false);
-        if !pid_ok {
+            .unwrap_or(false)
+    };
+
+    // Preferred: PID match AND command-interface match (or no interface info).
+    let preferred = configs.iter().find(|c| {
+        if !pid_matches(c) {
             return false;
         }
         if let (Some(iface), Some(hid)) = (
@@ -78,13 +85,30 @@ fn find_config(
             c.device.as_ref().and_then(|d| d.hid.as_ref()),
         ) {
             if let Some(cmd) = &hid.command_interface {
-                if cmd.interface != iface {
-                    return false;
-                }
+                return cmd.interface == iface;
             }
         }
         true
-    })
+    });
+
+    if preferred.is_some() {
+        return preferred;
+    }
+
+    // Fallback: PID match only — wrong interface, but better than skipping
+    // the device entirely (reconnect loop handles device_init failures).
+    if interface_num.is_some() {
+        if let Some(cfg) = configs.iter().find(|c| pid_matches(c)) {
+            warn!(
+                "PID {:#06x} found on interface {:?}, expected command interface; \
+                 starting task anyway — device_init will retry when headset is ready",
+                pid, interface_num
+            );
+            return Some(cfg);
+        }
+    }
+
+    None
 }
 
 /// Return the path to the hidraw-helper socket.
@@ -435,10 +459,11 @@ async fn run_main_loop(
 
     for dev in existing {
         info!(
-            "device at startup: {} (VID={:#06x} PID={:#06x})",
+            "device at startup: {} (VID={:#06x} PID={:#06x} iface={:?})",
             dev.hidraw_path.display(),
             dev.vid,
-            dev.pid
+            dev.pid,
+            dev.interface_num
         );
         if let Some(cfg) = find_config(&configs, dev.pid, dev.interface_num) {
             let cfg = Arc::clone(cfg);
