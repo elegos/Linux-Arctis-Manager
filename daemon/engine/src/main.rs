@@ -206,7 +206,9 @@ async fn run_device(
             if let Some(entry) = s.devices.get_mut(&info.hidraw_path) {
                 for ev in &init_events {
                     for (field, val) in &ev.fields {
-                        entry.status.insert(field.clone(), state::event_value_to_json(val));
+                        entry
+                            .status
+                            .insert(field.clone(), state::event_value_to_json(val));
                     }
                 }
             }
@@ -216,20 +218,18 @@ async fn run_device(
         // Create virtual audio sinks and apply the initial chatmix balance.
         // Wrapped in Arc<Mutex> so the event-forwarding task can drive the
         // audio lifecycle directly from radio_connection_status events.
-        let audio_shared = Arc::new(Mutex::new(
-            match audio::setup_sinks().await {
-                Ok(setup) => {
-                    if let (Some(game), Some(chat)) = chatmix_from_events(&init_events) {
-                        audio::set_chatmix(game, chat).await;
-                    }
-                    Some(setup)
+        let audio_shared = Arc::new(Mutex::new(match audio::setup_sinks().await {
+            Ok(setup) => {
+                if let (Some(game), Some(chat)) = chatmix_from_events(&init_events) {
+                    audio::set_chatmix(game, chat).await;
                 }
-                Err(e) => {
-                    warn!("audio setup failed for {path_str}: {e}");
-                    None
-                }
-            },
-        ));
+                Some(setup)
+            }
+            Err(e) => {
+                warn!("audio setup failed for {path_str}: {e}");
+                None
+            }
+        }));
 
         // Fresh command channel per session.
         let (cmd_tx, cmd_rx) = mpsc::channel::<DeviceCommand>(16);
@@ -257,7 +257,9 @@ async fn run_device(
                     let mut s = state_for_events.lock().await;
                     if let Some(entry) = s.devices.get_mut(&hidraw_path_clone) {
                         for (field, val) in &ev.fields {
-                            entry.status.insert(field.clone(), state::event_value_to_json(val));
+                            entry
+                                .status
+                                .insert(field.clone(), state::event_value_to_json(val));
                             match field.as_str() {
                                 "chatmix_game" | "chatmix_chat" => chatmix_changed = true,
                                 "radio_connection_status" => {

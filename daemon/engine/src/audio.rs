@@ -128,7 +128,8 @@ async fn sink_and_loopback_exist(name: &str, physical: &str) -> bool {
     let mods = list_short_modules().await;
     let lb_source = format!("source={name}.monitor");
     let lb_sink = format!("sink={physical}");
-    let has_null = find_in_modules(&mods, "module-null-sink", &format!("sink_name={name}")).is_some();
+    let has_null =
+        find_in_modules(&mods, "module-null-sink", &format!("sink_name={name}")).is_some();
     let has_loopback = mods
         .iter()
         .any(|(_, n, a)| n == "module-loopback" && a.contains(&lb_source) && a.contains(&lb_sink));
@@ -146,10 +147,8 @@ pub async fn setup_sinks() -> Result<AudioSetup, AudioError> {
         .ok_or(AudioError::PhysicalSinkNotFound)?;
     info!("audio: physical Arctis sink = {physical}");
 
-    let (media_null, media_loopback) =
-        ensure_sink(MEDIA_SINK, "Arctis Media", &physical).await?;
-    let (chat_null, chat_loopback) =
-        ensure_sink(CHAT_SINK, "Arctis Chat", &physical).await?;
+    let (media_null, media_loopback) = ensure_sink(MEDIA_SINK, "Arctis Media", &physical).await?;
+    let (chat_null, chat_loopback) = ensure_sink(CHAT_SINK, "Arctis Chat", &physical).await?;
 
     Ok(AudioSetup {
         media_null,

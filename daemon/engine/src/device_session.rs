@@ -305,16 +305,33 @@ impl DeviceSession {
                     .write_interrupt(&op.request_bytes)
                     .await
                     .map_err(EngineError::Io)?;
-                self.transport
-                    .read_interrupt(Duration::from_millis(1000))
-                    .await
-                    .map_err(|e| match e {
-                        ReadError::Io(io_e) => EngineError::Io(io_e),
-                        ReadError::Timeout => EngineError::Io(std::io::Error::new(
-                            std::io::ErrorKind::TimedOut,
-                            "sync read timed out",
-                        )),
-                    })
+
+                // The interrupt stream carries both command responses and
+                // unsolicited device notifications.  Drain any notification
+                // reports whose first byte (report_id) does not match the
+                // expected response ID before returning the real response.
+                let expected_id = op.request_bytes.first().copied();
+                for _ in 0..8u8 {
+                    let response = self
+                        .transport
+                        .read_interrupt(Duration::from_millis(1000))
+                        .await
+                        .map_err(|e| match e {
+                            ReadError::Io(io_e) => EngineError::Io(io_e),
+                            ReadError::Timeout => EngineError::Io(std::io::Error::new(
+                                std::io::ErrorKind::TimedOut,
+                                "sync read timed out",
+                            )),
+                        })?;
+                    if expected_id.map_or(true, |id| response.first() == Some(&id)) {
+                        return Ok(response);
+                    }
+                    // Wrong report ID — async notification buffered before response.
+                }
+                Err(EngineError::Io(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "sync read: too many unexpected reports before response",
+                )))
             }
             Transport::HidFeature => {
                 let mut buf = vec![0u8; op.chunk_size];
