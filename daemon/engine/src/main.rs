@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio::task::JoinHandle;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use device_config::codec::FieldValue;
 use device_config::sync_dispatcher::{EmitEvent, EventValue};
@@ -200,27 +200,59 @@ async fn run_device(
 
     // Reconnection loop: retries whenever the headset is powered off or
     // disconnects.  Exits only when the task is aborted (dongle removed).
-    loop {
+    'reconnect: loop {
         let fd = match hidraw_client::request_fd(&helper_sock, &path_str).await {
             Ok(fd) => fd,
             Err(e) => {
                 warn!("fd request failed for {path_str}: {e}");
                 tokio::time::sleep(Duration::from_secs(3)).await;
-                continue;
+                continue 'reconnect;
             }
         };
 
         let mut session = DeviceSession::new((*config).clone(), fd);
 
-        let init_events = match session.device_init().await {
-            Ok(events) => {
-                info!("headset connected: {friendly_name}");
-                events
-            }
-            Err(e) => {
-                info!("headset not ready on {path_str} ({e}), retrying");
-                tokio::time::sleep(Duration::from_secs(2)).await;
-                continue;
+        // Inner loop: keep the fd open and wait reactively for the headset.
+        // On timeout (headset off) we listen for any async HID event from the
+        // dongle instead of sleeping; the wireless-connection-changed report
+        // arrives as soon as the headset powers on, triggering an immediate
+        // device_init retry without a fixed polling interval.
+        let init_events = 'init: loop {
+            match session.device_init().await {
+                Ok(events) => {
+                    info!("headset connected: {friendly_name}");
+                    break 'init events;
+                }
+                Err(EngineError::Io(ref e))
+                    if e.kind() == std::io::ErrorKind::TimedOut
+                        || e.raw_os_error() == Some(110) =>
+                {
+                    // Headset not responding.  Block on the open fd waiting for
+                    // any async notification (typically 0xB5 wireless-connection-
+                    // changed when the headset powers on).  This is reactive:
+                    // we wake the moment the dongle speaks, not on a timer.
+                    info!("headset not ready, waiting for wireless event on {path_str}...");
+                    match session.read_any_report(Duration::from_secs(30)).await {
+                        Ok(report) => {
+                            debug!(
+                                "async event received (cmd={:#04x}), retrying device_init",
+                                report.get(1).copied().unwrap_or(0)
+                            );
+                        }
+                        Err(EngineError::Io(ref e2))
+                            if e2.kind() != std::io::ErrorKind::TimedOut =>
+                        {
+                            // Real transport error — need a fresh fd.
+                            continue 'reconnect;
+                        }
+                        Err(_) => {} // 30-second timeout: try device_init again
+                    }
+                }
+                Err(e) => {
+                    info!("headset not ready on {path_str} ({e}), retrying");
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue 'reconnect;
+                }
             }
         };
 

@@ -114,11 +114,30 @@ fn passes_filter(vid: u16, pid: u16, pid_allowlist: &[u16]) -> bool {
 }
 
 fn vid_pid(dev: &Device) -> Option<(u16, u16)> {
-    let vid_str = dev.property_value("ID_VENDOR_ID")?.to_str()?;
-    let pid_str = dev.property_value("ID_MODEL_ID")?.to_str()?;
-    let vid = u16::from_str_radix(vid_str, 16).ok()?;
-    let pid = u16::from_str_radix(pid_str, 16).ok()?;
-    Some((vid, pid))
+    // Standard udev HID properties — set for most interfaces.
+    if let (Some(v), Some(p)) = (
+        dev.property_value("ID_VENDOR_ID"),
+        dev.property_value("ID_MODEL_ID"),
+    ) {
+        if let (Ok(vid), Ok(pid)) = (
+            u16::from_str_radix(v.to_str().unwrap_or(""), 16),
+            u16::from_str_radix(p.to_str().unwrap_or(""), 16),
+        ) {
+            return Some((vid, pid));
+        }
+    }
+    // Fallback: parse VID:PID from the parent HID device's sysname.
+    // Kernel names HID devices as "BBBB:VVVV:PPPP.IIII"
+    // (e.g. "0003:1038:12E0.0007").  Raw/vendor HID interfaces often lack
+    // the standard udev properties but are still reachable this way.
+    let hid_sysname = dev.parent()?.sysname().to_str()?.to_owned();
+    let parts: Vec<&str> = hid_sysname.splitn(3, ':').collect();
+    if parts.len() == 3 && parts[0].len() == 4 {
+        let vid = u16::from_str_radix(parts[1], 16).ok()?;
+        let pid = u16::from_str_radix(parts[2].split('.').next()?, 16).ok()?;
+        return Some((vid, pid));
+    }
+    None
 }
 
 fn usb_interface_num(dev: &Device) -> Option<u8> {
