@@ -215,12 +215,19 @@ pub async fn start_dbus_service(
 // ── JSON helpers ──────────────────────────────────────────────────────────────
 
 fn build_status_json(state: &AppState) -> String {
-    let map: Map<String, JsonValue> = state
+    let fields: Map<String, JsonValue> = state
         .devices
         .values()
         .flat_map(|entry| entry.status.iter().map(|(k, v)| (k.clone(), v.clone())))
         .collect();
-    serde_json::to_string(&map).unwrap_or_else(|_| "{}".to_string())
+
+    if fields.is_empty() {
+        return "{}".to_string();
+    }
+
+    // GUI expects {category: {field: {value, type}}}; group everything under "headset".
+    let result = serde_json::json!({"headset": fields});
+    serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
 }
 
 fn build_settings_json(state: &AppState) -> String {
@@ -234,25 +241,12 @@ fn build_settings_json(state: &AppState) -> String {
         return result.to_string();
     };
 
-    // current field values
-    let device_vals: Map<String, JsonValue> = entry
-        .status
-        .iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
-    result["device"] = JsonValue::Object(device_vals);
-
-    result["settings_config"] = build_settings_config(&entry.config);
-
-    serde_json::to_string(&result).unwrap_or_else(|_| result.to_string())
-}
-
-fn build_settings_config(config: &DeviceConfig) -> JsonValue {
-    let mut map = Map::new();
-
-    let (Some(apis), Some(structs)) = (&config.apis, &config.structs) else {
-        return JsonValue::Object(map);
+    let (Some(apis), Some(structs)) = (&entry.config.apis, &entry.config.structs) else {
+        return serde_json::to_string(&result).unwrap_or_else(|_| result.to_string());
     };
+
+    let mut device_map = Map::new();
+    let mut config_map = Map::new();
 
     for (api_name, api_def) in apis {
         if api_def.write.is_none() {
@@ -261,49 +255,114 @@ fn build_settings_config(config: &DeviceConfig) -> JsonValue {
         let Some(struct_def) = structs.get(api_name.as_str()) else {
             continue;
         };
-        let fields = outgoing_fields(struct_def, structs);
-        for fdef in fields {
+        for fdef in outgoing_fields(struct_def, structs) {
             if fdef.constant.is_some() {
                 continue;
             }
-            map.insert(fdef.name.clone(), field_to_schema(fdef));
+            let current = entry
+                .status
+                .get(&fdef.name)
+                .and_then(|v| v.get("value"))
+                .cloned();
+
+            // device section: plain current value (no {value, type} wrapper)
+            if let Some(val) = &current {
+                device_map
+                    .entry(fdef.name.clone())
+                    .or_insert_with(|| val.clone());
+            }
+
+            config_map
+                .entry(fdef.name.clone())
+                .or_insert_with(|| field_to_schema(fdef, current.as_ref()));
         }
     }
 
-    JsonValue::Object(map)
+    result["device"] = JsonValue::Object(device_map);
+    result["settings_config"] = JsonValue::Object(config_map);
+
+    serde_json::to_string(&result).unwrap_or_else(|_| result.to_string())
 }
 
-fn field_to_schema(fdef: &FieldDef) -> JsonValue {
-    let type_str = match fdef.field_type {
-        FieldType::Uint8 => "uint8",
-        FieldType::Uint16 => "uint16",
-        FieldType::Uint32 => "uint32",
-        FieldType::Float32 => "float32",
-        FieldType::ByteArray => "bytearray",
-    };
+fn yaml_to_json(y: &serde_yaml::Value) -> JsonValue {
+    if let Some(i) = y.as_i64() {
+        JsonValue::from(i)
+    } else if let Some(f) = y.as_f64() {
+        JsonValue::from(f)
+    } else if let Some(s) = y.as_str() {
+        JsonValue::from(s)
+    } else if let Some(b) = y.as_bool() {
+        JsonValue::from(b)
+    } else {
+        JsonValue::Null
+    }
+}
 
-    let mut schema = serde_json::json!({"type": type_str});
+/// Build a `ConfigSetting`-compatible schema for one writable field.
+///
+/// The GUI constructs `ConfigSetting(name=..., **schema)`, so every key here
+/// becomes an attribute.  Required keys: `type` (SettingType value string) and
+/// `default_value`.
+fn field_to_schema(fdef: &FieldDef, current_val: Option<&JsonValue>) -> JsonValue {
+    // default_value: prefer the live current value, fall back to range minimum.
+    let default_val = current_val.cloned().unwrap_or_else(|| {
+        fdef.range
+            .as_ref()
+            .and_then(|r| r.first())
+            .map(yaml_to_json)
+            .unwrap_or(JsonValue::from(0i64))
+    });
 
     if let Some(range) = &fdef.range {
         if range.len() == 2 {
-            if let (Some(mn), Some(mx)) = (range[0].as_f64(), range[1].as_f64()) {
-                schema["min"] = JsonValue::from(mn);
-                schema["max"] = JsonValue::from(mx);
+            let min_f = range[0].as_f64().unwrap_or(0.0);
+            let max_f = range[1].as_f64().unwrap_or(1.0);
+            if (max_f - min_f) <= 1.0 {
+                // Boolean [0, 1] range → toggle
+                return serde_json::json!({
+                    "type": "toggle",
+                    "default_value": default_val,
+                    "values": {
+                        "on": yaml_to_json(&range[1]),
+                        "off": yaml_to_json(&range[0]),
+                        "on_label": "on",
+                        "off_label": "off"
+                    }
+                });
+            } else {
+                // Wider numeric range → slider
+                return serde_json::json!({
+                    "type": "slider",
+                    "default_value": default_val,
+                    "min": yaml_to_json(&range[0]),
+                    "max": yaml_to_json(&range[1]),
+                    "step": 1
+                });
             }
         }
     }
 
     if let Some(values) = &fdef.values {
-        let opts: Vec<JsonValue> = values
+        let mapping: Map<String, JsonValue> = values
             .iter()
-            .filter_map(|v| v.as_str().map(JsonValue::from))
+            .enumerate()
+            .filter_map(|(i, v)| v.as_str().map(|s| (i.to_string(), JsonValue::from(s))))
             .collect();
-        if !opts.is_empty() {
-            schema["options"] = JsonValue::Array(opts);
-        }
+        return serde_json::json!({
+            "type": "discrete_map",
+            "default_value": default_val,
+            "values_mapping": JsonValue::Object(mapping)
+        });
     }
 
-    schema
+    // Fallback: treat as an unconstrained slider
+    serde_json::json!({
+        "type": "slider",
+        "default_value": default_val,
+        "min": 0,
+        "max": 255,
+        "step": 1
+    })
 }
 
 /// Return the "outgoing" (write-side) flat list of concrete `FieldDef`s for
@@ -448,8 +507,9 @@ mod tests {
             config_dirs: vec![PathBuf::from("/tmp")],
         };
         let json: JsonValue = serde_json::from_str(&build_status_json(&state)).unwrap();
-        assert_eq!(json["battery"]["value"], 80);
-        assert_eq!(json["battery"]["type"], "uint8");
+        // Fields are nested under the "headset" category for GUI compatibility.
+        assert_eq!(json["headset"]["battery"]["value"], 80);
+        assert_eq!(json["headset"]["battery"]["type"], "uint8");
     }
 
     #[test]
