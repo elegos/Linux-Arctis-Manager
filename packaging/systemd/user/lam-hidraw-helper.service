@@ -1,0 +1,13 @@
+[Unit]
+Description=Linux Arctis Manager — HID access helper
+Documentation=https://github.com/Mic92/linux-arctis-manager
+Before=lam-daemon.service
+
+[Service]
+Type=simple
+ExecStart=/usr/libexec/lam-hidraw-helper
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
