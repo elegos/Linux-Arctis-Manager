@@ -98,6 +98,23 @@ impl DeviceSession {
         Ok(events)
     }
 
+    /// Read one raw interrupt report from the device, ignoring report content.
+    /// Used in the reconnect loop to wait reactively for any sign of life from
+    /// the dongle (e.g. a wireless-connection-changed notification) instead of
+    /// sleeping a fixed interval between `device_init` retries.
+    pub async fn read_any_report(&mut self, timeout: Duration) -> Result<Vec<u8>, EngineError> {
+        self.transport
+            .read_interrupt(timeout)
+            .await
+            .map_err(|e| match e {
+                ReadError::Io(io_e) => EngineError::Io(io_e),
+                ReadError::Timeout => EngineError::Io(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "read_any_report timed out",
+                )),
+            })
+    }
+
     /// Dispatch a raw HID sync report through the sync event table.
     /// Returns `Ok(None)` when the command byte has no entry in `sync_events`.
     #[allow(dead_code)] // used in tests and by the upcoming D-Bus layer (E4)
