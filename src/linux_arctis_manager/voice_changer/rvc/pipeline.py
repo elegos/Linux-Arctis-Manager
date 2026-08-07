@@ -980,35 +980,15 @@ class RVCPipeline:
         return out_np
 
 
-_CONTENTVEC_URL  = ('https://huggingface.co/lengyue233/content-vec-best/resolve/main/'
-                    'pytorch_model.bin')
-_CONTENTVEC_PATH = Path.home() / '.config' / 'arctis_manager' / 'models' / 'contentvec_500.bin'
-
-
 def _ensure_contentvec() -> Path:
-    _CONTENTVEC_PATH.parent.mkdir(parents=True, exist_ok=True)
-    if not _CONTENTVEC_PATH.exists():
-        logger.info('Downloading ContentVec encoder (~360 MB) — one-time setup...')
-        tmp = _CONTENTVEC_PATH.with_suffix('.tmp')
-        try:
-            try:
-                from huggingface_hub import hf_hub_download
-                local = hf_hub_download(
-                    repo_id='lengyue233/content-vec-best',
-                    filename='pytorch_model.bin',
-                    local_dir=str(_CONTENTVEC_PATH.parent),
-                )
-                import shutil
-                shutil.move(local, _CONTENTVEC_PATH)
-            except ImportError:
-                import urllib.request
-                urllib.request.urlretrieve(_CONTENTVEC_URL, tmp)
-                tmp.rename(_CONTENTVEC_PATH)
-        except Exception:
-            tmp.unlink(missing_ok=True)
-            raise
-        logger.info('ContentVec saved to %s', _CONTENTVEC_PATH)
-    return _CONTENTVEC_PATH
+    from linux_arctis_manager.voice_changer.rvc.model_downloader import CONTENTVEC, model_path
+    path = model_path(CONTENTVEC)
+    if path is None:
+        raise FileNotFoundError(
+            'ContentVec model not found. '
+            'Download it from the Voice Changer → Base Models section.'
+        )
+    return path
 
 
 def _remap_fairseq_to_torchaudio(fs: dict) -> dict:
