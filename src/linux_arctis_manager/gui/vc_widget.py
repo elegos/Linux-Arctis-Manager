@@ -506,10 +506,44 @@ class QVCWidget(QWidget):
         self._rvc_no_backend_frame.setVisible(False)
         cl.addWidget(self._rvc_no_backend_frame)
 
+        # ── Base AI Models ─────────────────────────────────────────────
+        self._rvc_base_frame = QFrame()
+        self._rvc_base_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        bm = QVBoxLayout()
+        bm.setContentsMargins(10, 8, 10, 8)
+        bm.setSpacing(6)
+        self._rvc_base_frame.setLayout(bm)
+        base_title = QLabel(_T('ui', 'vc_rvc_base_models'))
+        base_title.setStyleSheet('font-weight: bold;')
+        bm.addWidget(base_title)
+        self._rvc_rmvpe_lbl = QLabel()
+        bm.addWidget(self._rvc_rmvpe_lbl)
+        self._rvc_contentvec_lbl = QLabel()
+        bm.addWidget(self._rvc_contentvec_lbl)
+        base_btn_row = QHBoxLayout()
+        self._rvc_base_download_btn = QPushButton(_T('ui', 'vc_rvc_base_download'))
+        self._rvc_base_download_btn.clicked.connect(self._download_base_models)
+        base_btn_row.addWidget(self._rvc_base_download_btn)
+        base_btn_row.addStretch()
+        bm.addLayout(base_btn_row)
+        base_note = QLabel(_T('ui', 'vc_rvc_base_note'))
+        base_note.setStyleSheet('font-size: 10px; color: gray;')
+        base_note.setWordWrap(True)
+        bm.addWidget(base_note)
+        cl.addWidget(self._rvc_base_frame)
+
+        # Everything below is disabled until base models are present.
+        self._rvc_model_section = QWidget()
+        ms = QVBoxLayout()
+        ms.setContentsMargins(0, 0, 0, 0)
+        ms.setSpacing(cl.spacing())
+        self._rvc_model_section.setLayout(ms)
+        cl.addWidget(self._rvc_model_section)
+
         # ── HuBERT encoder ─────────────────────────────────────────────
         hubert_sep = QLabel('HuBERT encoder')
         hubert_sep.setStyleSheet('font-weight: bold; margin-top: 6px;')
-        cl.addWidget(hubert_sep)
+        ms.addWidget(hubert_sep)
 
         hubert_row = QHBoxLayout()
         hubert_lbl = QLabel('Encoder model')
@@ -521,19 +555,19 @@ class QVCWidget(QWidget):
         self._rvc_hubert_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._rvc_hubert_combo.currentIndexChanged.connect(lambda _: self._apply())
         hubert_row.addWidget(self._rvc_hubert_combo)
-        cl.addLayout(hubert_row)
+        ms.addLayout(hubert_row)
 
         hubert_hint = QLabel(
             'Try ContentVec if words sound garbled — some models were trained with it.'
         )
         hubert_hint.setStyleSheet('font-size: 10px; color: gray;')
         hubert_hint.setWordWrap(True)
-        cl.addWidget(hubert_hint)
+        ms.addWidget(hubert_hint)
 
         # ── Local models ───────────────────────────────────────────────
         local_sep = QLabel(_T('ui', 'vc_rvc_local_models'))
         local_sep.setStyleSheet('font-weight: bold; margin-top: 6px;')
-        cl.addWidget(local_sep)
+        ms.addWidget(local_sep)
 
         model_row = QHBoxLayout()
         model_lbl = QLabel(_T('ui', 'vc_rvc_model'))
@@ -553,7 +587,7 @@ class QVCWidget(QWidget):
         self._rvc_delete_btn.setEnabled(False)
         self._rvc_delete_btn.clicked.connect(self._delete_model)
         model_row.addWidget(self._rvc_delete_btn)
-        cl.addLayout(model_row)
+        ms.addLayout(model_row)
 
         self._rvc_no_models_lbl = QLabel()
         self._rvc_no_models_lbl.setWordWrap(True)
@@ -561,7 +595,7 @@ class QVCWidget(QWidget):
         _italic_font.setItalic(True)
         self._rvc_no_models_lbl.setFont(_italic_font)
         self._rvc_no_models_lbl.setVisible(False)
-        cl.addWidget(self._rvc_no_models_lbl)
+        ms.addWidget(self._rvc_no_models_lbl)
 
         row, self._rvc_pitch_sl, self._rvc_pitch_lbl = _slider_row(
             _T('ui', 'vc_rvc_pitch'), -12, 12, 0,
@@ -569,12 +603,12 @@ class QVCWidget(QWidget):
         self._rvc_pitch_sl.valueChanged.connect(
             lambda v: (self._rvc_pitch_lbl.setText(f'{v:+d} st' if v != 0 else '0 st'),
                        self._apply_timer.start()))
-        cl.addLayout(row)
+        ms.addLayout(row)
 
         # ── Advanced tuning (persisted per model) ──────────────────────
         adv_sep = QLabel('Advanced tuning (saved per model)')
         adv_sep.setStyleSheet('font-weight: bold; margin-top: 6px;')
-        cl.addWidget(adv_sep)
+        ms.addWidget(adv_sep)
 
         # VTLN warp: <1 shifts formants up (male voice → female-trained model)
         row, self._rvc_vtln_sl, self._rvc_vtln_lbl = _slider_row(
@@ -589,7 +623,7 @@ class QVCWidget(QWidget):
         self._rvc_vtln_sl.valueChanged.connect(
             lambda v: (self._rvc_vtln_lbl.setText(f'{v/100:.2f}'),
                        self._apply_timer.start()))
-        cl.addLayout(row)
+        ms.addLayout(row)
 
         # Envelope mix: 0 % = follow input dynamics, 100 % = model's own envelope
         row, self._rvc_rms_sl, self._rvc_rms_lbl = _slider_row(
@@ -602,7 +636,7 @@ class QVCWidget(QWidget):
         self._rvc_rms_sl.valueChanged.connect(
             lambda v: (self._rvc_rms_lbl.setText(f'{v} %'),
                        self._apply_timer.start()))
-        cl.addLayout(row)
+        ms.addLayout(row)
 
         # F0 median filter: 0 = off, 3/5/7 = radius
         f0f_row = QHBoxLayout()
@@ -622,7 +656,7 @@ class QVCWidget(QWidget):
         self._rvc_f0filt_combo.currentIndexChanged.connect(lambda _: self._apply())
         f0f_row.addWidget(self._rvc_f0filt_combo)
         f0f_row.addStretch()
-        cl.addLayout(f0f_row)
+        ms.addLayout(f0f_row)
 
         # Input drive: RMS level fed to the model (×100)
         row, self._rvc_drive_sl, self._rvc_drive_lbl = _slider_row(
@@ -635,7 +669,7 @@ class QVCWidget(QWidget):
         self._rvc_drive_sl.valueChanged.connect(
             lambda v: (self._rvc_drive_lbl.setText(f'{v/100:.2f}'),
                        self._apply_timer.start()))
-        cl.addLayout(row)
+        ms.addLayout(row)
 
         # FAISS feature-retrieval blend (×100); 0 = off, needs a .index file
         row, self._rvc_index_sl, self._rvc_index_lbl = _slider_row(
@@ -651,7 +685,7 @@ class QVCWidget(QWidget):
         self._rvc_index_sl.valueChanged.connect(
             lambda v: (self._rvc_index_lbl.setText('Off' if v == 0 else f'{v/100:.2f}'),
                        self._apply_timer.start()))
-        cl.addLayout(row)
+        ms.addLayout(row)
 
         # Output soft limiter knee (×100); 1.00 = off
         row, self._rvc_lim_sl, self._rvc_lim_lbl = _slider_row(
@@ -664,7 +698,7 @@ class QVCWidget(QWidget):
         self._rvc_lim_sl.valueChanged.connect(
             lambda v: (self._rvc_lim_lbl.setText('Off' if v >= 100 else f'{v/100:.2f}'),
                        self._apply_timer.start()))
-        cl.addLayout(row)
+        ms.addLayout(row)
 
         # Auto-tune: closed-loop drive calibration against live saturation metrics
         tune_row = QHBoxLayout()
@@ -680,7 +714,7 @@ class QVCWidget(QWidget):
         self._rvc_tune_status = QLabel('')
         self._rvc_tune_status.setStyleSheet('font-size: 10px; color: gray;')
         tune_row.addWidget(self._rvc_tune_status, 1)
-        cl.addLayout(tune_row)
+        ms.addLayout(tune_row)
 
         # Guided calibration: read a short text, hear 3 tunings, pick by ear.
         calib_row = QHBoxLayout()
@@ -696,16 +730,16 @@ class QVCWidget(QWidget):
         reset_btn.setToolTip('Revert all tuning for this model to the defaults.')
         reset_btn.clicked.connect(self._reset_model_params)
         calib_row.addWidget(reset_btn)
-        cl.addLayout(calib_row)
+        ms.addLayout(calib_row)
 
         open_folder_btn = QPushButton(_T('ui', 'vc_rvc_open_folder'))
         open_folder_btn.clicked.connect(self._open_models_folder)
-        cl.addWidget(open_folder_btn)
+        ms.addWidget(open_folder_btn)
 
         # ── HuggingFace search ─────────────────────────────────────────
         hf_sep = QLabel(_T('ui', 'vc_rvc_hf_title'))
         hf_sep.setStyleSheet('font-weight: bold; margin-top: 10px;')
-        cl.addWidget(hf_sep)
+        ms.addWidget(hf_sep)
 
         search_row = QHBoxLayout()
         self._hf_search_input = QLineEdit()
@@ -720,17 +754,17 @@ class QVCWidget(QWidget):
         self._hf_search_btn = QPushButton(_T('ui', 'vc_rvc_hf_search_btn'))
         self._hf_search_btn.clicked.connect(self._hf_search)
         search_row.addWidget(self._hf_search_btn)
-        cl.addLayout(search_row)
+        ms.addLayout(search_row)
 
         self._hf_status_lbl = QLabel()
         self._hf_status_lbl.setVisible(False)
-        cl.addWidget(self._hf_status_lbl)
+        ms.addWidget(self._hf_status_lbl)
 
         self._hf_results_list = QListWidget()
         self._hf_results_list.setMaximumHeight(160)
         self._hf_results_list.setVisible(False)
         self._hf_results_list.currentRowChanged.connect(self._on_hf_result_selected)
-        cl.addWidget(self._hf_results_list)
+        ms.addWidget(self._hf_results_list)
 
         dl_row = QHBoxLayout()
         dl_lbl = QLabel(_T('ui', 'vc_rvc_hf_file'))
@@ -747,12 +781,12 @@ class QVCWidget(QWidget):
         self._dl_row_widget = QWidget()
         self._dl_row_widget.setLayout(dl_row)
         self._dl_row_widget.setVisible(False)
-        cl.addWidget(self._dl_row_widget)
+        ms.addWidget(self._dl_row_widget)
 
         # ── HuggingFace token ──────────────────────────────────────────
         tok_sep = QLabel(_T('ui', 'vc_rvc_hf_token_section'))
         tok_sep.setStyleSheet('font-weight: bold; margin-top: 8px;')
-        cl.addWidget(tok_sep)
+        ms.addWidget(tok_sep)
 
         tok_row = QHBoxLayout()
         self._hf_token_input = QLineEdit()
@@ -762,12 +796,12 @@ class QVCWidget(QWidget):
         self._hf_token_save_btn = QPushButton(_T('ui', 'vc_rvc_hf_token_save'))
         self._hf_token_save_btn.clicked.connect(self._save_hf_token)
         tok_row.addWidget(self._hf_token_save_btn)
-        cl.addLayout(tok_row)
+        ms.addLayout(tok_row)
 
         self._hf_token_hint = QLabel(_T('ui', 'vc_rvc_hf_token_hint'))
         self._hf_token_hint.setStyleSheet('font-size: 10px; color: gray;')
         self._hf_token_hint.setOpenExternalLinks(True)
-        cl.addWidget(self._hf_token_hint)
+        ms.addWidget(self._hf_token_hint)
 
         cl.addStretch()
         return scroll
@@ -836,7 +870,26 @@ class QVCWidget(QWidget):
         self._dist_box.setEnabled(self._ladspa_caps.get('distortion', False))
         self._reverb_box.setEnabled(self._ladspa_caps.get('reverb', False))
 
-        # RVC panel
+        # RVC panel — base models
+        base = self._rvc_caps.get('base_models', {})
+        rmvpe_ok     = bool(base.get('rmvpe', False))
+        contentvec_ok = bool(base.get('contentvec', False))
+        base_ok = rmvpe_ok and contentvec_ok
+        ok_mark, fail_mark = '✔', '✘'
+        self._rvc_rmvpe_lbl.setText(
+            f'{ok_mark if rmvpe_ok else fail_mark}  RMVPE (~180 MB)'
+        )
+        self._rvc_contentvec_lbl.setText(
+            f'{ok_mark if contentvec_ok else fail_mark}  ContentVec (~360 MB)'
+        )
+        self._rvc_base_download_btn.setEnabled(not base_ok)
+        self._rvc_base_download_btn.setText(
+            _T('ui', 'vc_rvc_base_download_done') if base_ok
+            else _T('ui', 'vc_rvc_base_download')
+        )
+        self._rvc_model_section.setEnabled(base_ok)
+
+        # RVC panel — AI backend
         rvc_avail      = bool(self._rvc_caps.get('available', False))
         ai_env_exists  = bool(self._rvc_caps.get('ai_env_exists', False))
         backends       = self._rvc_caps.get('backends', [])
@@ -1369,6 +1422,27 @@ class QVCWidget(QWidget):
                 self._rvc_install_combo.setCurrentIndex(idx)
         else:
             self._rvc_gpu_lbl.setText(_T('ui', 'vc_rvc_gpu_none'))
+
+    def _download_base_models(self) -> None:
+        reply = QMessageBox.question(
+            self,
+            _T('ui', 'vc_rvc_base_consent_title'),
+            _T('ui', 'vc_rvc_base_consent_msg'),
+            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Ok:
+            return
+        self._rvc_base_download_btn.setEnabled(False)
+        DbusWrapper.download_base_models()
+
+    def on_base_model_progress(self, message: str) -> None:
+        self._rvc_base_download_btn.setEnabled(False)
+
+    def on_base_model_complete(self, success: bool, _message: str) -> None:
+        if success:
+            DbusWrapper.request_vc_capabilities(self.sig_vc_capabilities)
+        else:
+            self._rvc_base_download_btn.setEnabled(True)
 
     def _install_ai_deps(self) -> None:
         backend = self._rvc_install_combo.currentData() or 'auto'
