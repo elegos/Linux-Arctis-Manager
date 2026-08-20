@@ -4,6 +4,8 @@
 // physical Arctis headset output.  All operations are async (tokio process).
 
 use std::fmt;
+
+use serde::Serialize;
 use tokio::process::Command;
 use tracing::{info, warn};
 
@@ -24,6 +26,54 @@ impl fmt::Display for AudioError {
         match self {
             AudioError::Pactl(msg) => write!(f, "pactl: {msg}"),
             AudioError::PhysicalSinkNotFound => write!(f, "physical Arctis sink not found"),
+        }
+    }
+}
+
+// ── Audio sink enumeration ────────────────────────────────────────────────────
+
+/// A user-visible PipeWire/PulseAudio output sink.
+#[derive(Debug, Clone, Serialize)]
+pub struct AudioSink {
+    /// `node.name` — stable ALSA path, rename-proof.
+    pub id: String,
+    /// `node.nick` — human-readable display label.
+    pub name: String,
+}
+
+/// Parse `pactl -f json list sinks` output into `AudioSink` pairs.
+/// Skips the virtual sinks created by this daemon (`Arctis_Media`, `Arctis_Chat`).
+/// This is a pure function so it can be unit-tested without a running PipeWire.
+pub fn parse_audio_sinks(json: &str) -> Vec<AudioSink> {
+    let Ok(sinks) = serde_json::from_str::<serde_json::Value>(json) else {
+        return vec![];
+    };
+    let Some(arr) = sinks.as_array() else {
+        return vec![];
+    };
+    arr.iter()
+        .filter_map(|sink| {
+            let id = sink["name"].as_str()?;
+            if id == MEDIA_SINK || id == CHAT_SINK {
+                return None;
+            }
+            let nick = sink["properties"]["node.nick"].as_str().unwrap_or(id);
+            Some(AudioSink {
+                id: id.to_owned(),
+                name: nick.to_owned(),
+            })
+        })
+        .collect()
+}
+
+/// Enumerate all non-virtual PipeWire output sinks.
+/// Returns an empty list if `pactl` is unavailable or returns an error.
+pub async fn list_audio_sinks() -> Vec<AudioSink> {
+    match pactl(&["-f", "json", "list", "sinks"]).await {
+        Ok(json) => parse_audio_sinks(&json),
+        Err(e) => {
+            warn!("audio: list sinks failed: {e}");
+            vec![]
         }
     }
 }
@@ -242,5 +292,32 @@ mod tests {
     fn audio_error_display() {
         assert!(!AudioError::PhysicalSinkNotFound.to_string().is_empty());
         assert!(!AudioError::Pactl("oops".into()).to_string().is_empty());
+    }
+
+    #[test]
+    fn parse_audio_sinks_skips_virtual_and_extracts_fields() {
+        let json = r#"[
+            {"name": "Arctis_Media",  "properties": {"node.nick": "Arctis Media"}},
+            {"name": "Arctis_Chat",   "properties": {"node.nick": "Arctis Chat"}},
+            {"name": "alsa_output.usb-SteelSeries-00", "properties": {"node.nick": "Arctis Nova"}}
+        ]"#;
+        let sinks = parse_audio_sinks(json);
+        assert_eq!(sinks.len(), 1);
+        assert_eq!(sinks[0].id, "alsa_output.usb-SteelSeries-00");
+        assert_eq!(sinks[0].name, "Arctis Nova");
+    }
+
+    #[test]
+    fn parse_audio_sinks_falls_back_to_id_when_nick_missing() {
+        let json = r#"[{"name": "alsa_output.usb-foo", "properties": {}}]"#;
+        let sinks = parse_audio_sinks(json);
+        assert_eq!(sinks.len(), 1);
+        assert_eq!(sinks[0].name, "alsa_output.usb-foo");
+    }
+
+    #[test]
+    fn parse_audio_sinks_returns_empty_on_bad_json() {
+        assert!(parse_audio_sinks("not json").is_empty());
+        assert!(parse_audio_sinks("null").is_empty());
     }
 }
