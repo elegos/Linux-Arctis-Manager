@@ -1,15 +1,16 @@
 mod audio;
 mod dbus;
-mod eq;
-mod eq_manager;
-mod stream_monitor;
 mod device_persistence;
 mod device_session;
 mod engine_error;
+mod eq;
+mod eq_manager;
+mod focus_monitor;
 mod general_settings;
 mod hidraw_client;
 mod hotplug;
 mod state;
+mod stream_monitor;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -613,11 +614,9 @@ async fn run_main_loop(
     let (tx, mut rx) = mpsc::channel::<hotplug::HotplugEvent>(16);
 
     // Install SIGTERM handler once before the select! loop.
-    let mut sigterm = tokio::signal::unix::signal(
-        tokio::signal::unix::SignalKind::terminate(),
-    )
-    .map_err(|e| warn!("SIGTERM handler unavailable: {e}"))
-    .ok();
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .map_err(|e| warn!("SIGTERM handler unavailable: {e}"))
+        .ok();
 
     let aud_on_remove = Arc::clone(&audio_shared);
 

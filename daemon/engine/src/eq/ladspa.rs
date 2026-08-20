@@ -10,7 +10,6 @@
 // I/O functions (module load/unload, live gain update) are covered by the
 // `lam-integrity-check ladspa-eq` subcommand.
 
-use tracing::warn;
 
 use super::preset::{BandMode, EqPreset};
 
@@ -19,8 +18,8 @@ use super::preset::{BandMode, EqPreset};
 /// Centre frequencies of the 15 `mbeq_1197` control ports, in order.
 /// These are fixed by the plugin and must not change.
 pub const MBEQ_FREQ: [f32; 15] = [
-    50.0, 100.0, 156.0, 220.0, 311.0, 440.0, 622.0, 880.0, 1250.0, 1750.0, 2500.0, 3500.0,
-    5000.0, 10000.0, 20000.0,
+    50.0, 100.0, 156.0, 220.0, 311.0, 440.0, 622.0, 880.0, 1250.0, 1750.0, 2500.0, 3500.0, 5000.0,
+    10000.0, 20000.0,
 ];
 
 /// Indices into `MBEQ_FREQ` activated by `BandMode::Fixed10`.
@@ -84,7 +83,11 @@ pub fn nearest_mbeq_index(freq: f32) -> usize {
 
 /// Format the 15 gains as the `control=` argument for `module-ladspa-sink`.
 pub fn control_arg(gains: &[f32; 15]) -> String {
-    gains.iter().map(|g| format!("{g:.2}")).collect::<Vec<_>>().join(",")
+    gains
+        .iter()
+        .map(|g| format!("{g:.2}"))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// Build the full argument string for `pactl load-module module-ladspa-sink`.
@@ -183,7 +186,9 @@ pub async fn load_eq_module(
 
 /// Unload a previously loaded `module-ladspa-sink` by its module index.
 pub async fn unload_eq_module(module_id: u32) -> Result<(), LadspaError> {
-    pactl(&["unload-module", &module_id.to_string()]).await.map(|_| ())
+    pactl(&["unload-module", &module_id.to_string()])
+        .await
+        .map(|_| ())
 }
 
 /// Find the PipeWire node ID for a named sink by parsing `pw-dump` JSON.
@@ -224,38 +229,15 @@ pub async fn update_gains_live(sink_name: &str, gains: &[f32; 15]) -> Result<(),
         .ok_or_else(|| LadspaError::NodeNotFound(sink_name.to_owned()))?;
 
     // Build the SPA JSON props update for the LADSPA control array.
-    let gain_arr: String = gains.iter().map(|g| format!("{g:.2}")).collect::<Vec<_>>().join(" ");
-    let props = format!(
-        "{{ params = [ \"ladspa.control\" [ {gain_arr} ] ] }}"
-    );
+    let gain_arr: String = gains
+        .iter()
+        .map(|g| format!("{g:.2}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let props = format!("{{ params = [ \"ladspa.control\" [ {gain_arr} ] ] }}");
     pw_cli(&["s", &node_id.to_string(), "Props", &props])
         .await
         .map(|_| ())
-}
-
-/// Apply an EQ preset to a LADSPA sink.
-///
-/// If the module is already loaded (`module_id` is `Some`), updates gains live.
-/// Otherwise loads a fresh module and returns the new module index.
-pub async fn apply_preset(
-    preset: &EqPreset,
-    sink_name: &str,
-    master: &str,
-    module_id: Option<u32>,
-) -> Result<u32, LadspaError> {
-    let gains = gains_for_preset(preset);
-    if module_id.is_some() {
-        match update_gains_live(sink_name, &gains).await {
-            Ok(()) => return Ok(module_id.unwrap()),
-            Err(e) => {
-                warn!("ladspa: live update failed ({e}), reloading module");
-                if let Some(id) = module_id {
-                    let _ = unload_eq_module(id).await;
-                }
-            }
-        }
-    }
-    load_eq_module(sink_name, master, &gains).await
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -367,7 +349,12 @@ mod tests {
         };
         let gains = gains_for_preset(&preset);
         for (i, &idx) in FIXED_5_INDICES.iter().enumerate() {
-            assert_eq!(gains[idx], (i + 1) as f32, "mbeq[{idx}] should be {}", i + 1);
+            assert_eq!(
+                gains[idx],
+                (i + 1) as f32,
+                "mbeq[{idx}] should be {}",
+                i + 1
+            );
         }
         // Non-active indices = 0
         for (i, &g) in gains.iter().enumerate() {
@@ -419,7 +406,11 @@ mod tests {
 
     #[test]
     fn parametric10_missing_frequency_defaults_to_1000hz() {
-        let band = EqBand { gain: 2.0, frequency: None, filter_type: None };
+        let band = EqBand {
+            gain: 2.0,
+            frequency: None,
+            filter_type: None,
+        };
         let preset = EqPreset {
             name: "test".into(),
             band_mode: BandMode::Parametric10,
@@ -436,7 +427,10 @@ mod tests {
     fn control_arg_flat_all_zeros() {
         let gains = [0.0f32; 15];
         let s = control_arg(&gains);
-        assert_eq!(s, "0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00");
+        assert_eq!(
+            s,
+            "0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00"
+        );
     }
 
     #[test]
