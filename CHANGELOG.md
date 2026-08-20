@@ -42,6 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sidetone preview no longer stays silent when the underlying virtual audio routing had been rebuilt since the daemon started; the daemon also now self-heals that routing on restart.
 - RVC voice changer: phrase endings no longer degrade into random vocals/mumbling. The pipeline gated speech with a fixed absolute threshold, so post-phrase breath and room noise were amplified and "voiced" by the model at full speech level. Gating is now level-adaptive (relative to the running speech level), quiet word-final vowels are preserved via a periodicity check so endings like "…Ginny" keep their final syllable, and phrase-final vocal fry is stabilised with wider F0 gap interpolation plus a speaker-relative pitch floor. The pitch anchor is outlier-robust: keyboard clicks and similar transients can no longer poison it (previously heard as the whole voice shifting up) nor open the gate from silence (heard as vocal blips when typing).
 - Stopping the daemon no longer leaves an "audio return" (playback echoing back into the headset): the sidetone preview loopback survived teardown and was silently re-attached by the session manager to the headset's own monitor. The loopback is now pinned to its source, stale instances from crashed sessions are swept on preview start, and the preview restarts automatically when the voice-changer chain rebuilds (e.g. when switching models).
+- Fixed UI's settings and status data mixing.
+- Fixed i18n's newline processing.
 
 ## Changed
 
