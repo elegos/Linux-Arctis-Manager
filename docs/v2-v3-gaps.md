@@ -135,8 +135,8 @@ bands:
 |---|---|---|
 | `…EQ` D-Bus interface (9 methods, 1 signal) | `ArctisManagerDbusEQService` | **Done** — `GetEQCapabilities`, `GetEQSettings`, `SetEQSetting`, `ListPresets`, `GetPreset`, `SavePreset`, `DeletePreset`, `GetRunningStreams`, `GetSteamGames`; `EQChanged` signal |
 | Per-channel (media/chat) enable, backend, band_mode, preset | `EQSettings.{media,chat}` | **Done** — `eq::settings`: `ChannelEqSettings`, `EqBackend` (auto/ladspa/hardware), YAML persistence |
-| `GetEQCapabilities()` → `{has_hw_eq, hw_band_mode}` | N/A (v2 software-only) | **Done** — always returns `has_hw_eq: false` (device YAML EQ API support not yet wired) |
-| Hardware EQ via HID (fixed_10, parametric_10, fixed_5) | N/A | **Partial** — `eq::hardware` encodes payloads for NovaPro and ParametricNova; device YAML EQ APIs not yet declared |
+| `GetEQCapabilities()` → `{has_hw_eq, hw_band_mode}` | N/A (v2 software-only) | **Done** — reads device `apis` map: `custom_eq` present → `has_hw_eq: true, hw_band_mode: "fixed_10"` |
+| Hardware EQ via HID (fixed_10, parametric_10, fixed_5) | N/A | **Partial** — `eq::hardware` encodes payloads; `custom_eq` API declared in device YAML; `apply_channel_eq` still falls back to LADSPA when `backend = Hardware` — write path not yet wired |
 | LADSPA `mbeq_1197` pipeline (10-band simple, 15-band advanced) | `EQManager` | **Done** — `eq::ladspa` + `eq_manager`: all 3 band modes, live gain update, routing swap |
 | Preset library (YAML files in `eq_presets/`) | `list_presets()`, `EQPreset` | **Done** — `eq::preset`: `BandMode` (fixed_10/parametric_10/fixed_5), save/load/list |
 | App-aware overrides (stream / executable / Steam game) | `EQAppOverride` | **Partial** — data model in `eq::settings` (`AppMatcher`, `AppOverride`); activation logic not yet wired |
