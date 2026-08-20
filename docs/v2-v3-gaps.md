@@ -101,18 +101,49 @@ V2 bug: stored `node.nick` as the device id — rename breaks redirect. V3 fix: 
 
 ## Equalizer (EQ)
 
-Everything in this section is **Missing** in V3.
+### Architecture (V3 design)
 
-| Feature | V2 |
-|---|---|
-| `…EQ` D-Bus interface (8 methods, 1 signal) | `ArctisManagerDbusEQService` |
-| Per-channel (media/chat) enable, simple/advanced mode, preset | `EQSettings.{media,chat}` |
-| 10-band (simple) and 15-band (advanced) LADSPA `mbeq_1197` pipeline | `EQManager` |
-| Preset library (YAML files in `eq_presets/`) | `list_presets()`, `EQPreset` |
-| App-aware overrides (match by stream / executable / Steam game) | `EQAppOverride` |
-| PulseAudio stream monitor for app override activation | `EQManager.start_stream_monitor()` |
-| `GetSteamGames` (Steam library scan) | `steam_library.py` |
-| `GetRunningStreams` (PulseAudio client list) | `get_running_streams()` |
+Three preset band modes:
+
+| `band_mode` | Bands | Format | HW backend | LADSPA backend |
+|---|---|---|---|---|
+| `fixed_10` | 10 fixed frequencies | gain only, ±12 dB | Nova Pro wired/wireless, Nova Elite | `mbeq_1197` simple |
+| `parametric_10` | 10 free-frequency | freq + filter_type + gain | Nova 3/5/7 Gen2 | `mbeq_1197` advanced (15b, 5 locked@0) |
+| `fixed_5` | 5 fixed frequencies | gain only | Arctis 5 | `mbeq_1197` simple (5/10 active) |
+
+Backend selection per channel:
+- `auto`: hardware if device supports that `band_mode`, else LADSPA fallback
+- `ladspa`: always software (user-selectable regardless of device capability)
+- `hardware`: force HID EQ; silent fallback to LADSPA if unsupported
+
+App override activation:
+- LADSPA backend → PipeWire stream monitor (same as V2)
+- Hardware backend → foreground window monitor (compositor D-Bus)
+
+Preset YAML format (`~/.config/arctis_manager/eq_presets/<name>.yaml`):
+```yaml
+name: "Bass Boost"
+band_mode: fixed_10       # or parametric_10, fixed_5
+bands:
+  - gain: 4.0             # fixed_10 / fixed_5: gain only
+    # parametric_10 adds: frequency: <Hz>, filter_type: peaking|low_shelf|high_shelf
+```
+
+### Implementation status
+
+| Feature | V2 | V3 |
+|---|---|---|
+| `…EQ` D-Bus interface (8 methods, 1 signal) | `ArctisManagerDbusEQService` | **Missing** |
+| Per-channel (media/chat) enable, backend, band_mode, preset | `EQSettings.{media,chat}` | **Missing** |
+| `GetEQCapabilities()` → `{has_hw_eq, hw_band_mode}` | N/A (v2 software-only) | **Missing** |
+| Hardware EQ via HID (fixed_10, parametric_10, fixed_5) | N/A | **Missing** |
+| LADSPA `mbeq_1197` pipeline (10-band simple, 15-band advanced) | `EQManager` | **Missing** |
+| Preset library (YAML files in `eq_presets/`) | `list_presets()`, `EQPreset` | **Missing** |
+| App-aware overrides (stream / executable / Steam game) | `EQAppOverride` | **Missing** |
+| PipeWire stream monitor (LADSPA backend app override) | `EQManager.start_stream_monitor()` | **Missing** |
+| Foreground window monitor (hardware backend app override) | N/A | **Missing** |
+| `GetSteamGames` (Steam library scan) | `steam_library.py` | **Missing** |
+| `GetRunningStreams` (PulseAudio client list) | `get_running_streams()` | **Missing** |
 
 ---
 
