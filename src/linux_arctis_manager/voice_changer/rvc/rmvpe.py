@@ -11,8 +11,6 @@ import torch.nn.functional as F
 
 logger = logging.getLogger('RMVPE')
 
-_RMVPE_URL  = 'https://huggingface.co/Daswer123/RVC_Base/resolve/main/rmvpe.pt'
-_RMVPE_PATH = Path.home() / '.config' / 'arctis_manager' / 'models' / 'rmvpe.pt'
 
 
 # ── Mel spectrogram (torchaudio, no librosa/scipy) ────────────────────────────
@@ -222,30 +220,17 @@ class _E2E(nn.Module):
         return self.fc(x)                  # [B, T, 360]
 
 
-# ── Download + load ───────────────────────────────────────────────────────────
+# ── Load ─────────────────────────────────────────────────────────────────────
 
 def ensure_model() -> Path:
-    _RMVPE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    if not _RMVPE_PATH.exists():
-        logger.info('Downloading RMVPE pitch model (~180 MB) — one-time setup...')
-        tmp = _RMVPE_PATH.with_suffix('.tmp')
-        try:
-            try:
-                from huggingface_hub import hf_hub_download
-                local = hf_hub_download(
-                    repo_id='Daswer123/RVC_Base', filename='rmvpe.pt',
-                    local_dir=str(_RMVPE_PATH.parent),
-                )
-                Path(local).rename(_RMVPE_PATH)
-            except ImportError:
-                import urllib.request
-                urllib.request.urlretrieve(_RMVPE_URL, tmp)
-                tmp.rename(_RMVPE_PATH)
-        except Exception:
-            tmp.unlink(missing_ok=True)
-            raise
-        logger.info('RMVPE saved to %s', _RMVPE_PATH)
-    return _RMVPE_PATH
+    from linux_arctis_manager.voice_changer.rvc.model_downloader import RMVPE, model_path
+    path = model_path(RMVPE)
+    if path is None:
+        raise FileNotFoundError(
+            'RMVPE model not found. '
+            'Download it from the Voice Changer → Base Models section.'
+        )
+    return path
 
 
 class RMVPE:

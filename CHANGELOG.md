@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RVC guided voice calibration: a wizard prompts a short edge-case reading (word endings, nasals, sibilants, plosives, questions, trail-offs), renders it offline through three candidate tunings, and lets the user choose by ear (original recording included for reference), refine iteratively with narrower steps, re-record, or save the pick as the model's tuning.
 - RVC FAISS feature retrieval (`.index` files): when a feature index sits next to the model (`<model>.index`), an "Index rate" per-model setting blends each voice feature with its nearest training-set neighbours — stabilising out-of-distribution input such as creaky word endings. Model zips and HuggingFace downloads now extract/fetch the index automatically, renaming it to match the model file; models with an index show a "(with index)" suffix in the model list. Requires `faiss-cpu` (added to the AI environment installer).
 - RVC "Reset tuning" button next to the calibration wizard: reverts all of the current model's tuning parameters to the defaults after confirmation.
+- Base AI models (RMVPE pitch estimator ~180 MB, ContentVec encoder ~360 MB) are now downloaded from the official [`Linux-Arctis-Manager-AI-Models`](https://github.com/elegos/Linux-Arctis-Manager-AI-Models) GitHub release instead of HuggingFace. Each file is verified against a SHA-256 checksum published in the release. A consent dialog informs the user of the download source and limited liability before any file is transferred. The RVC panel is disabled until both models are present. Download progress (filename + percentage) is shown in the application footer.
 
 ## Fixed
 
@@ -41,6 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sidetone preview no longer stays silent when the underlying virtual audio routing had been rebuilt since the daemon started; the daemon also now self-heals that routing on restart.
 - RVC voice changer: phrase endings no longer degrade into random vocals/mumbling. The pipeline gated speech with a fixed absolute threshold, so post-phrase breath and room noise were amplified and "voiced" by the model at full speech level. Gating is now level-adaptive (relative to the running speech level), quiet word-final vowels are preserved via a periodicity check so endings like "…Ginny" keep their final syllable, and phrase-final vocal fry is stabilised with wider F0 gap interpolation plus a speaker-relative pitch floor. The pitch anchor is outlier-robust: keyboard clicks and similar transients can no longer poison it (previously heard as the whole voice shifting up) nor open the gate from silence (heard as vocal blips when typing).
 - Stopping the daemon no longer leaves an "audio return" (playback echoing back into the headset): the sidetone preview loopback survived teardown and was silently re-attached by the session manager to the headset's own monitor. The loopback is now pinned to its source, stale instances from crashed sessions are swept on preview start, and the preview restarts automatically when the voice-changer chain rebuilds (e.g. when switching models).
+- Fixed UI's settings and status data mixing.
+- Fixed i18n's newline processing.
 
 ## Changed
 

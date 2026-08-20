@@ -1,6 +1,6 @@
 [project]
 name = "linux-arctis-manager"
-version = "2.5.0-beta3"
+version = "2.5.0-beta4"
 description = "A replacement for SteelSeries GG software, to manage your Arctis device on Linux!"
 readme = "README.md"
 requires-python = ">=3.10"

@@ -5,7 +5,7 @@ from typing import Literal
 from PySide6.QtCore import QSize, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QHBoxLayout, QLabel,
-                               QMessageBox, QSizePolicy, QToolButton,
+                               QMessageBox, QProgressBar, QSizePolicy, QToolButton,
                                QVBoxLayout, QWidget)
 
 from linux_arctis_manager.constants import SYSTEMD_SERVICE_NAME
@@ -82,6 +82,8 @@ class QMainApp(QBaseDesktopApp):
         self.dbus_wrapper.sig_ai_complete.connect(self._on_ai_complete)
         self.dbus_wrapper.sig_download_progress.connect(self._on_download_progress)
         self.dbus_wrapper.sig_download_complete.connect(self._on_download_complete)
+        self.dbus_wrapper.sig_base_model_progress.connect(self._on_base_model_progress)
+        self.dbus_wrapper.sig_base_model_complete.connect(self._on_base_model_complete)
 
         self._ui_version = project_version()
         self._service_restart_attempted = False
@@ -190,6 +192,19 @@ class QMainApp(QBaseDesktopApp):
         # FOOTER
         footer = QHBoxLayout()
         footer.setContentsMargins(4, 0, 4, 2)
+
+        self._base_dl_filename = QLabel()
+        self._base_dl_filename.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self._base_dl_filename.setVisible(False)
+        footer.addWidget(self._base_dl_filename)
+
+        self._base_dl_bar = QProgressBar()
+        self._base_dl_bar.setMinimum(0)
+        self._base_dl_bar.setMaximum(100)
+        self._base_dl_bar.setFixedWidth(160)
+        self._base_dl_bar.setVisible(False)
+        footer.addWidget(self._base_dl_bar)
+
         self._ai_status_label = QLabel()
         self._ai_status_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         _italic = self._ai_status_label.font()
@@ -197,6 +212,7 @@ class QMainApp(QBaseDesktopApp):
         self._ai_status_label.setFont(_italic)
         self._ai_status_label.setVisible(False)
         footer.addWidget(self._ai_status_label, 1)
+
         self._version_label = QLabel(
             I18n.translate('ui', 'version_footer').format(version=project_version())
         )
@@ -299,6 +315,30 @@ class QMainApp(QBaseDesktopApp):
             self.mic_widget.vc_widget._pending_model_select = name
         QTimer.singleShot(500, self.mic_widget.vc_widget.refresh_models)
         QTimer.singleShot(600, self.mic_widget.vc_widget.on_download_done)
+
+    @Slot(str)
+    def _on_base_model_progress(self, message: str) -> None:
+        # Parse "filename: 42%" to update the progress bar, or show plain text.
+        import re
+        self._base_dl_filename.setVisible(True)
+        self._base_dl_bar.setVisible(True)
+        m = re.match(r'^(.+?):\s*(\d+)%$', message)
+        if m:
+            self._base_dl_filename.setText(m.group(1))
+            self._base_dl_bar.setValue(int(m.group(2)))
+        else:
+            self._base_dl_filename.setText(message)
+            self._base_dl_bar.setValue(0)
+        self.mic_widget.vc_widget.on_base_model_progress(message)
+
+    @Slot(bool, str)
+    def _on_base_model_complete(self, success: bool, message: str) -> None:
+        self._base_dl_bar.setValue(100 if success else 0)
+        QTimer.singleShot(3000, lambda: (
+            self._base_dl_filename.setVisible(False),
+            self._base_dl_bar.setVisible(False),
+        ))
+        self.mic_widget.vc_widget.on_base_model_complete(success, message)
 
     @Slot(str, str)
     def _show_error_dialog(self, title: str, message: str) -> None:
