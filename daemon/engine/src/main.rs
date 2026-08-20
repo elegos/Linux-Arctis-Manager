@@ -302,21 +302,9 @@ async fn run_device(
         }
         let _ = signal_tx.send(SignalEvent::StatusChanged);
 
-        // Redirect default sink to Arctis_Media on headset connect, if enabled.
-        {
-            let redirect = app_state
-                .lock()
-                .await
-                .general_settings
-                .redirect_audio_on_connect;
-            if redirect {
-                audio::set_default_sink(audio::MEDIA_SINK).await;
-            }
-        }
-
         // Create virtual audio sinks and apply the initial chatmix balance.
-        // Uses the shared audio state passed from main() so the EQ interface can
-        // also access the physical sink name and loopback module IDs.
+        // Must run before redirect so Arctis_Media exists when set_default_sink
+        // is called.
         {
             let mut guard = audio_shared.lock().await;
             if guard.is_none() {
@@ -329,6 +317,19 @@ async fn run_device(
                     }
                     Err(e) => warn!("audio setup failed for {path_str}: {e}"),
                 }
+            }
+        }
+
+        // Redirect default sink to Arctis_Media on headset connect, if enabled.
+        // Runs after setup_sinks so the sink exists.
+        {
+            let redirect = app_state
+                .lock()
+                .await
+                .general_settings
+                .redirect_audio_on_connect;
+            if redirect {
+                audio::set_default_sink(audio::MEDIA_SINK).await;
             }
         }
 
@@ -582,6 +583,84 @@ async fn main() {
     run_main_loop(configs, helper_sock, app_state, signal_tx, audio_shared).await;
 }
 
+/// Keep only devices that are useful to start a task for.
+///
+/// If the command interface for a given PID is present in the list, discard all
+/// other interfaces for that PID — they would only produce fallback matches and
+/// repeated device_init timeouts.  If the command interface is absent (headset
+/// off, only dongle enumerated), keep them so the reconnect loop can wait for it.
+fn filter_to_command_interfaces(
+    devs: &[hotplug::DeviceInfo],
+    configs: &[Arc<DeviceConfig>],
+) -> Vec<hotplug::DeviceInfo> {
+    use std::collections::HashSet;
+
+    // Collect (pid, command_interface) pairs that ARE present in the list.
+    let present_cmd: HashSet<(u16, u8)> = devs
+        .iter()
+        .flat_map(|d| {
+            configs.iter().find_map(|c| {
+                let pid_match = c
+                    .device
+                    .as_ref()
+                    .and_then(|dev| dev.variants.as_ref())
+                    .map(|vs| vs.iter().any(|v| v.product_id == d.pid))
+                    .unwrap_or(false);
+                if !pid_match {
+                    return None;
+                }
+                let cmd = c
+                    .device
+                    .as_ref()
+                    .and_then(|dev| dev.hid.as_ref())
+                    .and_then(|h| h.command_interface.as_ref())
+                    .map(|ci| ci.interface)?;
+                if d.interface_num == Some(cmd) {
+                    Some((d.pid, cmd))
+                } else {
+                    None
+                }
+            })
+        })
+        .collect();
+
+    devs.iter()
+        .filter(|d| {
+            // Find the expected command interface for this PID (if any).
+            let cmd_iface = configs.iter().find_map(|c| {
+                let pid_match = c
+                    .device
+                    .as_ref()
+                    .and_then(|dev| dev.variants.as_ref())
+                    .map(|vs| vs.iter().any(|v| v.product_id == d.pid))
+                    .unwrap_or(false);
+                if !pid_match {
+                    return None;
+                }
+                c.device
+                    .as_ref()
+                    .and_then(|dev| dev.hid.as_ref())
+                    .and_then(|h| h.command_interface.as_ref())
+                    .map(|ci| ci.interface)
+            });
+
+            match cmd_iface {
+                // No command_interface in config — keep the device as-is.
+                None => true,
+                // Command interface defined and THIS device is it — keep.
+                Some(cmd) if d.interface_num == Some(cmd) => true,
+                // Command interface defined, this device is NOT it, but the
+                // correct one IS present — skip to avoid a useless task.
+                Some(cmd) if present_cmd.contains(&(d.pid, cmd)) => false,
+                // Command interface defined but not yet enumerated — keep for
+                // the reconnect loop (headset off, only dongle visible).
+                _ => true,
+            }
+        })
+        .cloned()
+        .collect()
+}
+
 async fn run_main_loop(
     configs: Vec<Arc<DeviceConfig>>,
     helper_sock: PathBuf,
@@ -596,6 +675,11 @@ async fn run_main_loop(
             vec![]
         }
     };
+
+    // For each PID, if the command interface is already present in the scanned
+    // list, skip non-command interfaces — they would only produce fallback matches
+    // and useless device_init timeouts.
+    let existing = filter_to_command_interfaces(&existing, &configs);
 
     let mut tasks: HashMap<PathBuf, JoinHandle<()>> = HashMap::new();
 
