@@ -233,7 +233,14 @@ async fn run_device(
             }
         };
 
-        let mut session = DeviceSession::new((*config).clone(), fd);
+        let mut session = match DeviceSession::new((*config).clone(), fd) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!("failed to open transport for {path_str}: {e}");
+                tokio::time::sleep(Duration::from_secs(3)).await;
+                continue 'reconnect;
+            }
+        };
 
         // Inner loop: keep the fd open and wait reactively for the headset.
         // On timeout (headset off) we listen for any async HID event from the
