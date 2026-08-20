@@ -499,6 +499,10 @@ class QAddOverrideDialog(QDialog):
 # Per-channel EQ section
 # ---------------------------------------------------------------------------
 
+_BACKEND_IDX = {'auto': 0, 'ladspa': 1, 'hardware': 2}
+_BACKEND_VAL = {0: 'auto', 1: 'ladspa', 2: 'hardware'}
+
+
 class QChannelSection(QGroupBox):
     preset_saved              = Signal(object)   # dict with name/mode/bands
     preset_deleted            = Signal(str)      # preset name
@@ -536,6 +540,21 @@ class QChannelSection(QGroupBox):
         mr.addWidget(self._mode_group)
         mr.addStretch()
         layout.addLayout(mr)
+
+        # Backend row — visible only when device has hardware EQ support
+        br = QHBoxLayout()
+        br.addWidget(QLabel(I18n.translate('ui', 'eq_backend')))
+        self._backend_group = QCheckableButtonGroup()
+        self._backend_group.addButton(0, 'auto',     True,  'settings_values')
+        self._backend_group.addButton(1, 'ladspa',   False, 'settings_values')
+        self._backend_group.addButton(2, 'hardware', False, 'settings_values')
+        self._backend_group.new_value.connect(lambda _: self.preset_selection_changed.emit())
+        br.addWidget(self._backend_group)
+        br.addStretch()
+        self._backend_widget = QWidget()
+        self._backend_widget.setLayout(br)
+        self._backend_widget.setVisible(False)
+        layout.addWidget(self._backend_widget)
 
         # Preset row
         pr = QHBoxLayout()
@@ -576,12 +595,16 @@ class QChannelSection(QGroupBox):
     # Public API called by QEQWidget
     # ------------------------------------------------------------------
 
+    def set_hw_eq_visible(self, visible: bool) -> None:
+        self._backend_widget.setVisible(visible)
+
     def load_settings(self, settings: dict, presets: dict[str, dict]) -> None:
         self._presets = presets
 
-        enabled = settings.get('enabled', False)
-        mode    = settings.get('mode', 'simple')
+        enabled     = settings.get('enabled', False)
+        mode        = settings.get('mode', 'simple')
         preset_name = settings.get('preset_name')
+        backend     = settings.get('backend', 'auto')
 
         self._enable.toggle.blockSignals(True)
         self._enable.toggle.setChecked(enabled)
@@ -590,6 +613,10 @@ class QChannelSection(QGroupBox):
         mode_val = 1 if mode == 'advanced' else 0
         for btn in self._mode_group.buttons:
             btn.setChecked(btn.property('value') == mode_val)
+
+        bidx = _BACKEND_IDX.get(backend, 0)
+        for btn in self._backend_group.buttons:
+            btn.setChecked(btn.property('value') == bidx)
 
         self._rebuild_preset_combo(preset_name)
 
@@ -603,6 +630,7 @@ class QChannelSection(QGroupBox):
             'enabled': self._enable.toggle.isChecked(),
             'mode': self._current_mode(),
             'preset_name': self._current_preset_name(),
+            'backend': self._current_backend(),
         }
 
     # ------------------------------------------------------------------
@@ -614,6 +642,12 @@ class QChannelSection(QGroupBox):
             if btn.isChecked():
                 return 'advanced' if btn.property('value') == 1 else 'simple'
         return 'simple'
+
+    def _current_backend(self) -> str:
+        for btn in self._backend_group.buttons:
+            if btn.isChecked():
+                return _BACKEND_VAL.get(btn.property('value'), 'auto')
+        return 'auto'
 
     def _current_preset_name(self) -> str | None:
         txt = self._preset_combo.currentText()
@@ -808,6 +842,7 @@ class QEQWidget(QWidget):
         self._running_streams: list[str] = []
         self._initial_load_done = False   # prevents preset-list refresh from resetting the combo
         self._ladspa_available = True
+        self._has_hw_eq = False
 
         self._apply_timer = QTimer(self)
         self._apply_timer.setSingleShot(True)
@@ -919,7 +954,9 @@ class QEQWidget(QWidget):
     def _on_eq_capabilities(self, caps: dict) -> None:
         available = bool(caps.get('ladspa_available', True))
         plugin = caps.get('ladspa_plugin', 'mbeq_1197')
+        has_hw_eq = bool(caps.get('has_hw_eq', False))
         self._ladspa_available = available
+        self._has_hw_eq = has_hw_eq
         self._ladspa_frame.setVisible(not available)
         if not available:
             msg = '\n'.join([
@@ -932,6 +969,8 @@ class QEQWidget(QWidget):
             ])
             self._ladspa_warn_label.setText(msg)
             logger.warning('LADSPA plugin %r not found — EQ controls disabled', plugin)
+        self._media_section.set_hw_eq_visible(has_hw_eq)
+        self._chat_section.set_hw_eq_visible(has_hw_eq)
         self._media_section.setEnabled(available)
         self._chat_section.setEnabled(available)
         self._apply_btn.setEnabled(available)
