@@ -1,0 +1,237 @@
+// EQ audio runtime state: tracks which LADSPA modules and loopbacks are active
+// for each channel so the D-Bus interface can swap them when EQ is toggled.
+
+use std::sync::Arc;
+
+use tokio::sync::Mutex;
+use tracing::{info, warn};
+
+use crate::audio::{self, AudioSetup};
+use crate::eq::ladspa;
+use crate::eq::preset::{load_preset, preset_path};
+use crate::eq::settings::{ChannelEqSettings, EqBackend};
+
+/// Sink names for the EQ virtual sinks.
+pub const MEDIA_EQ_SINK: &str = "Arctis_Media_EQ_internal";
+pub const CHAT_EQ_SINK: &str = "Arctis_Chat_EQ_internal";
+
+// ── Per-channel runtime ───────────────────────────────────────────────────────
+
+#[derive(Debug, Default)]
+struct ChannelEqState {
+    /// LADSPA `module-ladspa-sink` module index (when loaded).
+    ladspa_module_id: Option<u32>,
+    /// Loopback module from `<Channel>.monitor → EQ sink` (when loaded).
+    eq_loopback_id: Option<u32>,
+    /// Whether the channel is currently routing through the EQ sink.
+    active: bool,
+}
+
+// ── EQ runtime ────────────────────────────────────────────────────────────────
+
+/// Shared state managed by the EQ D-Bus interface.
+/// Wrapped in `Arc<Mutex<_>>` and passed to `EqInterface`.
+#[derive(Debug, Default)]
+pub struct EqRuntime {
+    media: ChannelEqState,
+    chat: ChannelEqState,
+}
+
+impl EqRuntime {
+    pub fn new() -> Arc<Mutex<Self>> {
+        Arc::new(Mutex::new(Self::default()))
+    }
+}
+
+// ── Apply / tear-down ─────────────────────────────────────────────────────────
+
+/// Apply (or update) the EQ on a single channel.
+///
+/// If LADSPA is not yet loaded for this channel:
+///   1. Load a `module-ladspa-sink` (channel_eq_sink → physical).
+///   2. Unload the direct channel loopback.
+///   3. Load a new loopback: channel.monitor → channel_eq_sink.
+///   4. Update `AudioSetup` loopback ID and `EqRuntime` state.
+///
+/// If LADSPA is already loaded, push new gains live (no reload).
+///
+/// Returns `true` on success.
+pub async fn apply_channel_eq(
+    ch_settings: &ChannelEqSettings,
+    channel: &str, // "media" or "chat"
+    base_dir: &std::path::Path,
+    audio_shared: &Arc<Mutex<Option<AudioSetup>>>,
+    eq_rt: &Arc<Mutex<EqRuntime>>,
+) -> bool {
+    let preset_name = &ch_settings.preset;
+    let _band_mode = ch_settings.band_mode;
+
+    // Load the preset.
+    let preset_file = preset_path(base_dir, preset_name);
+    let preset = match load_preset(&preset_file) {
+        Ok(p) => p,
+        Err(e) => {
+            warn!("eq: cannot load preset '{preset_name}': {e}");
+            return false;
+        }
+    };
+
+    // Resolve backend: hardware EQ not yet supported in v3 device configs,
+    // so auto/hardware both fall back to LADSPA for now.
+    let use_ladspa = !matches!(ch_settings.backend, EqBackend::Hardware);
+    if !use_ladspa {
+        warn!("eq: hardware backend not yet implemented; falling back to LADSPA");
+    }
+
+    let gains = ladspa::gains_for_preset(&preset);
+    let (eq_sink, source_sink) = if channel == "media" {
+        (MEDIA_EQ_SINK, audio::MEDIA_SINK)
+    } else {
+        (CHAT_EQ_SINK, audio::CHAT_SINK)
+    };
+
+    // Get the physical sink name and current loopback ID.
+    let (physical, direct_lb_id) = {
+        let guard = audio_shared.lock().await;
+        match guard.as_ref() {
+            None => {
+                warn!("eq: no audio setup; cannot apply EQ for {channel}");
+                return false;
+            }
+            Some(s) => {
+                let lb = if channel == "media" { s.media_loopback } else { s.chat_loopback };
+                (s.physical_sink.clone(), lb)
+            }
+        }
+    };
+
+    // Check whether the LADSPA module is already live.
+    let existing_ladspa_id = {
+        let rt = eq_rt.lock().await;
+        if channel == "media" { rt.media.ladspa_module_id } else { rt.chat.ladspa_module_id }
+    };
+
+    if let Some(id) = existing_ladspa_id {
+        // Already loaded: push gains live.
+        if let Err(e) = ladspa::update_gains_live(eq_sink, &gains).await {
+            warn!("eq: live update failed for {channel} ({e}); reloading");
+            // Fall through to reload path.
+            let _ = id;
+        } else {
+            info!("eq: live gains updated for {channel}");
+            return true;
+        }
+    }
+
+    // Load LADSPA sink.
+    let ladspa_id = match ladspa::load_eq_module(eq_sink, &physical, &gains).await {
+        Ok(id) => id,
+        Err(e) => {
+            warn!("eq: failed to load LADSPA sink for {channel}: {e}");
+            return false;
+        }
+    };
+
+    // Remove the direct loopback (channel → physical) to avoid double playback.
+    if let Err(e) = crate::audio::unload_module_by_id(direct_lb_id).await {
+        warn!("eq: failed to unload direct loopback {direct_lb_id}: {e}");
+    }
+
+    // Create new loopback: channel.monitor → eq_sink.
+    let source = format!("{source_sink}.monitor");
+    let lb_args = format!("source={source} sink={eq_sink} latency_msec=0");
+    let new_lb_id = match crate::audio::load_module_pub("module-loopback", &lb_args).await {
+        Some(id) => id,
+        None => {
+            warn!("eq: failed to create EQ loopback for {channel}");
+            // Attempt to restore the original loopback.
+            let restore_args = format!("source={source} sink={physical} latency_msec=0");
+            if let Some(id) = crate::audio::load_module_pub("module-loopback", &restore_args).await {
+                let mut guard = audio_shared.lock().await;
+                if let Some(s) = guard.as_mut() {
+                    if channel == "media" { s.media_loopback = id; } else { s.chat_loopback = id; }
+                }
+            }
+            return false;
+        }
+    };
+
+    // Store new IDs.
+    {
+        let mut guard = audio_shared.lock().await;
+        if let Some(s) = guard.as_mut() {
+            if channel == "media" { s.media_loopback = new_lb_id; } else { s.chat_loopback = new_lb_id; }
+        }
+    }
+    {
+        let mut rt = eq_rt.lock().await;
+        let ch = if channel == "media" { &mut rt.media } else { &mut rt.chat };
+        ch.ladspa_module_id = Some(ladspa_id);
+        ch.eq_loopback_id = Some(new_lb_id);
+        ch.active = true;
+    }
+
+    info!("eq: LADSPA EQ enabled for {channel} (ladspa={ladspa_id}, loopback={new_lb_id})");
+    true
+}
+
+/// Disable EQ on a channel: remove the LADSPA sink and EQ loopback, restore
+/// the direct loopback to the physical sink.
+pub async fn disable_channel_eq(
+    channel: &str,
+    audio_shared: &Arc<Mutex<Option<AudioSetup>>>,
+    eq_rt: &Arc<Mutex<EqRuntime>>,
+) {
+    let (ladspa_id, eq_lb_id) = {
+        let rt = eq_rt.lock().await;
+        let ch = if channel == "media" { &rt.media } else { &rt.chat };
+        (ch.ladspa_module_id, ch.eq_loopback_id)
+    };
+
+    let (physical, source_sink) = {
+        let guard = audio_shared.lock().await;
+        match guard.as_ref() {
+            None => return,
+            Some(s) => (s.physical_sink.clone(), if channel == "media" {
+                audio::MEDIA_SINK.to_owned()
+            } else {
+                "Arctis_Chat".to_owned()
+            }),
+        }
+    };
+
+    // Remove EQ loopback.
+    if let Some(id) = eq_lb_id {
+        if let Err(e) = crate::audio::unload_module_by_id(id).await {
+            warn!("eq: failed to unload EQ loopback {id}: {e}");
+        }
+    }
+
+    // Remove LADSPA sink.
+    if let Some(id) = ladspa_id {
+        let _ = ladspa::unload_eq_module(id).await;
+    }
+
+    // Restore direct loopback: channel.monitor → physical.
+    let source = format!("{source_sink}.monitor");
+    let args = format!("source={source} sink={physical} latency_msec=0");
+    let restored_lb_id = crate::audio::load_module_pub("module-loopback", &args).await;
+
+    {
+        let mut guard = audio_shared.lock().await;
+        if let Some(s) = guard.as_mut() {
+            if let Some(id) = restored_lb_id {
+                if channel == "media" { s.media_loopback = id; } else { s.chat_loopback = id; }
+            }
+        }
+    }
+    {
+        let mut rt = eq_rt.lock().await;
+        let ch = if channel == "media" { &mut rt.media } else { &mut rt.chat };
+        ch.ladspa_module_id = None;
+        ch.eq_loopback_id = None;
+        ch.active = false;
+    }
+
+    info!("eq: EQ disabled for {channel}");
+}
