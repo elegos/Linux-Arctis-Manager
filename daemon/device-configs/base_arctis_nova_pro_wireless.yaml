@@ -27,6 +27,16 @@ transforms:
     default: UNKNOWN
     values: {1: DISCONNECTED, 2: CHARGING, 4: CHARGED, 8: DISCHARGING}
 
+  wireless_mode_to_label:
+    type: case_int_to_str
+    default: UNKNOWN
+    values: {0: SPEED, 1: RANGE}
+
+  bt_call_default_to_label:
+    type: case_int_to_str
+    default: UNKNOWN
+    values: {0: OFF, 1: ON, 2: AUTO}
+
 structs:
   save_to_flash:
     - {name: report_id, type: uint8, constant: 0x06}
@@ -349,7 +359,7 @@ sync_events:
   0xB3:
     emit: bt_call_default_changed
     fields:
-      - {name: bt_call_default, byte: 2, display_type: on_off}
+      - {name: bt_call_default, byte: 2, transform: bt_call_default_to_label}
 
   0xB5:
     emit: wireless_connection_changed
@@ -378,7 +388,7 @@ sync_events:
   0xC3:
     emit: wireless_mode_changed
     fields:
-      - {name: wireless_mode, byte: 2}
+      - {name: wireless_mode, byte: 2, transform: wireless_mode_to_label}
 
 sync_read:
   - struct: audio_settings
@@ -402,10 +412,10 @@ sync_read:
   - struct: wireless_settings
     maps:
       - {emit: bluetooth_startup_changed,       field: bt_power_default,         display_type: on_off}
-      - {emit: bt_call_default_changed,          field: bt_call_default,          display_type: on_off}
+      - {emit: bt_call_default_changed,          field: bt_call_default,          transform: bt_call_default_to_label}
       - {emit: muted_mic_brightness_changed,     field: muted_mic_brightness,     display_type: percentage}
       - {emit: power_inactivity_timer_changed,   field: power_inactivity_timer,   transform: timer_enum_to_minutes}
-      - {emit: wireless_mode_changed,            field: wireless_mode}
+      - {emit: wireless_mode_changed,            field: wireless_mode,            transform: wireless_mode_to_label}
       - {emit: wireless_connection_changed,      field: radio_connection_status,  transform: radio_connection_to_label}
       - emit: battery_changed
         fields: [headset_batt_level, charger_batt_level]
