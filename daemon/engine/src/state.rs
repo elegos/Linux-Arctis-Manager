@@ -50,6 +50,9 @@ pub enum DeviceCommand {
 #[derive(Clone, Debug)]
 pub enum SignalEvent {
     StatusChanged,
+    SettingsChanged {
+        json: String,
+    },
     DeviceConnected {
         pid: u16,
         name: String,
@@ -96,6 +99,22 @@ pub fn event_value_to_json(ev: &EventValue) -> JsonValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::sync::broadcast;
+
+    #[test]
+    fn settings_changed_roundtrips_on_broadcast() {
+        let (tx, mut rx) = broadcast::channel(4);
+        let payload = r#"{"general":{},"device":{},"settings_config":{}}"#;
+        tx.send(SignalEvent::SettingsChanged {
+            json: payload.to_string(),
+        })
+        .unwrap();
+        let ev = rx.try_recv().unwrap();
+        match ev {
+            SignalEvent::SettingsChanged { json } => assert_eq!(json, payload),
+            _ => panic!("wrong variant"),
+        }
+    }
 
     #[test]
     fn event_value_to_json_u8() {
