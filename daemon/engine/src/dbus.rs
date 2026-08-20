@@ -966,8 +966,6 @@ mod tests {
             config: Arc::new(config),
             vid: 0,
             pid: 0,
-            name: "test".to_string(),
-            capabilities: vec![],
             status,
             cmd_tx,
         }
@@ -1037,8 +1035,6 @@ mod tests {
                 config: Arc::new(config),
                 vid: 0,
                 pid: 0,
-                name: "test".to_string(),
-                capabilities: vec![],
                 status,
                 cmd_tx: tx,
             },
