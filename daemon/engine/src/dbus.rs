@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::state::SignalEvent as SE;
 use device_config::codec::FieldValue;
 use device_config::{DeviceConfig, FieldDef, FieldOrRef, FieldType, StructDef};
 use serde_json::{Map, Value as JsonValue};
@@ -54,6 +55,7 @@ impl StatusInterface {
 
 struct SettingsInterface {
     state: Arc<Mutex<AppState>>,
+    signal_tx: broadcast::Sender<SignalEvent>,
 }
 
 #[interface(name = "name.giacomofurlan.ArctisManager.Next.Settings")]
@@ -83,18 +85,29 @@ impl SettingsInterface {
             (api, fv)
         };
 
-        // Re-acquire to send the command
-        let state = self.state.lock().await;
-        let Some(entry) = state.devices.values().next() else {
-            return false;
+        let sent = {
+            let state = self.state.lock().await;
+            let Some(entry) = state.devices.values().next() else {
+                return false;
+            };
+            let mut values = HashMap::new();
+            values.insert(setting.to_string(), field_value);
+            entry
+                .cmd_tx
+                .send(DeviceCommand::WriteApi { api_name, values })
+                .await
+                .is_ok()
         };
-        let mut values = HashMap::new();
-        values.insert(setting.to_string(), field_value);
-        entry
-            .cmd_tx
-            .send(DeviceCommand::WriteApi { api_name, values })
-            .await
-            .is_ok()
+
+        if sent {
+            let json = {
+                let s = self.state.lock().await;
+                build_settings_json(&s)
+            };
+            let _ = self.signal_tx.send(SE::SettingsChanged { json });
+        }
+
+        sent
     }
 
     async fn get_version(&self) -> String {
@@ -104,12 +117,17 @@ impl SettingsInterface {
     async fn get_list_options(&self, _list_name: &str) -> String {
         "[]".to_string()
     }
+
+    #[zbus(signal)]
+    async fn settings_changed(emitter: &SignalEmitter<'_>, settings_json: &str)
+        -> zbus::Result<()>;
 }
 
 // ── Config interface ──────────────────────────────────────────────────────────
 
 struct ConfigInterface {
     state: Arc<Mutex<AppState>>,
+    signal_tx: broadcast::Sender<SignalEvent>,
 }
 
 #[interface(name = "name.giacomofurlan.ArctisManager.Next.Config")]
@@ -122,8 +140,12 @@ impl ConfigInterface {
         let dir_refs: Vec<&std::path::Path> =
             dirs.iter().map(std::path::PathBuf::as_path).collect();
         let new_configs = crate::load_configs_from_dirs(&dir_refs);
-        let mut state = self.state.lock().await;
-        state.configs = new_configs;
+        let json = {
+            let mut state = self.state.lock().await;
+            state.configs = new_configs;
+            build_settings_json(&state)
+        };
+        let _ = self.signal_tx.send(SE::SettingsChanged { json });
         true
     }
 }
@@ -137,6 +159,7 @@ impl ConfigInterface {
 pub async fn start_dbus_service(
     state: Arc<Mutex<AppState>>,
     mut signal_rx: broadcast::Receiver<SignalEvent>,
+    signal_tx: broadcast::Sender<SignalEvent>,
 ) -> zbus::Result<zbus::Connection> {
     let conn = connection::Builder::session()?
         .name(BUS_NAME)?
@@ -150,19 +173,21 @@ pub async fn start_dbus_service(
             SETTINGS_PATH,
             SettingsInterface {
                 state: Arc::clone(&state),
+                signal_tx: signal_tx.clone(),
             },
         )?
         .serve_at(
             CONFIG_PATH,
             ConfigInterface {
                 state: Arc::clone(&state),
+                signal_tx,
             },
         )?
         .build()
         .await?;
 
-    // Owned emitters — valid for the lifetime of `conn`.
     let status_emitter = SignalEmitter::new(&conn, STATUS_PATH)?.into_owned();
+    let settings_emitter = SignalEmitter::new(&conn, SETTINGS_PATH)?.into_owned();
 
     tokio::spawn(async move {
         loop {
@@ -183,6 +208,13 @@ pub async fn start_dbus_service(
                     };
                     if let Err(e) = StatusInterface::status_changed(&status_emitter, &json).await {
                         error!("StatusChanged signal failed: {e}");
+                    }
+                }
+                SignalEvent::SettingsChanged { json } => {
+                    if let Err(e) =
+                        SettingsInterface::settings_changed(&settings_emitter, &json).await
+                    {
+                        error!("SettingsChanged signal failed: {e}");
                     }
                 }
                 SignalEvent::DeviceConnected {
@@ -466,6 +498,24 @@ mod tests {
             v.split('.').count() >= 2,
             "'{v}' has fewer than 2 version components"
         );
+    }
+
+    #[test]
+    fn settings_changed_event_carries_json() {
+        use tokio::sync::broadcast;
+        let (tx, mut rx) = broadcast::channel::<SignalEvent>(4);
+        let payload = r#"{"general":{},"device":{"volume":50},"settings_config":{}}"#;
+        tx.send(SignalEvent::SettingsChanged {
+            json: payload.to_string(),
+        })
+        .unwrap();
+        match rx.try_recv().unwrap() {
+            SignalEvent::SettingsChanged { json } => {
+                let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+                assert_eq!(v["device"]["volume"], 50);
+            }
+            _ => panic!("wrong variant"),
+        }
     }
     use device_config::{ApiDef, ApiOp, FieldType, Transport};
     use std::path::PathBuf;

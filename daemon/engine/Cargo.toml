@@ -10,6 +10,10 @@ build = "build.rs"
 name = "lam-daemon"
 path = "src/main.rs"
 
+[[bin]]
+name = "lam-integrity-check"
+path = "src/bin/integrity_check.rs"
+
 [dependencies]
 device-config = { workspace = true }
 hid-transport = { workspace = true }

@@ -75,6 +75,9 @@ class DbusWrapper(QObject):
         status_signal_thread = Thread(target=lambda: asyncio.run(self._register_status_dbus_signal()))
         status_signal_thread.start()
 
+        settings_signal_thread = Thread(target=lambda: asyncio.run(self._register_settings_dbus_signal()))
+        settings_signal_thread.start()
+
         vc_signal_thread = Thread(target=lambda: asyncio.run(self._register_vc_signals()), daemon=True)
         vc_signal_thread.start()
     
@@ -90,6 +93,19 @@ class DbusWrapper(QObject):
             await self._stop_status_signal_future
         except Exception as e:
             self.logger.warning('status signal registration failed: %s', e)
+
+    async def _register_settings_dbus_signal(self):
+        try:
+            def callback(settings_json: str) -> None:
+                self.sig_settings.emit(json.loads(settings_json) or {})
+
+            (await self.settings_iface()).on_settings_changed(callback) # type: ignore
+
+            loop = asyncio.get_running_loop()
+            stop_future: asyncio.Future = loop.create_future()
+            await stop_future
+        except Exception as e:
+            self.logger.warning('settings signal registration failed: %s', e)
 
     async def _register_vc_signals(self):
         try:

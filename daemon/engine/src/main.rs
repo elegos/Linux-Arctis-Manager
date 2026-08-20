@@ -430,7 +430,7 @@ async fn main() {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    info!("lam-daemon {}", env!("CARGO_PKG_VERSION"));
+    info!("lam-daemon {}", env!("LAM_VERSION"));
 
     let cfg_dirs = config_dirs();
     let dir_refs: Vec<&Path> = cfg_dirs.iter().map(PathBuf::as_path).collect();
@@ -459,7 +459,13 @@ async fn main() {
     let (signal_tx, signal_rx) = broadcast::channel::<SignalEvent>(64);
 
     // Start D-Bus service.  On failure, continue without it (headless / test env).
-    let _dbus_conn = match dbus::start_dbus_service(Arc::clone(&app_state), signal_rx).await {
+    let _dbus_conn = match dbus::start_dbus_service(
+        Arc::clone(&app_state),
+        signal_rx,
+        signal_tx.clone(),
+    )
+    .await
+    {
         Ok(c) => {
             info!("D-Bus service registered");
             Some(c)
