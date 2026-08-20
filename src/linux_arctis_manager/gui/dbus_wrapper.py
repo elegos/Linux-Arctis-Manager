@@ -142,6 +142,9 @@ class DbusWrapper(QObject):
         self._status_signal_loop: asyncio.AbstractEventLoop|None = None
         self._stop_status_signal_future: asyncio.Future|None = None
 
+        self._settings_signal_loop: asyncio.AbstractEventLoop|None = None
+        self._stop_settings_signal_future: asyncio.Future|None = None
+
         self._vc_signal_loop: asyncio.AbstractEventLoop|None = None
         self._stop_vc_signal_future: asyncio.Future|None = None
 
@@ -199,9 +202,9 @@ class DbusWrapper(QObject):
 
             (await self.settings_iface()).on_settings_changed(callback) # type: ignore
 
-            loop = asyncio.get_running_loop()
-            stop_future: asyncio.Future = loop.create_future()
-            await stop_future
+            self._settings_signal_loop = asyncio.get_running_loop()
+            self._stop_settings_signal_future = self._settings_signal_loop.create_future()
+            await self._stop_settings_signal_future
         except Exception as e:
             self.logger.warning('settings signal registration failed: %s', e)
 
@@ -265,6 +268,8 @@ class DbusWrapper(QObject):
         self._stopping = True
         if self._status_signal_loop and self._stop_status_signal_future:
             self._status_signal_loop.call_soon_threadsafe(self._stop_status_signal_future.set_result, None)
+        if self._settings_signal_loop and self._stop_settings_signal_future:
+            self._settings_signal_loop.call_soon_threadsafe(self._stop_settings_signal_future.set_result, None)
         if self._vc_signal_loop and self._stop_vc_signal_future:
             self._vc_signal_loop.call_soon_threadsafe(self._stop_vc_signal_future.set_result, None)
 
