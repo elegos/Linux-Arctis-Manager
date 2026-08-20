@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (v3 daemon)
+
+- v3: `representation` section in device YAML configs maps category names to status field lists; `GetStatus` now returns fields grouped by category instead of all under `"headset"`.
+
 ### Added
 
 - Software EQ via PulseAudio LADSPA (`mbeq_1197` from `swh-plugins`): per-channel (media and chat) equaliser with simple (10-band) and advanced (15-band) modes, ±12 dB gain range per band.

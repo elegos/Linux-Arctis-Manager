@@ -304,6 +304,10 @@ pub struct DeviceConfig {
     pub lifecycle: Option<Lifecycle>,
     #[serde(default)]
     pub device: Option<DeviceSection>,
+    /// Maps category names to the ordered list of status field names to display.
+    /// Absent on base configs that inherit the representation from a leaf config.
+    #[serde(default)]
+    pub representation: Option<HashMap<String, Vec<String>>>,
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -394,6 +398,11 @@ fn merge(mut base: DeviceConfig, overlay: DeviceConfig) -> DeviceConfig {
     // Device section: overlay wins.
     if overlay.device.is_some() {
         base.device = overlay.device;
+    }
+
+    // Representation: overlay wins.
+    if overlay.representation.is_some() {
+        base.representation = overlay.representation;
     }
 
     base.extends = None;
@@ -689,6 +698,44 @@ structs:
         assert!(
             matches!(&fields[1], FieldOrRef::Ref { struct_ref } if struct_ref == "custom_eq_setting")
         );
+    }
+
+    #[test]
+    fn representation_section_parses_and_merges() {
+        let dir = tempfile::tempdir().unwrap();
+        write_file(
+            dir.path(),
+            "base.yaml",
+            r#"
+representation:
+  headset:
+    - headset_batt_level
+    - charging_status
+  wireless:
+    - wireless_mode
+"#,
+        );
+        let path = write_file(
+            dir.path(),
+            "device.yaml",
+            r#"
+extends: base
+
+representation:
+  headset:
+    - headset_batt_level
+  mic:
+    - mic_volume
+"#,
+        );
+
+        let cfg = load(&path, &[dir.path()]).unwrap();
+        let rep = cfg.representation.expect("representation must be present");
+        // overlay wins
+        assert!(rep["headset"].contains(&"headset_batt_level".to_string()));
+        assert!(!rep["headset"].contains(&"charging_status".to_string()));
+        assert!(rep.contains_key("mic"));
+        assert!(!rep.contains_key("wireless"));
     }
 
     #[test]

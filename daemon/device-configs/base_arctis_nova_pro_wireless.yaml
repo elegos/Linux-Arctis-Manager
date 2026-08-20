@@ -422,3 +422,29 @@ lifecycle:
     - call: disable_chatmix
     - call: disable_sonar
     - call: save_to_flash
+
+representation:
+  headset:
+    - headset_batt_level
+    - charger_batt_level
+    - headset_batt_status
+    - charging_status
+    - device_gain
+    - volume
+    - surround
+  mic:
+    - mic_volume
+    - sidetone
+    - mic_muted
+    - muted_mic_brightness
+  bluetooth:
+    - bt_power_default
+    - bt_call_default
+    - bt_connection_mode
+    - bt_connection_status
+  wireless:
+    - radio_connection_status
+    - wireless_mode
+    - power_inactivity_timer
+    - transparent_level
+    - transparency_mode

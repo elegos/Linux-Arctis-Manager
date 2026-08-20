@@ -251,17 +251,39 @@ pub async fn start_dbus_service(
 // ── JSON helpers ──────────────────────────────────────────────────────────────
 
 fn build_status_json(state: &AppState) -> String {
-    let fields: Map<String, JsonValue> = state
-        .devices
-        .values()
-        .flat_map(|entry| entry.status.iter().map(|(k, v)| (k.clone(), v.clone())))
-        .collect();
+    let Some(entry) = state.devices.values().next() else {
+        return "{}".to_string();
+    };
 
-    if fields.is_empty() {
+    if entry.status.is_empty() {
         return "{}".to_string();
     }
 
-    // GUI expects {category: {field: {value, type}}}; group everything under "headset".
+    if let Some(representation) = &entry.config.representation {
+        let mut result: Map<String, JsonValue> = Map::new();
+        for (category, field_names) in representation {
+            let mut cat_map: Map<String, JsonValue> = Map::new();
+            for field_name in field_names {
+                if let Some(val) = entry.status.get(field_name) {
+                    cat_map.insert(field_name.clone(), val.clone());
+                }
+            }
+            if !cat_map.is_empty() {
+                result.insert(category.clone(), JsonValue::Object(cat_map));
+            }
+        }
+        if result.is_empty() {
+            return "{}".to_string();
+        }
+        return serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string());
+    }
+
+    // Fallback: group all fields under "headset" when no representation is defined.
+    let fields: Map<String, JsonValue> = entry
+        .status
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
     let result = serde_json::json!({"headset": fields});
     serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
 }
@@ -574,6 +596,49 @@ mod tests {
         // Fields are nested under the "headset" category for GUI compatibility.
         assert_eq!(json["headset"]["battery"]["value"], 80);
         assert_eq!(json["headset"]["battery"]["type"], "uint8");
+    }
+
+    #[test]
+    fn build_status_json_uses_representation() {
+        let (tx, _rx) = mpsc::channel(1);
+        let mut status = HashMap::new();
+        status.insert(
+            "battery".to_string(),
+            serde_json::json!({"value": 80, "type": "uint8"}),
+        );
+        status.insert(
+            "wireless_mode".to_string(),
+            serde_json::json!({"value": "speed", "type": "label"}),
+        );
+        let mut rep = HashMap::new();
+        rep.insert("headset".to_string(), vec!["battery".to_string()]);
+        rep.insert("wireless".to_string(), vec!["wireless_mode".to_string()]);
+        let config = DeviceConfig {
+            representation: Some(rep),
+            ..DeviceConfig::default()
+        };
+        let mut devices = HashMap::new();
+        devices.insert(
+            std::path::PathBuf::from("/dev/hidraw0"),
+            crate::state::DeviceEntry {
+                config: Arc::new(config),
+                pid: 0,
+                name: "test".to_string(),
+                capabilities: vec![],
+                status,
+                cmd_tx: tx,
+            },
+        );
+        let state = AppState {
+            configs: vec![],
+            devices,
+            config_dirs: vec![std::path::PathBuf::from("/tmp")],
+        };
+        let json: JsonValue = serde_json::from_str(&build_status_json(&state)).unwrap();
+        assert_eq!(json["headset"]["battery"]["value"], 80);
+        assert_eq!(json["wireless"]["wireless_mode"]["value"], "speed");
+        // mic category was not in representation, so must be absent
+        assert!(json.get("mic").is_none());
     }
 
     #[test]
