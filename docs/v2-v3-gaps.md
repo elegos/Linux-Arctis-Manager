@@ -28,9 +28,9 @@
 | `GetSettings` — `settings_config` for general fields | `GeneralSettings.settings_config` | **Missing** |
 | `SetSetting` (device fields) | writes `device_settings` + sends HID | **Done** — `WriteApi` command via DSL |
 | `SetSetting` (general fields) | writes `GeneralSettings` + persists | **Missing** |
-| `GetListOptions("pulse_audio_devices")` | enumerates PulseAudio sinks | **Missing** — returns `"[]"` |
-| `GetVersion` | method on Settings interface | **Partial** — `version` property on **Config** interface instead |
-| `SettingsChanged` signal | fired on any setting write | **Missing** |
+| `GetListOptions("pulse_audio_devices")` | enumerates PulseAudio sinks | **Done** — returns `{id: node.name, name: node.nick}`; stable across renames (v2 stored `node.nick` as both id and name — bug fixed) |
+| `GetVersion` | method on Settings interface | **Done** — method on Settings; version sourced from shared `VERSION` file at build time |
+| `SettingsChanged` signal | fired on any setting write | **Done** — emitted by `SetSetting` and `ReloadConfigs`; GUI subscribes |
 
 ---
 
@@ -40,10 +40,11 @@
 |---|---|---|
 | `redirect_audio_on_connect` | toggle | **Missing** |
 | `redirect_audio_on_disconnect` | toggle | **Missing** |
-| `redirect_audio_on_disconnect_device` | select (PulseAudio sink `node.nick`) | **Missing** |
+| `redirect_audio_on_disconnect_device` | select (PulseAudio sink `node.nick`) | **Missing** — V3 will store `node.name` (stable ALSA path) instead of `node.nick`; `GetListOptions` already returns correct pairs |
 
 V2 action on connect: `pactl set-default-sink Arctis_Media`.
 V2 action on disconnect: `pactl set-default-sink <chosen_device>`.
+V2 bug: stored `node.nick` as the device id — rename breaks redirect. V3 fix: store `node.name`.
 
 ---
 
@@ -62,7 +63,7 @@ V2 action on disconnect: `pactl set-default-sink <chosen_device>`.
 | Feature | V2 | V3 |
 |---|---|---|
 | `GetStatus` + `StatusChanged` signal | yes | **Done** |
-| Status grouped by category (headset / mic / bluetooth / wireless) | yes — YAML `representation` dict | **Partial** — all fields under one `"headset"` category |
+| Status grouped by category (headset / mic / bluetooth / wireless) | yes — YAML `representation` dict | **Done** — `representation:` section in device YAML maps categories to field lists; fallback to single `"headset"` when absent |
 | Field `type` values: `percentage`, `on_off`, `label` | yes — YAML `status_parse` | **Partial** — sends `uint8`/`label`; `percentage` not set for battery fields |
 | `DeviceConnected(pid, name, capabilities[])` signal | missing in V2 | **New in V3** |
 | `DeviceDisconnected(pid)` signal | missing in V2 | **New in V3** |
@@ -153,7 +154,7 @@ Everything in this section is **Missing** in V3.
 
 | Tab | Widget | V3 daemon coverage |
 |---|---|---|
-| Status | `QStatusWidget` | **Partial** — fields shown but single category only |
+| Status | `QStatusWidget` | **Done** — fields grouped by category via YAML `representation` |
 | General | `QSettingsWidget(section='general')` | **Missing** — `general` section always empty |
 | Device | `QSettingsWidget(section='device')` | **Done** — renders sliders/toggles from V3 settings_config |
 | Equalizer | `QEQWidget` | **Missing** — no EQ D-Bus interface |
