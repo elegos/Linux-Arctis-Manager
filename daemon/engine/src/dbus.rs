@@ -14,6 +14,7 @@ use tracing::{error, warn};
 use zbus::object_server::SignalEmitter;
 use zbus::{connection, interface};
 
+use crate::device_persistence;
 use crate::general_settings::GeneralSettings;
 use crate::state::{AppState, DeviceCommand, SignalEvent};
 
@@ -57,6 +58,7 @@ impl StatusInterface {
 struct SettingsInterface {
     state: Arc<Mutex<AppState>>,
     signal_tx: broadcast::Sender<SignalEvent>,
+    settings_base_dir: std::path::PathBuf,
 }
 
 #[interface(name = "name.giacomofurlan.ArctisManager.Next.Settings")]
@@ -127,6 +129,27 @@ impl SettingsInterface {
         };
 
         if sent {
+            // Persist the written value: load existing overrides, update, save.
+            let (vid, pid) = {
+                let s = self.state.lock().await;
+                if let Some(entry) = s.devices.values().next() {
+                    (entry.vid, entry.pid)
+                } else {
+                    (0, 0)
+                }
+            };
+            if vid != 0 || pid != 0 {
+                let file_path =
+                    device_persistence::settings_file_path(&self.settings_base_dir, vid, pid);
+                let json_val: serde_json::Value =
+                    serde_json::from_str(value).unwrap_or(serde_json::Value::Null);
+                let mut overrides = device_persistence::load_device_settings(&file_path);
+                overrides.insert(setting.to_string(), json_val);
+                if let Err(e) = device_persistence::save_device_settings(&file_path, &overrides) {
+                    warn!("SetSetting: failed to persist device settings: {e}");
+                }
+            }
+
             let json = {
                 let s = self.state.lock().await;
                 build_settings_json(&s)
@@ -193,6 +216,7 @@ pub async fn start_dbus_service(
     state: Arc<Mutex<AppState>>,
     mut signal_rx: broadcast::Receiver<SignalEvent>,
     signal_tx: broadcast::Sender<SignalEvent>,
+    settings_base_dir: std::path::PathBuf,
 ) -> zbus::Result<zbus::Connection> {
     let conn = connection::Builder::session()?
         .name(BUS_NAME)?
@@ -207,6 +231,7 @@ pub async fn start_dbus_service(
             SettingsInterface {
                 state: Arc::clone(&state),
                 signal_tx: signal_tx.clone(),
+                settings_base_dir,
             },
         )?
         .serve_at(
@@ -497,7 +522,7 @@ fn resolve_fields<'a>(
 
 /// Find the name of the first API whose write struct contains a non-constant
 /// field named `field_name`.
-pub fn find_api_for_field(config: &DeviceConfig, field_name: &str) -> Option<String> {
+pub(crate) fn find_api_for_field(config: &DeviceConfig, field_name: &str) -> Option<String> {
     let apis = config.apis.as_ref()?;
     let structs = config.structs.as_ref()?;
 
@@ -520,7 +545,7 @@ pub fn find_api_for_field(config: &DeviceConfig, field_name: &str) -> Option<Str
 
 /// Parse a JSON-encoded string value into a `FieldValue` matching the type
 /// expected by `field_name` in `api_name`'s write struct.
-fn parse_setting_value(
+pub(crate) fn parse_setting_value(
     config: &DeviceConfig,
     api_name: &str,
     field_name: &str,
@@ -586,6 +611,7 @@ mod tests {
         let config = DeviceConfig::default();
         crate::state::DeviceEntry {
             config: Arc::new(config),
+            vid: 0,
             pid: 0,
             name: "test".to_string(),
             capabilities: vec![],
@@ -656,6 +682,7 @@ mod tests {
             std::path::PathBuf::from("/dev/hidraw0"),
             crate::state::DeviceEntry {
                 config: Arc::new(config),
+                vid: 0,
                 pid: 0,
                 name: "test".to_string(),
                 capabilities: vec![],
