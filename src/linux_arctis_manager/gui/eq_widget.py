@@ -927,6 +927,7 @@ class QEQWidget(QWidget):
         # App overrides
         ov_box = QGroupBox(I18n.translate('ui', 'eq_app_overrides'))
         ov = QVBoxLayout()
+        ov.setAlignment(Qt.AlignmentFlag.AlignTop)
         ov_box.setLayout(ov)
         self._overrides_list = QListWidget()
         self._overrides_list.setMaximumHeight(140)

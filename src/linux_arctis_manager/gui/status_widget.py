@@ -1,5 +1,5 @@
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QScrollArea, QVBoxLayout, QWidget
 
 from linux_arctis_manager.i18n import I18n
 
@@ -10,9 +10,19 @@ class QStatusWidget(QWidget):
     def __init__(self, parent: QWidget):
         super().__init__(parent)
 
+        outer = QVBoxLayout()
+        outer.setContentsMargins(0, 0, 0, 0)
+        self.setLayout(outer)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll_content = QWidget()
         self.main_layout = QVBoxLayout()
         self.main_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.setLayout(self.main_layout)
+        scroll_content.setLayout(self.main_layout)
+        scroll.setWidget(scroll_content)
+        outer.addWidget(scroll)
     
     def clean_layout(self):
         while self.main_layout.count():
