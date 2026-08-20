@@ -30,11 +30,11 @@ pub struct DeviceSession {
 }
 
 impl DeviceSession {
-    pub fn new(config: DeviceConfig, fd: OwnedFd) -> Self {
-        Self {
+    pub fn new(config: DeviceConfig, fd: OwnedFd) -> std::io::Result<Self> {
+        Ok(Self {
             config,
-            transport: HidTransport::from_fd(fd),
-        }
+            transport: HidTransport::from_fd(fd)?,
+        })
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -451,9 +451,11 @@ mod tests {
     use nix::sys::socket::{socketpair, AddressFamily, SockFlag, SockType};
 
     fn make_pair() -> (OwnedFd, OwnedFd) {
+        // SOCK_SEQPACKET preserves message boundaries: each write() is a
+        // separate read(), matching the per-report semantics of real hidraw fds.
         socketpair(
             AddressFamily::Unix,
-            SockType::Stream,
+            SockType::SeqPacket,
             None,
             SockFlag::SOCK_CLOEXEC,
         )
@@ -469,7 +471,7 @@ mod tests {
     #[tokio::test]
     async fn device_init_with_empty_config_succeeds() {
         let (engine_fd, _peer) = make_pair();
-        let mut session = DeviceSession::new(cfg("{}"), engine_fd);
+        let mut session = DeviceSession::new(cfg("{}"), engine_fd).expect("from_fd");
         let events = session.device_init().await.unwrap();
         assert!(events.is_empty());
     }
@@ -484,7 +486,8 @@ lifecycle:
     - call: reticulate_splines
 "#),
             engine_fd,
-        );
+        )
+        .expect("from_fd");
         assert!(matches!(
             session.device_init().await.unwrap_err(),
             EngineError::UnknownLifecycleCall(s) if s == "reticulate_splines"
@@ -508,7 +511,8 @@ lifecycle:
     - call: save_to_flash
 "#),
             engine_fd,
-        );
+        )
+        .expect("from_fd");
 
         let task = tokio::spawn(async move {
             let mut s = session;
@@ -516,7 +520,7 @@ lifecycle:
         });
 
         // Read what the engine sent.
-        let mut peer = HidTransport::from_fd(peer_fd);
+        let mut peer = HidTransport::from_fd(peer_fd).expect("from_fd");
         let received = peer
             .read_interrupt(Duration::from_millis(500))
             .await
@@ -547,14 +551,15 @@ lifecycle:
     - call: save_to_flash
 "#),
             engine_fd,
-        );
+        )
+        .expect("from_fd");
 
         let task = tokio::spawn(async move {
             let mut s = session;
             s.run_lifecycle_hook("shutdown").await
         });
 
-        let mut peer = HidTransport::from_fd(peer_fd);
+        let mut peer = HidTransport::from_fd(peer_fd).expect("from_fd");
         let received = peer
             .read_interrupt(Duration::from_millis(500))
             .await
@@ -567,7 +572,7 @@ lifecycle:
     #[tokio::test]
     async fn run_lifecycle_hook_unknown_name_errors() {
         let (engine_fd, _peer) = make_pair();
-        let mut session = DeviceSession::new(cfg("{}"), engine_fd);
+        let mut session = DeviceSession::new(cfg("{}"), engine_fd).expect("from_fd");
         assert!(matches!(
             session.run_lifecycle_hook("flurp").await.unwrap_err(),
             EngineError::UnknownLifecycleHook(s) if s == "flurp"
@@ -599,13 +604,13 @@ sync_read:
         let (tx, rx) = tokio::sync::oneshot::channel();
 
         let task = tokio::spawn(async move {
-            let mut s = DeviceSession::new(session_config, engine_fd);
+            let mut s = DeviceSession::new(session_config, engine_fd).expect("from_fd");
             let result = s.run_sync_read().await;
             let _ = tx.send(result);
         });
 
         // Serve the read: receive the request, send back a response.
-        let mut peer = HidTransport::from_fd(peer_fd);
+        let mut peer = HidTransport::from_fd(peer_fd).expect("from_fd");
         peer.read_interrupt(Duration::from_millis(500))
             .await
             .expect("engine should send read request");
@@ -624,8 +629,8 @@ sync_read:
 
     // ── E1-S5: async event loop ───────────────────────────────────────────────
 
-    #[test]
-    fn dispatch_sync_report_emits_known_event() {
+    #[tokio::test]
+    async fn dispatch_sync_report_emits_known_event() {
         let (engine_fd, _peer) = make_pair();
         let session = DeviceSession::new(
             cfg(r#"
@@ -636,7 +641,8 @@ sync_events:
       - {name: level, byte: 2}
 "#),
             engine_fd,
-        );
+        )
+        .expect("from_fd");
 
         let report = [0x00u8, 0x42, 80, 0, 0, 0, 0, 0]; // level = 80
         let result = session
@@ -652,10 +658,10 @@ sync_events:
         );
     }
 
-    #[test]
-    fn dispatch_sync_report_returns_none_for_unknown_command() {
+    #[tokio::test]
+    async fn dispatch_sync_report_returns_none_for_unknown_command() {
         let (engine_fd, _peer) = make_pair();
-        let session = DeviceSession::new(cfg("{}"), engine_fd);
+        let session = DeviceSession::new(cfg("{}"), engine_fd).expect("from_fd");
         let report = [0x00u8, 0xFF, 0x00, 0x00];
         assert!(session.dispatch_sync_report(&report).unwrap().is_none());
     }
@@ -671,7 +677,8 @@ sync_events:
     fields: []
 "#),
             engine_fd,
-        );
+        )
+        .expect("from_fd");
 
         let (event_tx, mut event_rx) = mpsc::channel(8);
 
@@ -680,7 +687,7 @@ sync_events:
             s.run_event_loop(event_tx).await
         });
 
-        let mut peer = HidTransport::from_fd(peer_fd);
+        let mut peer = HidTransport::from_fd(peer_fd).expect("from_fd");
         let report = [0x00u8, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
         peer.write_interrupt(&report).await.unwrap();
 
@@ -709,7 +716,8 @@ sync_events:
     fields: []
 "#),
             engine_fd,
-        );
+        )
+        .expect("from_fd");
 
         let (event_tx, mut event_rx) = mpsc::channel(8);
 
@@ -718,7 +726,7 @@ sync_events:
             s.run_event_loop(event_tx).await
         });
 
-        let mut peer = HidTransport::from_fd(peer_fd);
+        let mut peer = HidTransport::from_fd(peer_fd).expect("from_fd");
         // Unknown command — should be skipped without error.
         peer.write_interrupt(&[0x00u8, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
             .await
@@ -771,11 +779,11 @@ apis:
             values.insert(format!("gain{i}"), FieldValue::F32(0.0));
         }
         let task = tokio::spawn(async move {
-            let mut s = DeviceSession::new(config, engine_fd);
+            let mut s = DeviceSession::new(config, engine_fd).expect("from_fd");
             s.write_api_direct("custom_eq", values).await
         });
 
-        let mut peer = HidTransport::from_fd(peer_fd);
+        let mut peer = HidTransport::from_fd(peer_fd).expect("from_fd");
         // bytes[0]=0x06 (report_id), bytes[1]=0x33 (command), bytes[2..12]=20 each
         let received = peer
             .read_interrupt(Duration::from_millis(500))
@@ -810,11 +818,11 @@ apis:
         let mut values = HashMap::new();
         values.insert("eq_preset".to_string(), FieldValue::U8(4));
         let task = tokio::spawn(async move {
-            let mut s = DeviceSession::new(config, engine_fd);
+            let mut s = DeviceSession::new(config, engine_fd).expect("from_fd");
             s.write_api_direct("selected_eq_preset", values).await
         });
 
-        let mut peer = HidTransport::from_fd(peer_fd);
+        let mut peer = HidTransport::from_fd(peer_fd).expect("from_fd");
         let received = peer
             .read_interrupt(Duration::from_millis(500))
             .await
@@ -844,11 +852,11 @@ apis:
         let mut values = HashMap::new();
         values.insert("line_out_mode".to_string(), FieldValue::U8(2));
         let task = tokio::spawn(async move {
-            let mut s = DeviceSession::new(config, engine_fd);
+            let mut s = DeviceSession::new(config, engine_fd).expect("from_fd");
             s.write_api_direct("line_out_mode", values).await
         });
 
-        let mut peer = HidTransport::from_fd(peer_fd);
+        let mut peer = HidTransport::from_fd(peer_fd).expect("from_fd");
         let received = peer
             .read_interrupt(Duration::from_millis(500))
             .await
@@ -879,11 +887,11 @@ apis:
         values.insert("stream_aux".to_string(), FieldValue::U8(30));
         values.insert("stream_mic".to_string(), FieldValue::U8(50));
         let task = tokio::spawn(async move {
-            let mut s = DeviceSession::new(config, engine_fd);
+            let mut s = DeviceSession::new(config, engine_fd).expect("from_fd");
             s.write_api_direct("stream_mix", values).await
         });
 
-        let mut peer = HidTransport::from_fd(peer_fd);
+        let mut peer = HidTransport::from_fd(peer_fd).expect("from_fd");
         let received = peer
             .read_interrupt(Duration::from_millis(500))
             .await
@@ -919,11 +927,11 @@ apis:
         let mut values = HashMap::new();
         values.insert("dim_timer".to_string(), FieldValue::U8(30)); // 30 minutes → enum 5
         let task = tokio::spawn(async move {
-            let mut s = DeviceSession::new(config, engine_fd);
+            let mut s = DeviceSession::new(config, engine_fd).expect("from_fd");
             s.write_api_direct("dim_timer", values).await
         });
 
-        let mut peer = HidTransport::from_fd(peer_fd);
+        let mut peer = HidTransport::from_fd(peer_fd).expect("from_fd");
         let received = peer
             .read_interrupt(Duration::from_millis(500))
             .await
@@ -951,11 +959,11 @@ apis:
         let mut values = HashMap::new();
         values.insert("oled_brightness".to_string(), FieldValue::U8(7));
         let task = tokio::spawn(async move {
-            let mut s = DeviceSession::new(config, engine_fd);
+            let mut s = DeviceSession::new(config, engine_fd).expect("from_fd");
             s.write_api_direct("oled_brightness", values).await
         });
 
-        let mut peer = HidTransport::from_fd(peer_fd);
+        let mut peer = HidTransport::from_fd(peer_fd).expect("from_fd");
         let received = peer
             .read_interrupt(Duration::from_millis(500))
             .await
@@ -983,11 +991,11 @@ apis:
         let mut values = HashMap::new();
         values.insert("bt_power_default".to_string(), FieldValue::U8(1));
         let task = tokio::spawn(async move {
-            let mut s = DeviceSession::new(config, engine_fd);
+            let mut s = DeviceSession::new(config, engine_fd).expect("from_fd");
             s.write_api_direct("bluetooth_startup", values).await
         });
 
-        let mut peer = HidTransport::from_fd(peer_fd);
+        let mut peer = HidTransport::from_fd(peer_fd).expect("from_fd");
         let received = peer
             .read_interrupt(Duration::from_millis(500))
             .await
@@ -1013,11 +1021,11 @@ apis:
         let mut values = HashMap::new();
         values.insert("bt_call_default".to_string(), FieldValue::U8(2));
         let task = tokio::spawn(async move {
-            let mut s = DeviceSession::new(config, engine_fd);
+            let mut s = DeviceSession::new(config, engine_fd).expect("from_fd");
             s.write_api_direct("bt_call_default", values).await
         });
 
-        let mut peer = HidTransport::from_fd(peer_fd);
+        let mut peer = HidTransport::from_fd(peer_fd).expect("from_fd");
         let received = peer
             .read_interrupt(Duration::from_millis(500))
             .await
@@ -1044,11 +1052,11 @@ apis:
 
         let (engine_fd, peer_fd) = make_pair();
         let task = tokio::spawn(async move {
-            let mut s = DeviceSession::new(config, engine_fd);
+            let mut s = DeviceSession::new(config, engine_fd).expect("from_fd");
             s.run_lifecycle_hook("shutdown").await
         });
 
-        let mut peer = HidTransport::from_fd(peer_fd);
+        let mut peer = HidTransport::from_fd(peer_fd).expect("from_fd");
         // shutdown: disable_chatmix (0x49 0x00), disable_sonar (0x8D 0x00), save_to_flash (0x09)
         let mut save_found = false;
         for _ in 0..3 {

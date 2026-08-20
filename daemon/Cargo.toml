@@ -29,7 +29,7 @@ tokio-udev = "0.10"
 # HID (requires hidapi / libudev at link time — added in E1-S2)
 hidapi = { version = "2", default-features = false, features = ["linux-native"] }
 # Unix system calls (getuid, sendmsg/SCM_RIGHTS for E2)
-nix = { version = "0.30", features = ["user", "socket", "uio", "ioctl"] }
+nix = { version = "0.30", features = ["user", "socket", "uio", "ioctl", "fs"] }
 # serialisation
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
