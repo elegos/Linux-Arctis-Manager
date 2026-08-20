@@ -152,7 +152,9 @@ mod tests {
 
     #[test]
     fn app_matcher_stream_roundtrip() {
-        let m = AppMatcher::Stream { name: "Spotify".into() };
+        let m = AppMatcher::Stream {
+            name: "Spotify".into(),
+        };
         let yaml = serde_yaml::to_string(&m).unwrap();
         let back: AppMatcher = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(back, m);
@@ -160,7 +162,9 @@ mod tests {
 
     #[test]
     fn app_matcher_executable_roundtrip() {
-        let m = AppMatcher::Executable { path: "/usr/bin/spotify".into() };
+        let m = AppMatcher::Executable {
+            path: "/usr/bin/spotify".into(),
+        };
         let yaml = serde_yaml::to_string(&m).unwrap();
         let back: AppMatcher = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(back, m);
@@ -182,7 +186,10 @@ mod tests {
             backend: None,
         };
         let yaml = serde_yaml::to_string(&o).unwrap();
-        assert!(!yaml.contains("backend"), "backend should be omitted: {yaml}");
+        assert!(
+            !yaml.contains("backend"),
+            "backend should be omitted: {yaml}"
+        );
     }
 
     #[test]
@@ -194,7 +201,9 @@ mod tests {
             preset: "Studio".into(),
             app_overrides: vec![
                 AppOverride {
-                    matcher: AppMatcher::Stream { name: "Firefox".into() },
+                    matcher: AppMatcher::Stream {
+                        name: "Firefox".into(),
+                    },
                     preset: "Flat".into(),
                     backend: Some(EqBackend::Hardware),
                 },

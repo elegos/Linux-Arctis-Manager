@@ -359,9 +359,13 @@ async fn check_ladspa_eq() -> i32 {
     println!();
     println!("mbeq_1197 band frequencies:");
     for (i, &f) in ladspa::MBEQ_FREQ.iter().enumerate() {
-        let role = if ladspa::FIXED_10_INDICES.contains(&i) { " [fixed_10]" }
-                   else if ladspa::FIXED_5_INDICES.contains(&i) { " [fixed_5]" }
-                   else { "" };
+        let role = if ladspa::FIXED_10_INDICES.contains(&i) {
+            " [fixed_10]"
+        } else if ladspa::FIXED_5_INDICES.contains(&i) {
+            " [fixed_5]"
+        } else {
+            ""
+        };
         println!("  [{i:2}] {:>6} Hz{role}", f as u32);
     }
 
@@ -369,7 +373,11 @@ async fn check_ladspa_eq() -> i32 {
     println!();
     println!("Loading test null-sink (lam_ic_test_src)...");
     let load_null = tokio::process::Command::new("pactl")
-        .args(["load-module", "module-null-sink", "sink_name=lam_ic_test_src"])
+        .args([
+            "load-module",
+            "module-null-sink",
+            "sink_name=lam_ic_test_src",
+        ])
         .output()
         .await;
     let null_id: Option<u32> = match load_null {

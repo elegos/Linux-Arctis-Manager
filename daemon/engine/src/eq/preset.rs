@@ -145,7 +145,13 @@ pub fn preset_path(base_dir: &Path, name: &str) -> PathBuf {
     // Sanitise: replace filesystem-unsafe characters with '_'.
     let safe: String = name
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     base_dir.join("eq_presets").join(format!("{safe}.yaml"))
 }
@@ -163,8 +169,8 @@ pub fn save_preset(base_dir: &Path, preset: &EqPreset) -> std::io::Result<()> {
 pub fn load_preset(path: &Path) -> Result<EqPreset, String> {
     let content =
         std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
-    let preset: EqPreset = serde_yaml::from_str(&content)
-        .map_err(|e| format!("parse {}: {e}", path.display()))?;
+    let preset: EqPreset =
+        serde_yaml::from_str(&content).map_err(|e| format!("parse {}: {e}", path.display()))?;
     preset.validate()?;
     Ok(preset)
 }
@@ -279,7 +285,10 @@ mod tests {
         let p = flat_preset(BandMode::Fixed10);
         assert_eq!(p.bands.len(), 10);
         assert!(p.validate().is_ok());
-        assert!(p.bands.iter().all(|b| b.gain == 0.0 && b.frequency.is_none()));
+        assert!(p
+            .bands
+            .iter()
+            .all(|b| b.gain == 0.0 && b.frequency.is_none()));
     }
 
     #[test]
@@ -287,7 +296,10 @@ mod tests {
         let p = flat_preset(BandMode::Parametric10);
         assert_eq!(p.bands.len(), 10);
         assert!(p.validate().is_ok());
-        assert!(p.bands.iter().all(|b| b.frequency.is_some() && b.filter_type.is_some()));
+        assert!(p
+            .bands
+            .iter()
+            .all(|b| b.frequency.is_some() && b.filter_type.is_some()));
     }
 
     #[test]

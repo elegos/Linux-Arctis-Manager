@@ -355,13 +355,13 @@ class DbusWrapper(QObject):
         async def _call() -> None:
             try:
                 caps_v3 = await DbusWrapper._eq_call_json('GetEQCapabilities', '', [])
-                # V3 returns {has_hw_eq, hw_band_mode}; GUI expects {ladspa_available, ladspa_plugin}.
-                # LADSPA is always available in V3 (mbeq_1197 is the universal fallback).
                 qt_signal.emit({
-                    'ladspa_available': True,
+                    'ladspa_available': caps_v3.get('ladspa_available', True),
                     'ladspa_plugin': 'mbeq_1197',
                     'has_hw_eq': caps_v3.get('has_hw_eq', False),
                     'hw_band_mode': caps_v3.get('hw_band_mode'),
+                    'hw_override_backend': caps_v3.get('hw_override_backend', 'unsupported'),
+                    'hw_override_unsupported_reason': caps_v3.get('hw_override_unsupported_reason'),
                 })
             except Exception as e:
                 DbusWrapper.logger.warning(f'EQ GetEQCapabilities failed: {e}')

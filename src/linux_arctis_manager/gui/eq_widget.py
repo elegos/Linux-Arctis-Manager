@@ -556,6 +556,12 @@ class QChannelSection(QGroupBox):
         self._backend_widget.setVisible(False)
         layout.addWidget(self._backend_widget)
 
+        # Note shown when hardware app-override tracking is unavailable (e.g. GNOME Wayland)
+        self._hw_override_note = QLabel()
+        self._hw_override_note.setWordWrap(True)
+        self._hw_override_note.setVisible(False)
+        layout.addWidget(self._hw_override_note)
+
         # Preset row
         pr = QHBoxLayout()
         pr.addWidget(QLabel(I18n.translate('ui', 'eq_preset')))
@@ -597,6 +603,13 @@ class QChannelSection(QGroupBox):
 
     def set_hw_eq_visible(self, visible: bool) -> None:
         self._backend_widget.setVisible(visible)
+
+    def set_hw_override_note(self, reason: str | None) -> None:
+        if reason:
+            self._hw_override_note.setText(reason)
+            self._hw_override_note.setVisible(True)
+        else:
+            self._hw_override_note.setVisible(False)
 
     def load_settings(self, settings: dict, presets: dict[str, dict]) -> None:
         self._presets = presets
@@ -971,6 +984,11 @@ class QEQWidget(QWidget):
             logger.warning('LADSPA plugin %r not found — EQ controls disabled', plugin)
         self._media_section.set_hw_eq_visible(has_hw_eq)
         self._chat_section.set_hw_eq_visible(has_hw_eq)
+        if has_hw_eq:
+            backend = caps.get('hw_override_backend', 'unsupported')
+            reason = caps.get('hw_override_unsupported_reason') if backend == 'unsupported' else None
+            self._media_section.set_hw_override_note(reason)
+            self._chat_section.set_hw_override_note(reason)
         self._media_section.setEnabled(available)
         self._chat_section.setEnabled(available)
         self._apply_btn.setEnabled(available)
