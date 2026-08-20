@@ -125,7 +125,7 @@ impl SettingsInterface {
                 return false;
             };
             // For multi-field structs, populate sibling fields from current status.
-            let mut values = build_write_values(&entry.config, &api_name, setting, field_value, &entry.status);
+            let values = build_write_values(&entry.config, &api_name, setting, field_value, &entry.status);
             entry
                 .cmd_tx
                 .send(DeviceCommand::WriteApi { api_name, values })
