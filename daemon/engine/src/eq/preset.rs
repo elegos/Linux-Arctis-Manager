@@ -25,6 +25,7 @@ pub struct EqBand {
     pub filter_type: Option<FilterType>,
 }
 
+#[allow(dead_code)]
 impl EqBand {
     pub fn gain_only(gain: f32) -> Self {
         Self {
@@ -117,6 +118,7 @@ impl EqPreset {
 
 // ── Flat (0 dB) preset constructors ──────────────────────────────────────────
 
+#[allow(dead_code)]
 pub fn flat_preset(band_mode: BandMode) -> EqPreset {
     let bands = match band_mode {
         BandMode::Fixed10 | BandMode::Parametric10 => {
