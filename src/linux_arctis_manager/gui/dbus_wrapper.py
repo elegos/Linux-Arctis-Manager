@@ -23,6 +23,81 @@ from linux_arctis_manager.constants import (DBUS_BUS_NAME,
                                             DBUS_VC_OBJECT_PATH)
 
 
+# ── V3 EQ translation ─────────────────────────────────────────────────────────
+# V3 daemon uses band_mode ('fixed_10'/'parametric_10'/'fixed_5') and 'preset'.
+# The GUI uses mode ('simple'/'advanced') and 'preset_name'.
+# All translation lives here so eq_widget.py stays unchanged.
+
+_MODE_TO_BAND_MODE: dict[str, str] = {'simple': 'fixed_10', 'advanced': 'parametric_10'}
+_BAND_MODE_TO_MODE: dict[str, str] = {
+    'fixed_10': 'simple', 'fixed_5': 'simple', 'parametric_10': 'advanced',
+}
+# Fixed display frequencies per band_mode (the daemon stores only gain, no freq).
+_BAND_MODE_FREQS: dict[str, list[int]] = {
+    'fixed_10': [50, 100, 220, 440, 880, 1750, 3500, 5000, 10000, 20000],
+    'fixed_5':  [50, 440, 1750, 5000, 20000],
+}
+
+
+def _v3_settings_to_gui(s3: dict) -> dict:
+    """Translate V3 EqSettings JSON to the format the GUI expects."""
+    result: dict = {'app_overrides': []}
+    for ch in ('media', 'chat'):
+        cd = s3.get(ch, {})
+        bm = cd.get('band_mode', 'fixed_10')
+        result[ch] = {
+            'enabled': cd.get('enabled', False),
+            'mode': _BAND_MODE_TO_MODE.get(bm, 'simple'),
+            'preset_name': cd.get('preset') or None if cd.get('preset') != 'flat' else None,
+        }
+        for ov in cd.get('app_overrides', []):
+            matcher = ov.get('matcher', {})
+            if 'stream' in matcher:
+                mt, val, app_id, gname = 'stream', matcher['stream'].get('name', ''), None, ''
+            elif 'executable' in matcher:
+                mt, val, app_id, gname = 'executable', matcher['executable'].get('path', ''), None, ''
+            elif 'steam_game' in matcher:
+                mt, val, app_id = 'steam', '', matcher['steam_game'].get('app_id')
+                gname = ''
+            else:
+                continue
+            result['app_overrides'].append({
+                'matcher_type': mt, 'value': val,
+                'steam_app_id': app_id, 'steam_game_name': gname,
+                'preset_name': ov.get('preset', ''), 'channel': ch,
+            })
+    return result
+
+
+def _v3_preset_to_gui(p3: dict) -> dict:
+    """Translate a V3 EqPreset to the GUI's V2 format."""
+    bm = p3.get('band_mode', 'fixed_10')
+    bands_v3 = p3.get('bands', [])
+    if bm == 'parametric_10':
+        mode = 'advanced'
+        bands = [{'frequency': b.get('frequency', 1000), 'gain': b.get('gain', 0.0)}
+                 for b in bands_v3]
+    else:
+        freqs = _BAND_MODE_FREQS.get(bm, _BAND_MODE_FREQS['fixed_10'])
+        mode = 'simple'
+        bands = [{'frequency': f, 'gain': b.get('gain', 0.0)}
+                 for f, b in zip(freqs, bands_v3)]
+    return {'name': p3['name'], 'mode': mode, 'description': '', 'builtin': False, 'bands': bands}
+
+
+def _gui_preset_to_v3(p2: dict) -> dict:
+    """Translate a GUI V2 preset to V3 format for SavePreset."""
+    mode = p2.get('mode', 'simple')
+    bm = _MODE_TO_BAND_MODE.get(mode, 'fixed_10')
+    bands_v2 = p2.get('bands', [])
+    if bm == 'parametric_10':
+        bands = [{'gain': b['gain'], 'frequency': b['frequency'], 'filter_type': 'peaking'}
+                 for b in bands_v2]
+    else:
+        bands = [{'gain': b['gain']} for b in bands_v2]
+    return {'name': p2['name'], 'band_mode': bm, 'bands': bands}
+
+
 class DbusWrapper(QObject):
     sig_status = Signal(object)
     sig_settings = Signal(object)
@@ -254,15 +329,45 @@ class DbusWrapper(QObject):
 
     @staticmethod
     def request_eq_capabilities(qt_signal: SignalInstance) -> None:
-        Thread(target=lambda: asyncio.run(DbusWrapper._call_eq_async('GetEQCapabilities', '', [], qt_signal, is_json=True))).start()
+        async def _call() -> None:
+            try:
+                caps_v3 = await DbusWrapper._eq_call_json('GetEQCapabilities', '', [])
+                # V3 returns {has_hw_eq, hw_band_mode}; GUI expects {ladspa_available, ladspa_plugin}.
+                # LADSPA is always available in V3 (mbeq_1197 is the universal fallback).
+                qt_signal.emit({
+                    'ladspa_available': True,
+                    'ladspa_plugin': 'mbeq_1197',
+                    'has_hw_eq': caps_v3.get('has_hw_eq', False),
+                    'hw_band_mode': caps_v3.get('hw_band_mode'),
+                })
+            except Exception as e:
+                DbusWrapper.logger.warning(f'EQ GetEQCapabilities failed: {e}')
+        Thread(target=lambda: asyncio.run(_call())).start()
 
     @staticmethod
     def request_eq_settings(qt_signal: SignalInstance) -> None:
-        Thread(target=lambda: asyncio.run(DbusWrapper._call_eq_async('GetEQSettings', '', [], qt_signal, is_json=True))).start()
+        async def _call() -> None:
+            try:
+                s3 = await DbusWrapper._eq_call_json('GetEQSettings', '', [])
+                qt_signal.emit(_v3_settings_to_gui(s3))
+            except Exception as e:
+                DbusWrapper.logger.warning(f'EQ GetEQSettings failed: {e}')
+        Thread(target=lambda: asyncio.run(_call())).start()
 
     @staticmethod
     def request_eq_presets(qt_signal: SignalInstance) -> None:
-        Thread(target=lambda: asyncio.run(DbusWrapper._call_eq_async('GetPresets', '', [], qt_signal, is_json=True))).start()
+        async def _call() -> None:
+            try:
+                summaries = await DbusWrapper._eq_call_json('ListPresets', '', [])
+                presets = []
+                for s in summaries:
+                    p3 = await DbusWrapper._eq_call_json('GetPreset', 's', [s['name']])
+                    if p3:
+                        presets.append(_v3_preset_to_gui(p3))
+                qt_signal.emit(presets)
+            except Exception as e:
+                DbusWrapper.logger.warning(f'EQ request_eq_presets failed: {e}')
+        Thread(target=lambda: asyncio.run(_call())).start()
 
     @staticmethod
     def request_steam_games(qt_signal: SignalInstance) -> None:
@@ -270,36 +375,74 @@ class DbusWrapper(QObject):
 
     @staticmethod
     def request_running_streams(qt_signal: SignalInstance) -> None:
-        Thread(target=lambda: asyncio.run(DbusWrapper._call_eq_async('GetRunningStreams', '', [], qt_signal, is_json=True))).start()
+        async def _call() -> None:
+            try:
+                streams = await DbusWrapper._eq_call_json('GetRunningStreams', '', [])
+                # V3 returns [{name, pid}]; GUI expects [str].
+                if streams and isinstance(streams[0], dict):
+                    streams = [s['name'] for s in streams]
+                qt_signal.emit(streams)
+            except Exception as e:
+                DbusWrapper.logger.warning(f'EQ GetRunningStreams failed: {e}')
+        Thread(target=lambda: asyncio.run(_call())).start()
 
     @staticmethod
     def set_eq_settings(settings: dict) -> None:
-        Thread(target=lambda: asyncio.run(DbusWrapper._call_eq_async('SetEQSettings', 's', [json.dumps(settings)]))).start()
+        async def _call() -> None:
+            try:
+                for ch in ('media', 'chat'):
+                    cd = settings.get(ch, {})
+                    bm = _MODE_TO_BAND_MODE.get(cd.get('mode', 'simple'), 'fixed_10')
+                    preset = cd.get('preset_name') or 'flat'
+                    for key, val in (
+                        ('enabled', cd.get('enabled', False)),
+                        ('band_mode', bm),
+                        ('preset', preset),
+                    ):
+                        await DbusWrapper._eq_call_raw('SetEQSetting', 'sss', [ch, key, json.dumps(val)])
+                # app_overrides: not yet supported by V3 SetEQSetting — skipped.
+            except Exception as e:
+                DbusWrapper.logger.warning(f'EQ set_eq_settings failed: {e}')
+        Thread(target=lambda: asyncio.run(_call())).start()
 
     @staticmethod
     def save_eq_preset(preset: dict) -> None:
-        Thread(target=lambda: asyncio.run(DbusWrapper._call_eq_async('SavePreset', 's', [json.dumps(preset)]))).start()
+        Thread(target=lambda: asyncio.run(
+            DbusWrapper._call_eq_async('SavePreset', 's', [json.dumps(_gui_preset_to_v3(preset))])
+        )).start()
 
     @staticmethod
     def delete_eq_preset(name: str) -> None:
         Thread(target=lambda: asyncio.run(DbusWrapper._call_eq_async('DeletePreset', 's', [name]))).start()
 
     @staticmethod
+    async def _eq_call_raw(member: str, signature: str, body: list) -> str | None:
+        """Low-level EQ call; returns raw reply string or None on error."""
+        bus = await MessageBus().connect()
+        reply = await bus.call(Message(
+            destination=DBUS_BUS_NAME, path=DBUS_EQ_OBJECT_PATH,
+            interface=DBUS_EQ_INTERFACE_NAME, member=member,
+            message_type=MessageType.METHOD_CALL, signature=signature, body=body,
+        ))
+        if reply and reply.message_type != MessageType.ERROR and reply.body:
+            return reply.body[0]
+        return None
+
+    @staticmethod
+    async def _eq_call_json(member: str, signature: str, body: list) -> dict | list:
+        """EQ call that returns parsed JSON, or empty dict on error."""
+        raw = await DbusWrapper._eq_call_raw(member, signature, body)
+        if raw:
+            return json.loads(raw)
+        return {}
+
+    @staticmethod
     async def _call_eq_async(member: str, signature: str, body: list,
                              qt_signal: SignalInstance | None = None, is_json: bool = False) -> None:
         try:
-            bus = await MessageBus().connect()
-            reply = await bus.call(Message(
-                destination=DBUS_BUS_NAME,
-                path=DBUS_EQ_OBJECT_PATH,
-                interface=DBUS_EQ_INTERFACE_NAME,
-                member=member,
-                message_type=MessageType.METHOD_CALL,
-                signature=signature,
-                body=body,
-            ))
-            if qt_signal is not None and reply is not None and reply.message_type != MessageType.ERROR:
-                result = json.loads(reply.body[0]) if is_json else reply.body[0]
+            raw = await DbusWrapper._eq_call_raw(member, signature, body)
+            if qt_signal is not None and raw is not None:
+                result = json.loads(raw) if is_json else raw
                 qt_signal.emit(result)
         except Exception as e:
             DbusWrapper.logger.warning(f'EQ DBus call {member} failed: {e}')
