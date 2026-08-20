@@ -199,12 +199,24 @@ impl EqInterface {
     /// Returns EQ capabilities of the connected device.
     /// JSON: `{"has_hw_eq": bool, "hw_band_mode": "fixed_10"|"parametric_10"|"fixed_5"|null}`.
     async fn get_eq_capabilities(&self) -> String {
-        // HW EQ capability is determined from device config.
-        // Currently no device YAML defines EQ APIs, so always false.
-        let _state = self.state.lock().await;
+        let state = self.state.lock().await;
+        // Detect hardware EQ by checking for known EQ API keys in the connected device config.
+        // `custom_eq` → 10-band fixed (Nova Pro family).
+        let (has_hw_eq, hw_band_mode): (bool, Option<&str>) = state
+            .devices
+            .values()
+            .find_map(|entry| {
+                let apis = entry.config.apis.as_ref()?;
+                if apis.contains_key("custom_eq") {
+                    Some((true, Some("fixed_10")))
+                } else {
+                    None
+                }
+            })
+            .unwrap_or((false, None));
         serde_json::to_string(&serde_json::json!({
-            "has_hw_eq": false,
-            "hw_band_mode": null
+            "has_hw_eq": has_hw_eq,
+            "hw_band_mode": hw_band_mode,
         }))
         .unwrap_or_else(|_| r#"{"has_hw_eq":false,"hw_band_mode":null}"#.to_string())
     }
