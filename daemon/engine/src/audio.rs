@@ -187,24 +187,54 @@ fn find_in_modules(mods: &[(u32, String, String)], module_name: &str, arg: &str)
         .map(|(i, _, _)| *i)
 }
 
-/// Check whether a null-sink with `name` and its monitor loopback already exist.
-async fn sink_and_loopback_exist(name: &str, physical: &str) -> bool {
+/// Return true if a sink named `name` appears in the actual sink list.
+/// More reliable than checking module args, which PipeWire may not preserve.
+async fn virtual_sink_exists(name: &str) -> bool {
+    let Ok(json) = pactl(&["-f", "json", "list", "sinks"]).await else {
+        return false;
+    };
+    let Ok(sinks) = serde_json::from_str::<serde_json::Value>(&json) else {
+        return false;
+    };
+    sinks
+        .as_array()
+        .map(|arr| {
+            arr.iter().any(|s| {
+                s["properties"]["node.name"].as_str() == Some(name)
+                    || s["name"].as_str() == Some(name)
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// Unload every module-loopback whose source is `{sink_name}.monitor`.
+/// Called at the start of setup to prevent loopback duplication across
+/// daemon restarts (PipeWire does not reliably preserve module args, which
+/// breaks idempotency checks that rely on them).
+async fn sweep_loopbacks_for_source(sink_name: &str) {
     let mods = list_short_modules().await;
-    let lb_source = format!("source={name}.monitor");
-    let lb_sink = format!("sink={physical}");
-    let has_null =
-        find_in_modules(&mods, "module-null-sink", &format!("sink_name={name}")).is_some();
-    let has_loopback = mods
-        .iter()
-        .any(|(_, n, a)| n == "module-loopback" && a.contains(&lb_source) && a.contains(&lb_sink));
-    has_null && has_loopback
+    let marker = format!("source={sink_name}.monitor");
+    for (idx, name, args) in &mods {
+        if name == "module-loopback" && args.contains(marker.as_str()) {
+            if let Err(e) = pactl(&["unload-module", &idx.to_string()]).await {
+                warn!("audio: failed to sweep stale loopback {idx}: {e}");
+            } else {
+                info!("audio: swept stale loopback {idx} ({sink_name}.monitor)");
+            }
+        }
+    }
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /// Create Arctis_Media and Arctis_Chat virtual sinks with loopbacks to the
-/// physical Arctis headset output.  Idempotent: skips creation if the sink
-/// and its loopback already exist from a previous session.
+/// physical Arctis headset output.
+///
+/// The null-sinks survive daemon restarts (PipeWire keeps them alive as long
+/// as it is running), so they are reused when present.  Loopbacks are always
+/// swept and recreated: PipeWire may not preserve module args across sessions,
+/// which breaks any args-based idempotency check and leads to duplicate
+/// loopbacks (the signal is summed N times → distortion / perceived bass boost).
 pub async fn setup_sinks() -> Result<AudioSetup, AudioError> {
     let physical = find_physical_sink()
         .await
@@ -228,20 +258,24 @@ async fn ensure_sink(
     description: &str,
     physical: &str,
 ) -> Result<(u32, u32), AudioError> {
-    if sink_and_loopback_exist(name, physical).await {
-        // Sinks survive daemon restarts; retrieve existing module indices.
-        info!("audio: {name} already set up, reusing");
-        return get_module_indices(name, physical).await;
-    }
+    // Always sweep stale loopbacks regardless of whether the null-sink exists.
+    // This prevents accumulation when the daemon restarts without a clean exit.
+    sweep_loopbacks_for_source(name).await;
 
-    // Outer quotes let the module-arg parser treat the entire proplist as one
-    // token; inner single-quotes quote the description value within it.
-    let null_args =
-        format!("sink_name={name} sink_properties=\"node.description='{description}'\"");
-    let null_idx = load_module("module-null-sink", &null_args)
-        .await
-        .ok_or_else(|| AudioError::Pactl(format!("module-null-sink for {name}")))?;
-    info!("audio: created {name} (module {null_idx})");
+    let null_idx = if virtual_sink_exists(name).await {
+        info!("audio: {name} null-sink already present, reusing");
+        // Best-effort: retrieve the module index for later unload; 0 if not found.
+        let mods = list_short_modules().await;
+        find_in_modules(&mods, "module-null-sink", &format!("sink_name={name}")).unwrap_or(0)
+    } else {
+        let null_args =
+            format!("sink_name={name} sink_properties=\"node.description='{description}'\"");
+        let idx = load_module("module-null-sink", &null_args)
+            .await
+            .ok_or_else(|| AudioError::Pactl(format!("module-null-sink for {name}")))?;
+        info!("audio: created {name} null-sink (module {idx})");
+        idx
+    };
 
     let lb_args = format!("source={name}.monitor sink={physical} latency_msec=0");
     let lb_idx = load_module("module-loopback", &lb_args)
@@ -249,21 +283,6 @@ async fn ensure_sink(
         .ok_or_else(|| AudioError::Pactl(format!("module-loopback for {name}")))?;
     info!("audio: loopback {name}.monitor -> {physical} (module {lb_idx})");
 
-    Ok((null_idx, lb_idx))
-}
-
-/// Retrieve module indices for sinks that already existed before this session.
-async fn get_module_indices(name: &str, physical: &str) -> Result<(u32, u32), AudioError> {
-    let mods = list_short_modules().await;
-    let null_idx = find_in_modules(&mods, "module-null-sink", &format!("sink_name={name}"))
-        .ok_or_else(|| AudioError::Pactl(format!("cannot find null-sink index for {name}")))?;
-    let lb_source = format!("source={name}.monitor");
-    let lb_sink = format!("sink={physical}");
-    let lb_idx = mods
-        .iter()
-        .find(|(_, n, a)| n == "module-loopback" && a.contains(&lb_source) && a.contains(&lb_sink))
-        .map(|(i, _, _)| *i)
-        .ok_or_else(|| AudioError::Pactl(format!("cannot find loopback index for {name}")))?;
     Ok((null_idx, lb_idx))
 }
 
