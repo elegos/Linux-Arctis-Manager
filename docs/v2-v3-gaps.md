@@ -12,7 +12,7 @@
 | `…Settings` | `ArctisManagerDbusSettingsService` | **Partial** — see Settings section |
 | `…Status` | `ArctisManagerDbusStatusService` | **Done** |
 | `…Config` | `ArctisManagerDbusConfigService` | **Done** |
-| `…EQ` | `ArctisManagerDbusEQService` | **Missing** |
+| `…EQ` | `ArctisManagerDbusEQService` | **Done** |
 | `…NC` | `ArctisManagerDbusNCService` | **Missing** |
 | `…VC` | `ArctisManagerDbusVCService` | **Missing** |
 
@@ -79,7 +79,7 @@ V2 bug: stored `node.nick` as the device id — rename breaks redirect. V3 fix: 
 | Wireless audio lifecycle (create on connect, teardown on disconnect) | yes | **Done** |
 | Physical sink discovery with retry | yes | **Done** |
 | Redirect default sink on headset connect/disconnect | yes (`GeneralSettings`) | **Done** — hooks in `run_device` and event-forwarding task |
-| EQ LADSPA loopback routing (`Arctis_Media` → mbeq) | yes | **Missing** |
+| EQ LADSPA loopback routing (`Arctis_Media` → mbeq) | yes | **Done** — `eq_manager`: swaps channel loopback target, live gain update without reload |
 | NC virtual mic source (`Arctis_NC_Mic`) | yes | **Missing** |
 | VC virtual sink (`Arctis_VC_Sink`) | yes | **Missing** |
 | Mic routing chain (NC → VC → `Arctis_Manager_Mic`) | yes | **Missing** |
@@ -133,17 +133,17 @@ bands:
 
 | Feature | V2 | V3 |
 |---|---|---|
-| `…EQ` D-Bus interface (8 methods, 1 signal) | `ArctisManagerDbusEQService` | **Missing** |
-| Per-channel (media/chat) enable, backend, band_mode, preset | `EQSettings.{media,chat}` | **Missing** |
-| `GetEQCapabilities()` → `{has_hw_eq, hw_band_mode}` | N/A (v2 software-only) | **Missing** |
-| Hardware EQ via HID (fixed_10, parametric_10, fixed_5) | N/A | **Missing** |
-| LADSPA `mbeq_1197` pipeline (10-band simple, 15-band advanced) | `EQManager` | **Missing** |
-| Preset library (YAML files in `eq_presets/`) | `list_presets()`, `EQPreset` | **Missing** |
-| App-aware overrides (stream / executable / Steam game) | `EQAppOverride` | **Missing** |
+| `…EQ` D-Bus interface (9 methods, 1 signal) | `ArctisManagerDbusEQService` | **Done** — `GetEQCapabilities`, `GetEQSettings`, `SetEQSetting`, `ListPresets`, `GetPreset`, `SavePreset`, `DeletePreset`, `GetRunningStreams`, `GetSteamGames`; `EQChanged` signal |
+| Per-channel (media/chat) enable, backend, band_mode, preset | `EQSettings.{media,chat}` | **Done** — `eq::settings`: `ChannelEqSettings`, `EqBackend` (auto/ladspa/hardware), YAML persistence |
+| `GetEQCapabilities()` → `{has_hw_eq, hw_band_mode}` | N/A (v2 software-only) | **Done** — always returns `has_hw_eq: false` (device YAML EQ API support not yet wired) |
+| Hardware EQ via HID (fixed_10, parametric_10, fixed_5) | N/A | **Partial** — `eq::hardware` encodes payloads for NovaPro and ParametricNova; device YAML EQ APIs not yet declared |
+| LADSPA `mbeq_1197` pipeline (10-band simple, 15-band advanced) | `EQManager` | **Done** — `eq::ladspa` + `eq_manager`: all 3 band modes, live gain update, routing swap |
+| Preset library (YAML files in `eq_presets/`) | `list_presets()`, `EQPreset` | **Done** — `eq::preset`: `BandMode` (fixed_10/parametric_10/fixed_5), save/load/list |
+| App-aware overrides (stream / executable / Steam game) | `EQAppOverride` | **Partial** — data model in `eq::settings` (`AppMatcher`, `AppOverride`); activation logic not yet wired |
 | PipeWire stream monitor (LADSPA backend app override) | `EQManager.start_stream_monitor()` | **Missing** |
 | Foreground window monitor (hardware backend app override) | N/A | **Missing** |
-| `GetSteamGames` (Steam library scan) | `steam_library.py` | **Missing** |
-| `GetRunningStreams` (PulseAudio client list) | `get_running_streams()` | **Missing** |
+| `GetSteamGames` (Steam library scan) | `steam_library.py` | **Done** — ACF VDF parser, sorted by name |
+| `GetRunningStreams` (PulseAudio client list) | `get_running_streams()` | **Done** — `pactl -f json list clients`, filters internal PipeWire clients |
 
 ---
 
@@ -188,5 +188,5 @@ Everything in this section is **Missing** in V3.
 | Status | `QStatusWidget` | **Done** — fields grouped by category via YAML `representation` |
 | General | `QSettingsWidget(section='general')` | **Done** — general section populated with 3 fields and their schemas |
 | Device | `QSettingsWidget(section='device')` | **Done** — renders sliders/toggles from V3 settings_config |
-| Equalizer | `QEQWidget` | **Missing** — no EQ D-Bus interface |
+| Equalizer | `QEQWidget` | **Partial** — daemon-side D-Bus EQ interface done; GUI not yet updated |
 | Microphone (NC + VC) | `QMicWidget`, `QNCWidget`, `QVCWidget` | **Missing** — no NC/VC interfaces |
