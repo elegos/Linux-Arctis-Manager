@@ -26,6 +26,7 @@ pub struct AppState {
 
 pub struct DeviceEntry {
     pub config: Arc<DeviceConfig>,
+    pub vid: u16,
     #[allow(dead_code)] // read by upcoming status/hotplug signal extensions
     pub pid: u16,
     #[allow(dead_code)]

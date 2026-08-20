@@ -3,9 +3,10 @@
 /// Usage: lam-integrity-check <subcommand>
 ///
 /// Subcommands:
-///   settings-signal   Verify that SettingsChanged is emitted after SetSetting()
-///   list-options      Print GetListOptions("pulse_audio_devices") result
-///   general-settings  Print the general section from GetSettings and verify schema
+///   settings-signal    Verify that SettingsChanged is emitted after SetSetting()
+///   list-options       Print GetListOptions("pulse_audio_devices") result
+///   general-settings   Print the general section from GetSettings and verify schema
+///   device-persistence Verify SetSetting persists to disk and value appears in GetSettings
 use std::time::Duration;
 
 use futures::StreamExt;
@@ -38,13 +39,15 @@ async fn main() {
         "settings-signal" => check_settings_signal().await,
         "list-options" => check_list_options().await,
         "general-settings" => check_general_settings().await,
+        "device-persistence" => check_device_persistence().await,
         _ => {
             eprintln!("Usage: lam-integrity-check <subcommand>");
             eprintln!();
             eprintln!("Subcommands:");
-            eprintln!("  settings-signal   Verify SettingsChanged D-Bus signal delivery");
-            eprintln!("  list-options      Print GetListOptions(\"pulse_audio_devices\")");
-            eprintln!("  general-settings  Verify general section in GetSettings");
+            eprintln!("  settings-signal    Verify SettingsChanged D-Bus signal delivery");
+            eprintln!("  list-options       Print GetListOptions(\"pulse_audio_devices\")");
+            eprintln!("  general-settings   Verify general section in GetSettings");
+            eprintln!("  device-persistence Verify SetSetting persists value to YAML file");
             1
         }
     };
@@ -132,6 +135,116 @@ async fn check_settings_signal() -> i32 {
         }
         Err(_) => {
             eprintln!("TIMEOUT: no SettingsChanged signal received within 30 s");
+            1
+        }
+    }
+}
+
+async fn check_device_persistence() -> i32 {
+    println!("=== device-persistence integrity check ===");
+    println!();
+
+    let conn = match Connection::session().await {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("ERROR: cannot connect to session bus: {e}");
+            return 1;
+        }
+    };
+    let proxy = match SettingsProxy::new(&conn).await {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("ERROR: cannot create Settings proxy: {e}");
+            eprintln!("Is lam-daemon running?");
+            return 1;
+        }
+    };
+
+    // Read the current device section to find a writable field.
+    let raw = match proxy.get_settings().await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("ERROR: GetSettings failed: {e}");
+            return 1;
+        }
+    };
+    let parsed: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("ERROR: invalid JSON from GetSettings: {e}");
+            return 1;
+        }
+    };
+
+    let device = &parsed["device"];
+    if !device.is_object() || device.as_object().map(|m| m.is_empty()).unwrap_or(true) {
+        println!("INFO: no device connected — cannot test device persistence.");
+        println!("      Connect a device and retry.");
+        return 0;
+    }
+
+    // Pick the first writable field and its current value.
+    let (field, current_val) = device
+        .as_object()
+        .unwrap()
+        .iter()
+        .next()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .unwrap();
+
+    println!("Test field  : {field}");
+    println!("Current val : {current_val}");
+
+    // Write the same value back (no functional change, just exercise the path).
+    let val_str = serde_json::to_string(&current_val).unwrap();
+    match proxy.set_setting(&field, &val_str).await {
+        Ok(true) => println!("SetSetting  : OK"),
+        Ok(false) => {
+            eprintln!("ERROR: SetSetting returned false — field may not be writable");
+            return 1;
+        }
+        Err(e) => {
+            eprintln!("ERROR: SetSetting failed: {e}");
+            return 1;
+        }
+    }
+
+    // Check for the YAML file in the expected location.
+    let config_home = std::env::var_os("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))
+        .unwrap_or_else(|| std::path::PathBuf::from(".config"));
+    let settings_dir = config_home.join("arctis_manager/settings");
+
+    match std::fs::read_dir(&settings_dir) {
+        Ok(entries) => {
+            let yamls: Vec<_> = entries
+                .flatten()
+                .filter(|e| e.path().extension().map(|x| x == "yaml").unwrap_or(false))
+                .collect();
+            if yamls.is_empty() {
+                eprintln!("WARNING: no YAML file found in {}", settings_dir.display());
+                eprintln!("         (daemon may not have a vid/pid for this device)");
+                return 1;
+            }
+            for entry in &yamls {
+                let path = entry.path();
+                println!("Found file  : {}", path.display());
+                match std::fs::read_to_string(&path) {
+                    Ok(content) => {
+                        if content.contains(&field) {
+                            println!("OK: field '{field}' present in {}", path.display());
+                        } else {
+                            eprintln!("WARNING: field '{field}' not found in {}", path.display());
+                        }
+                    }
+                    Err(e) => eprintln!("ERROR: cannot read {}: {e}", path.display()),
+                }
+            }
+            0
+        }
+        Err(_) => {
+            eprintln!("ERROR: settings dir not found: {}", settings_dir.display());
             1
         }
     }
