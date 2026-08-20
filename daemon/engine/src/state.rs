@@ -59,6 +59,9 @@ pub enum SignalEvent {
     SettingsChanged {
         json: String,
     },
+    EQChanged {
+        json: String,
+    },
     DeviceConnected {
         pid: u16,
         name: String,

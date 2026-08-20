@@ -14,7 +14,11 @@ use tracing::{error, warn};
 use zbus::object_server::SignalEmitter;
 use zbus::{connection, interface};
 
+use crate::audio::AudioSetup;
 use crate::device_persistence;
+use crate::eq_manager::{self as eq_manager, EqRuntime};
+use crate::eq::preset::{list_presets, load_preset, preset_path, save_preset, EqPreset};
+use crate::eq::settings::{load_eq_settings, save_eq_settings};
 use crate::general_settings::GeneralSettings;
 use crate::state::{AppState, DeviceCommand, SignalEvent};
 
@@ -24,6 +28,7 @@ const BUS_NAME: &str = "name.giacomofurlan.ArctisManager.Next";
 const STATUS_PATH: &str = "/name/giacomofurlan/ArctisManager/Next/Status";
 const SETTINGS_PATH: &str = "/name/giacomofurlan/ArctisManager/Next/Settings";
 const CONFIG_PATH: &str = "/name/giacomofurlan/ArctisManager/Next/Config";
+const EQ_PATH: &str = "/name/giacomofurlan/ArctisManager/Next/EQ";
 
 // ── Status interface ──────────────────────────────────────────────────────────
 
@@ -179,6 +184,246 @@ impl SettingsInterface {
         -> zbus::Result<()>;
 }
 
+// ── EQ interface ──────────────────────────────────────────────────────────────
+
+struct EqInterface {
+    state: Arc<Mutex<AppState>>,
+    signal_tx: broadcast::Sender<SignalEvent>,
+    settings_base_dir: std::path::PathBuf,
+    eq_runtime: Arc<Mutex<EqRuntime>>,
+    audio_shared: Arc<Mutex<Option<AudioSetup>>>,
+}
+
+#[interface(name = "name.giacomofurlan.ArctisManager.Next.EQ")]
+impl EqInterface {
+    /// Returns EQ capabilities of the connected device.
+    /// JSON: `{"has_hw_eq": bool, "hw_band_mode": "fixed_10"|"parametric_10"|"fixed_5"|null}`.
+    async fn get_eq_capabilities(&self) -> String {
+        // HW EQ capability is determined from device config.
+        // Currently no device YAML defines EQ APIs, so always false.
+        let _state = self.state.lock().await;
+        serde_json::to_string(&serde_json::json!({
+            "has_hw_eq": false,
+            "hw_band_mode": null
+        }))
+        .unwrap_or_else(|_| r#"{"has_hw_eq":false,"hw_band_mode":null}"#.to_string())
+    }
+
+    /// Returns the full EQ settings JSON (both channels).
+    async fn get_eq_settings(&self) -> String {
+        let settings = load_eq_settings(&self.settings_base_dir);
+        serde_json::to_string(&settings).unwrap_or_else(|_| "{}".to_string())
+    }
+
+    /// Set a single EQ field on a channel.
+    ///
+    /// `channel`: `"media"` or `"chat"`.
+    /// `key`: `"enabled"`, `"backend"`, `"band_mode"`, or `"preset"`.
+    /// `value`: JSON-encoded value.
+    async fn set_eq_setting(&self, channel: &str, key: &str, value: &str) -> bool {
+        if channel != "media" && channel != "chat" {
+            return false;
+        }
+        let mut settings = load_eq_settings(&self.settings_base_dir);
+        let ch = if channel == "media" { &mut settings.media } else { &mut settings.chat };
+
+        let ok = match key {
+            "enabled" => {
+                if let Ok(b) = serde_json::from_str::<bool>(value) {
+                    ch.enabled = b;
+                    true
+                } else {
+                    false
+                }
+            }
+            "backend" => {
+                if let Ok(b) = serde_json::from_str(value) {
+                    ch.backend = b;
+                    true
+                } else {
+                    false
+                }
+            }
+            "band_mode" => {
+                if let Ok(m) = serde_json::from_str(value) {
+                    ch.band_mode = m;
+                    true
+                } else {
+                    false
+                }
+            }
+            "preset" => {
+                if let Ok(name) = serde_json::from_str::<String>(value) {
+                    ch.preset = name;
+                    true
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        };
+
+        if !ok {
+            return false;
+        }
+
+        if let Err(e) = save_eq_settings(&self.settings_base_dir, &settings) {
+            warn!("SetEQSetting: failed to persist: {e}");
+        }
+
+        // Apply or disable EQ pipeline.
+        let ch_settings = if channel == "media" { &settings.media } else { &settings.chat }.clone();
+        if ch_settings.enabled {
+            eq_manager::apply_channel_eq(
+                &ch_settings,
+                channel,
+                &self.settings_base_dir,
+                &self.audio_shared,
+                &self.eq_runtime,
+            )
+            .await;
+        } else {
+            eq_manager::disable_channel_eq(channel, &self.audio_shared, &self.eq_runtime).await;
+        }
+
+        let json = serde_json::to_string(&settings).unwrap_or_default();
+        let _ = self.signal_tx.send(SignalEvent::EQChanged { json });
+        true
+    }
+
+    /// Returns a JSON array of preset summaries: `[{"name": "...", "band_mode": "..."}]`.
+    async fn list_presets(&self) -> String {
+        let presets = list_presets(&self.settings_base_dir);
+        let summaries: Vec<serde_json::Value> = presets
+            .iter()
+            .map(|p| serde_json::json!({"name": p.name, "band_mode": p.band_mode}))
+            .collect();
+        serde_json::to_string(&summaries).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    /// Returns the full preset JSON for `name`, or `{}` if not found.
+    async fn get_preset(&self, name: &str) -> String {
+        let path = preset_path(&self.settings_base_dir, name);
+        match load_preset(&path) {
+            Ok(p) => serde_json::to_string(&p).unwrap_or_else(|_| "{}".to_string()),
+            Err(_) => "{}".to_string(),
+        }
+    }
+
+    /// Save (or overwrite) a preset from JSON.  Returns `true` on success.
+    async fn save_preset(&self, preset_json: &str) -> bool {
+        let preset: EqPreset = match serde_json::from_str(preset_json) {
+            Ok(p) => p,
+            Err(e) => {
+                warn!("SavePreset: invalid JSON: {e}");
+                return false;
+            }
+        };
+        match save_preset(&self.settings_base_dir, &preset) {
+            Ok(()) => true,
+            Err(e) => {
+                warn!("SavePreset: save failed: {e}");
+                false
+            }
+        }
+    }
+
+    /// Delete a preset by name.  Returns `true` if the file was removed.
+    async fn delete_preset(&self, name: &str) -> bool {
+        let path = preset_path(&self.settings_base_dir, name);
+        match std::fs::remove_file(&path) {
+            Ok(()) => true,
+            Err(e) => {
+                warn!("DeletePreset: {e}");
+                false
+            }
+        }
+    }
+
+    /// Returns JSON array of currently active PulseAudio clients.
+    /// Each entry: `{"name": "...", "pid": <u32>}`.
+    async fn get_running_streams(&self) -> String {
+        running_streams_json().await
+    }
+
+    /// Returns JSON array of installed Steam games.
+    /// Each entry: `{"app_id": <u32>, "name": "..."}`.
+    async fn get_steam_games(&self) -> String {
+        steam_games_json()
+    }
+
+    #[zbus(signal)]
+    async fn eq_changed(emitter: &SignalEmitter<'_>, settings_json: &str) -> zbus::Result<()>;
+}
+
+// ── EQ helpers ────────────────────────────────────────────────────────────────
+
+async fn running_streams_json() -> String {
+    let out = tokio::process::Command::new("pactl")
+        .args(["-f", "json", "list", "clients"])
+        .output()
+        .await;
+    let Ok(out) = out else { return "[]".to_string() };
+    if !out.status.success() {
+        return "[]".to_string();
+    }
+    let Ok(clients) = serde_json::from_slice::<serde_json::Value>(&out.stdout) else {
+        return "[]".to_string();
+    };
+    let Some(arr) = clients.as_array() else { return "[]".to_string() };
+    let result: Vec<serde_json::Value> = arr
+        .iter()
+        .filter_map(|c| {
+            let name = c["properties"]["application.name"].as_str()?.to_owned();
+            // Skip PipeWire/PulseAudio internal clients.
+            if name.starts_with("pipewire") || name.starts_with("PulseAudio") {
+                return None;
+            }
+            let pid = c["properties"]["application.process.id"]
+                .as_str()
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or(0);
+            Some(serde_json::json!({"name": name, "pid": pid}))
+        })
+        .collect();
+    serde_json::to_string(&result).unwrap_or_else(|_| "[]".to_string())
+}
+
+fn steam_games_json() -> String {
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let Some(home) = home else { return "[]".to_string() };
+    let steamapps = home.join(".steam/steam/steamapps");
+    let Ok(entries) = std::fs::read_dir(&steamapps) else { return "[]".to_string() };
+    let mut games: Vec<serde_json::Value> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().map_or(true, |e| e != "acf") {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(&path) else { continue };
+        // Parse minimal VDF: look for "appid" and "name" lines.
+        let app_id: Option<u32> = content
+            .lines()
+            .find(|l| l.trim_start().starts_with(r#""appid""#))
+            .and_then(|l| l.split('"').nth(3))
+            .and_then(|s| s.parse().ok());
+        let name: Option<&str> = content
+            .lines()
+            .find(|l| l.trim_start().starts_with(r#""name""#))
+            .and_then(|l| l.split('"').nth(3));
+        if let (Some(id), Some(n)) = (app_id, name) {
+            games.push(serde_json::json!({"app_id": id, "name": n}));
+        }
+    }
+    games.sort_by(|a, b| {
+        a["name"]
+            .as_str()
+            .unwrap_or("")
+            .cmp(b["name"].as_str().unwrap_or(""))
+    });
+    serde_json::to_string(&games).unwrap_or_else(|_| "[]".to_string())
+}
+
 // ── Config interface ──────────────────────────────────────────────────────────
 
 struct ConfigInterface {
@@ -217,7 +462,10 @@ pub async fn start_dbus_service(
     mut signal_rx: broadcast::Receiver<SignalEvent>,
     signal_tx: broadcast::Sender<SignalEvent>,
     settings_base_dir: std::path::PathBuf,
+    audio_shared: Arc<Mutex<Option<AudioSetup>>>,
 ) -> zbus::Result<zbus::Connection> {
+    let eq_runtime = EqRuntime::new();
+
     let conn = connection::Builder::session()?
         .name(BUS_NAME)?
         .serve_at(
@@ -231,14 +479,24 @@ pub async fn start_dbus_service(
             SettingsInterface {
                 state: Arc::clone(&state),
                 signal_tx: signal_tx.clone(),
-                settings_base_dir,
+                settings_base_dir: settings_base_dir.clone(),
             },
         )?
         .serve_at(
             CONFIG_PATH,
             ConfigInterface {
                 state: Arc::clone(&state),
-                signal_tx,
+                signal_tx: signal_tx.clone(),
+            },
+        )?
+        .serve_at(
+            EQ_PATH,
+            EqInterface {
+                state: Arc::clone(&state),
+                signal_tx: signal_tx.clone(),
+                settings_base_dir,
+                eq_runtime: Arc::clone(&eq_runtime),
+                audio_shared,
             },
         )?
         .build()
@@ -246,6 +504,7 @@ pub async fn start_dbus_service(
 
     let status_emitter = SignalEmitter::new(&conn, STATUS_PATH)?.into_owned();
     let settings_emitter = SignalEmitter::new(&conn, SETTINGS_PATH)?.into_owned();
+    let eq_emitter = SignalEmitter::new(&conn, EQ_PATH)?.into_owned();
 
     tokio::spawn(async move {
         loop {
@@ -273,6 +532,11 @@ pub async fn start_dbus_service(
                         SettingsInterface::settings_changed(&settings_emitter, &json).await
                     {
                         error!("SettingsChanged signal failed: {e}");
+                    }
+                }
+                SignalEvent::EQChanged { json } => {
+                    if let Err(e) = EqInterface::eq_changed(&eq_emitter, &json).await {
+                        error!("EQChanged signal failed: {e}");
                     }
                 }
                 SignalEvent::DeviceConnected {
