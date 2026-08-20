@@ -42,8 +42,13 @@ pub struct AudioSink {
 }
 
 /// Parse `pactl -f json list sinks` output into `AudioSink` pairs.
-/// Skips the virtual sinks created by this daemon (`Arctis_Media`, `Arctis_Chat`).
+/// Skips all daemon-managed virtual sinks (names starting with `"Arctis_"`).
 /// This is a pure function so it can be unit-tested without a running PipeWire.
+///
+/// Uses `properties["node.name"]` as the stable id — this is the full ALSA
+/// node path and is invariant across renames.  Some PipeWire/pipewire-pulse
+/// configurations expose the user-visible nick as the top-level `"name"` field
+/// instead, so we do not rely on it.
 pub fn parse_audio_sinks(json: &str) -> Vec<AudioSink> {
     let Ok(sinks) = serde_json::from_str::<serde_json::Value>(json) else {
         return vec![];
@@ -53,8 +58,12 @@ pub fn parse_audio_sinks(json: &str) -> Vec<AudioSink> {
     };
     arr.iter()
         .filter_map(|sink| {
-            let id = sink["name"].as_str()?;
-            if id == MEDIA_SINK || id == CHAT_SINK {
+            // node.name is always the stable ALSA path; fall back to top-level name.
+            let id = sink["properties"]["node.name"]
+                .as_str()
+                .or_else(|| sink["name"].as_str())?;
+            // Skip all daemon-managed virtual sinks.
+            if id.starts_with("Arctis_") {
                 return None;
             }
             let nick = sink["properties"]["node.nick"].as_str().unwrap_or(id);
@@ -305,10 +314,14 @@ mod tests {
 
     #[test]
     fn parse_audio_sinks_skips_virtual_and_extracts_fields() {
+        // Simulates a PipeWire env where top-level "name" is the nick (not the ALSA path).
         let json = r#"[
-            {"name": "Arctis_Media",  "properties": {"node.nick": "Arctis Media"}},
-            {"name": "Arctis_Chat",   "properties": {"node.nick": "Arctis Chat"}},
-            {"name": "alsa_output.usb-SteelSeries-00", "properties": {"node.nick": "Arctis Nova"}}
+            {"name": "Arctis Media",  "properties": {"node.name": "Arctis_Media",  "node.nick": "Arctis Media"}},
+            {"name": "Arctis Chat",   "properties": {"node.name": "Arctis_Chat",   "node.nick": "Arctis Chat"}},
+            {"name": "Arctis Nova Pro Wireless", "properties": {
+                "node.name": "alsa_output.usb-SteelSeries-00",
+                "node.nick": "Arctis Nova"
+            }}
         ]"#;
         let sinks = parse_audio_sinks(json);
         assert_eq!(sinks.len(), 1);
@@ -317,10 +330,38 @@ mod tests {
     }
 
     #[test]
-    fn parse_audio_sinks_falls_back_to_id_when_nick_missing() {
+    fn parse_audio_sinks_skips_all_arctis_prefix_virtual_sinks() {
+        let json = r#"[
+            {"name": "Arctis_Media",            "properties": {"node.name": "Arctis_Media"}},
+            {"name": "Arctis_Chat",             "properties": {"node.name": "Arctis_Chat"}},
+            {"name": "Arctis_Media_EQ_internal","properties": {"node.name": "Arctis_Media_EQ_internal"}},
+            {"name": "good",                    "properties": {"node.name": "alsa_output.pci-0000_0d_00.4", "node.nick": "HD Audio"}}
+        ]"#;
+        let sinks = parse_audio_sinks(json);
+        assert_eq!(sinks.len(), 1);
+        assert_eq!(sinks[0].id, "alsa_output.pci-0000_0d_00.4");
+        assert_eq!(sinks[0].name, "HD Audio");
+    }
+
+    #[test]
+    fn parse_audio_sinks_uses_node_name_property_as_stable_id() {
+        // When top-level "name" is the nick (some PipeWire configs), node.name must be used.
+        let json = r#"[{"name": "ALC1220 Digital", "properties": {
+            "node.name": "alsa_output.pci-0000_0d_00.4.iec958-stereo",
+            "node.nick": "ALC1220 Digital"
+        }}]"#;
+        let sinks = parse_audio_sinks(json);
+        assert_eq!(sinks.len(), 1);
+        assert_eq!(sinks[0].id, "alsa_output.pci-0000_0d_00.4.iec958-stereo");
+        assert_eq!(sinks[0].name, "ALC1220 Digital");
+    }
+
+    #[test]
+    fn parse_audio_sinks_falls_back_to_top_name_when_node_name_absent() {
         let json = r#"[{"name": "alsa_output.usb-foo", "properties": {}}]"#;
         let sinks = parse_audio_sinks(json);
         assert_eq!(sinks.len(), 1);
+        assert_eq!(sinks[0].id, "alsa_output.usb-foo");
         assert_eq!(sinks[0].name, "alsa_output.usb-foo");
     }
 
