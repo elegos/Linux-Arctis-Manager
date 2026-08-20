@@ -10,7 +10,6 @@
 // I/O functions (module load/unload, live gain update) are covered by the
 // `lam-integrity-check ladspa-eq` subcommand.
 
-
 use super::preset::{BandMode, EqPreset};
 
 // ── Plugin geometry ───────────────────────────────────────────────────────────

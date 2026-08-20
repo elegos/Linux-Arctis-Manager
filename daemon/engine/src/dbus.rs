@@ -365,6 +365,10 @@ impl EqInterface {
                 return false;
             }
         };
+        if let Err(e) = preset.validate() {
+            warn!("SavePreset: invalid preset: {e}");
+            return false;
+        }
         match save_preset(&self.settings_base_dir, &preset) {
             Ok(()) => true,
             Err(e) => {

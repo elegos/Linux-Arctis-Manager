@@ -15,6 +15,7 @@ use tokio::time::timeout;
 use zbus::proxy;
 use zbus::Connection;
 
+#[allow(dead_code)]
 #[path = "../eq/mod.rs"]
 mod eq;
 
