@@ -114,8 +114,14 @@ impl SettingsInterface {
         env!("LAM_VERSION").to_string()
     }
 
-    async fn get_list_options(&self, _list_name: &str) -> String {
-        "[]".to_string()
+    async fn get_list_options(&self, list_name: &str) -> String {
+        match list_name {
+            "pulse_audio_devices" => {
+                let sinks = crate::audio::list_audio_sinks().await;
+                serde_json::to_string(&sinks).unwrap_or_else(|_| "[]".to_string())
+            }
+            _ => "[]".to_string(),
+        }
     }
 
     #[zbus(signal)]

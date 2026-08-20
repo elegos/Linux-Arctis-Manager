@@ -4,6 +4,7 @@
 ///
 /// Subcommands:
 ///   settings-signal   Verify that SettingsChanged is emitted after SetSetting()
+///   list-options      Print GetListOptions("pulse_audio_devices") result
 use std::time::Duration;
 
 use futures::StreamExt;
@@ -23,6 +24,7 @@ trait Settings {
     async fn get_version(&self) -> zbus::Result<String>;
     async fn get_settings(&self) -> zbus::Result<String>;
     async fn set_setting(&self, setting: &str, value: &str) -> zbus::Result<bool>;
+    async fn get_list_options(&self, list_name: &str) -> zbus::Result<String>;
 
     #[zbus(signal)]
     async fn settings_changed(&self, settings_json: String) -> zbus::Result<()>;
@@ -33,11 +35,13 @@ async fn main() {
     let subcommand = std::env::args().nth(1).unwrap_or_default();
     let code = match subcommand.as_str() {
         "settings-signal" => check_settings_signal().await,
+        "list-options" => check_list_options().await,
         _ => {
             eprintln!("Usage: lam-integrity-check <subcommand>");
             eprintln!();
             eprintln!("Subcommands:");
             eprintln!("  settings-signal   Verify SettingsChanged D-Bus signal delivery");
+            eprintln!("  list-options      Print GetListOptions(\"pulse_audio_devices\")");
             1
         }
     };
@@ -125,6 +129,57 @@ async fn check_settings_signal() -> i32 {
         }
         Err(_) => {
             eprintln!("TIMEOUT: no SettingsChanged signal received within 30 s");
+            1
+        }
+    }
+}
+
+async fn check_list_options() -> i32 {
+    println!("=== list-options integrity check ===");
+    println!("List : pulse_audio_devices");
+    println!();
+
+    let conn = match Connection::session().await {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("ERROR: cannot connect to session bus: {e}");
+            return 1;
+        }
+    };
+
+    let proxy = match SettingsProxy::new(&conn).await {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("ERROR: cannot create Settings proxy: {e}");
+            eprintln!("Is lam-daemon running?");
+            return 1;
+        }
+    };
+
+    match proxy.get_list_options("pulse_audio_devices").await {
+        Ok(json) => {
+            let parsed: serde_json::Value =
+                serde_json::from_str(&json).unwrap_or(serde_json::Value::Null);
+            let pretty = serde_json::to_string_pretty(&parsed).unwrap_or(json);
+            println!("{pretty}");
+
+            // Verify that each entry has id != name (the v2 bug was id == name).
+            if let Some(arr) = parsed.as_array() {
+                let all_distinct = arr.iter().all(|e| e["id"] != e["name"]);
+                if arr.is_empty() {
+                    println!(
+                        "WARNING: list is empty (no audio sinks found or PipeWire not running)"
+                    );
+                } else if all_distinct {
+                    println!("OK: all entries have distinct id (node.name) and name (node.nick)");
+                } else {
+                    println!("WARNING: some entries have id == name — node.nick may be missing");
+                }
+            }
+            0
+        }
+        Err(e) => {
+            eprintln!("ERROR: GetListOptions failed: {e}");
             1
         }
     }
