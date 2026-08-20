@@ -169,6 +169,10 @@ pub struct SyncEventField {
     pub byte: u8,
     #[serde(default)]
     pub transform: Option<String>,
+    /// D-Bus display hint: `percentage`, `on_off`, `label`.  Overrides the raw
+    /// Rust type string in the emitted status JSON so the GUI renders correctly.
+    #[serde(default)]
+    pub display_type: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -201,6 +205,9 @@ pub struct SyncReadMap {
     pub fields: Option<Vec<String>>,
     #[serde(default)]
     pub transform: Option<String>,
+    /// D-Bus display hint applied to all fields in this map: `percentage`, `on_off`, `label`.
+    #[serde(default)]
+    pub display_type: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]

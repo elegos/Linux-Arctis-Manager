@@ -64,7 +64,7 @@ V2 bug: stored `node.nick` as the device id — rename breaks redirect. V3 fix: 
 |---|---|---|
 | `GetStatus` + `StatusChanged` signal | yes | **Done** |
 | Status grouped by category (headset / mic / bluetooth / wireless) | yes — YAML `representation` dict | **Done** — `representation:` section in device YAML maps categories to field lists; fallback to single `"headset"` when absent |
-| Field `type` values: `percentage`, `on_off`, `label` | yes — YAML `status_parse` | **Partial** — sends `uint8`/`label`; `percentage` not set for battery fields |
+| Field `type` values: `percentage`, `on_off`, `label` | yes — YAML `status_parse` | **Done** — `display_type` on `SyncEventField`/`SyncReadMap` propagates through `EmitEvent.display_types`; battery, mic volume, sidetone, brightness, gain, and BT toggle fields annotated |
 | `DeviceConnected(pid, name, capabilities[])` signal | missing in V2 | **New in V3** |
 | `DeviceDisconnected(pid)` signal | missing in V2 | **New in V3** |
 

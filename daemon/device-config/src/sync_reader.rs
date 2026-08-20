@@ -109,9 +109,18 @@ impl<'a> SyncReader<'a> {
             } else {
                 HashMap::new()
             };
+
+            let mut display_types = HashMap::new();
+            if let Some(dt) = &map.display_type {
+                for name in event_fields.keys() {
+                    display_types.insert(name.clone(), dt.clone());
+                }
+            }
+
             events.push(EmitEvent {
                 signal: map.emit.clone(),
                 fields: event_fields,
+                display_types,
             });
         }
         Ok(events)
@@ -319,6 +328,54 @@ sync_read:
             r.map_entry(entry, &f).unwrap_err(),
             SyncReadError::MissingField { field, .. } if field == "mic_volume"
         ));
+    }
+
+    #[test]
+    fn display_type_from_map_applied_to_all_fields() {
+        let c = cfg(r#"
+sync_read:
+  - struct: status
+    maps:
+      - emit: battery_changed
+        fields: [headset_batt_level, charger_batt_level]
+        display_type: percentage
+"#);
+        let r = SyncReader::new(&c);
+        let entry = &r.entries()[0];
+        let f = fields(&[
+            ("headset_batt_level", FieldValue::U8(75)),
+            ("charger_batt_level", FieldValue::U8(50)),
+        ]);
+        let events = r.map_entry(entry, &f).unwrap();
+        assert_eq!(
+            events[0]
+                .display_types
+                .get("headset_batt_level")
+                .map(String::as_str),
+            Some("percentage")
+        );
+        assert_eq!(
+            events[0]
+                .display_types
+                .get("charger_batt_level")
+                .map(String::as_str),
+            Some("percentage")
+        );
+    }
+
+    #[test]
+    fn display_type_absent_when_not_declared() {
+        let c = cfg(r#"
+sync_read:
+  - struct: audio_settings
+    maps:
+      - {emit: eq_preset, field: eq_preset}
+"#);
+        let r = SyncReader::new(&c);
+        let entry = &r.entries()[0];
+        let f = fields(&[("eq_preset", FieldValue::U8(2))]);
+        let events = r.map_entry(entry, &f).unwrap();
+        assert!(events[0].display_types.is_empty());
     }
 
     #[test]

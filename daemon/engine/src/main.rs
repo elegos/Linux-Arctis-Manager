@@ -262,9 +262,10 @@ async fn run_device(
             if let Some(entry) = s.devices.get_mut(&info.hidraw_path) {
                 for ev in &init_events {
                     for (field, val) in &ev.fields {
+                        let dt = ev.display_types.get(field).map(String::as_str);
                         entry
                             .status
-                            .insert(field.clone(), state::event_value_to_json(val));
+                            .insert(field.clone(), state::event_value_to_json(val, dt));
                     }
                 }
             }
@@ -313,9 +314,10 @@ async fn run_device(
                     let mut s = state_for_events.lock().await;
                     if let Some(entry) = s.devices.get_mut(&hidraw_path_clone) {
                         for (field, val) in &ev.fields {
+                            let dt = ev.display_types.get(field).map(String::as_str);
                             entry
                                 .status
-                                .insert(field.clone(), state::event_value_to_json(val));
+                                .insert(field.clone(), state::event_value_to_json(val, dt));
                             match field.as_str() {
                                 "chatmix_game" | "chatmix_chat" => chatmix_changed = true,
                                 "radio_connection_status" => {
