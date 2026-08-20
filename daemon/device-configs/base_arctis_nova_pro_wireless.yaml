@@ -97,7 +97,29 @@ structs:
   selected_eq_preset:
     - {name: report_id, type: uint8, constant: 0x06}
     - {name: command,   type: uint8, constant: 0x2E}
-    - {name: eq_preset, type: uint8, range: [0, 18]}
+    - name: eq_preset
+      type: uint8
+      range: [0, 18]
+      values_mapping:
+        "0":  flat
+        "1":  bass_boost
+        "2":  focus
+        "3":  smiley
+        "4":  apex_legends
+        "5":  baldurs_gate_3
+        "6":  cod_mwii
+        "7":  cod_warzone_2
+        "8":  destiny_2
+        "9":  diablo_iv
+        "10": fortnite
+        "11": fps_footsteps
+        "12": gta_v
+        "13": minecraft
+        "14": overwatch_2
+        "15": pubg
+        "16": rainbow_six_siege
+        "17": rocket_league
+        "18": custom
 
   dim_timer:
     - {name: report_id, type: uint8, constant: 0x06}
@@ -122,7 +144,7 @@ structs:
   bt_call_default:
     - {name: report_id,      type: uint8, constant: 0x06}
     - {name: command,        type: uint8, constant: 0xB3}
-    - {name: bt_call_default, type: uint8, range: [0, 2]}
+    - {name: bt_call_default, type: uint8, range: [0, 2], values_mapping: {"0": "off", "1": "on", "2": "auto"}}
 
   muted_mic_brightness:
     - {name: report_id,          type: uint8, constant: 0x06}
@@ -137,7 +159,7 @@ structs:
   wireless_mode:
     - {name: report_id,    type: uint8, constant: 0x06}
     - {name: command,      type: uint8, constant: 0xC3}
-    - {name: wireless_mode, type: uint8, range: [0, 1]}
+    - {name: wireless_mode, type: uint8, range: [0, 1], values_mapping: {"0": "speed", "1": "range"}}
 
   audio_settings:
     outgoing:
@@ -359,7 +381,7 @@ sync_events:
   0xB3:
     emit: bt_call_default_changed
     fields:
-      - {name: bt_call_default, byte: 2, transform: bt_call_default_to_label}
+      - {name: bt_call_default, byte: 2}
 
   0xB5:
     emit: wireless_connection_changed
@@ -388,7 +410,7 @@ sync_events:
   0xC3:
     emit: wireless_mode_changed
     fields:
-      - {name: wireless_mode, byte: 2, transform: wireless_mode_to_label}
+      - {name: wireless_mode, byte: 2}
 
 sync_read:
   - struct: audio_settings
@@ -412,10 +434,10 @@ sync_read:
   - struct: wireless_settings
     maps:
       - {emit: bluetooth_startup_changed,       field: bt_power_default,         display_type: on_off}
-      - {emit: bt_call_default_changed,          field: bt_call_default,          transform: bt_call_default_to_label}
+      - {emit: bt_call_default_changed,          field: bt_call_default}
       - {emit: muted_mic_brightness_changed,     field: muted_mic_brightness,     display_type: percentage}
       - {emit: power_inactivity_timer_changed,   field: power_inactivity_timer,   transform: timer_enum_to_minutes}
-      - {emit: wireless_mode_changed,            field: wireless_mode,            transform: wireless_mode_to_label}
+      - {emit: wireless_mode_changed,            field: wireless_mode}
       - {emit: wireless_connection_changed,      field: radio_connection_status,  transform: radio_connection_to_label}
       - emit: battery_changed
         fields: [headset_batt_level, charger_batt_level]
