@@ -610,6 +610,16 @@ async fn run_main_loop(
     }
 
     let (tx, mut rx) = mpsc::channel::<hotplug::HotplugEvent>(16);
+
+    // Install SIGTERM handler once before the select! loop.
+    let mut sigterm = tokio::signal::unix::signal(
+        tokio::signal::unix::SignalKind::terminate(),
+    )
+    .map_err(|e| warn!("SIGTERM handler unavailable: {e}"))
+    .ok();
+
+    let aud_on_remove = Arc::clone(&audio_shared);
+
     tokio::select! {
         res = hotplug::watch(vec![], tx) => {
             if let Err(e) = res {
@@ -645,11 +655,33 @@ async fn run_main_loop(
                         if let Some(handle) = tasks.remove(&dev.hidraw_path) {
                             handle.abort();
                         }
-                        // run_device loops forever; clean up state here on dongle removal.
+                        // The aborted task may not have reached its own teardown;
+                        // take and destroy the sinks here unconditionally.
+                        if let Some(setup) = aud_on_remove.lock().await.take() {
+                            info!("dongle removed: removing virtual audio sinks");
+                            audio::teardown_sinks(setup).await;
+                        }
                         cleanup_device(&app_state, &dev.hidraw_path, dev.pid, &signal_tx).await;
                     }
                 }
             }
         } => {}
+        _ = tokio::signal::ctrl_c() => {
+            info!("SIGINT received, shutting down");
+        }
+        _ = async {
+            match sigterm.as_mut() {
+                Some(s) => { s.recv().await; }
+                None => std::future::pending::<()>().await,
+            }
+        } => {
+            info!("SIGTERM received, shutting down");
+        }
+    }
+
+    // Tear down virtual audio sinks on any exit path.
+    if let Some(setup) = audio_shared.lock().await.take() {
+        info!("daemon exit: removing virtual audio sinks");
+        audio::teardown_sinks(setup).await;
     }
 }
