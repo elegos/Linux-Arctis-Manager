@@ -507,6 +507,7 @@ mod tests {
             constant: None,
             range: None,
             values: None,
+            values_mapping: None,
             repeat: None,
             size: None,
         })
@@ -519,6 +520,7 @@ mod tests {
             constant: Some(num(val)),
             range: None,
             values: None,
+            values_mapping: None,
             repeat: None,
             size: None,
         })
@@ -531,6 +533,7 @@ mod tests {
             constant: None,
             range: Some(vec![float(min), float(max)]),
             values: None,
+            values_mapping: None,
             repeat: None,
             size: None,
         })
@@ -543,6 +546,7 @@ mod tests {
             constant: None,
             range: None,
             values: Some(vals.iter().copied().map(num).collect()),
+            values_mapping: None,
             repeat: None,
             size: None,
         })
@@ -555,6 +559,7 @@ mod tests {
             constant: None,
             range: None,
             values: None,
+            values_mapping: None,
             repeat: Some(n),
             size: None,
         })
@@ -567,6 +572,7 @@ mod tests {
             constant: None,
             range: None,
             values: None,
+            values_mapping: None,
             repeat: None,
             size: Some(size),
         })
@@ -854,6 +860,7 @@ mod tests {
                 constant: Some(Yaml::String("$report_id".to_string())),
                 range: None,
                 values: None,
+                values_mapping: None,
                 repeat: None,
                 size: None,
             })]),
