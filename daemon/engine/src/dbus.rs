@@ -488,6 +488,12 @@ pub async fn start_dbus_service(
 ) -> zbus::Result<zbus::Connection> {
     let eq_runtime = EqRuntime::new();
 
+    // Clones for the stream monitor (spawned after conn is built).
+    let monitor_audio = Arc::clone(&audio_shared);
+    let monitor_eq_rt = Arc::clone(&eq_runtime);
+    let monitor_base = settings_base_dir.clone();
+    let monitor_rx = signal_tx.subscribe();
+
     let conn = connection::Builder::session()?
         .name(BUS_NAME)?
         .serve_at(
@@ -527,6 +533,13 @@ pub async fn start_dbus_service(
     let status_emitter = SignalEmitter::new(&conn, STATUS_PATH)?.into_owned();
     let settings_emitter = SignalEmitter::new(&conn, SETTINGS_PATH)?.into_owned();
     let eq_emitter = SignalEmitter::new(&conn, EQ_PATH)?.into_owned();
+
+    tokio::spawn(crate::stream_monitor::run(
+        monitor_base,
+        monitor_audio,
+        monitor_eq_rt,
+        monitor_rx,
+    ));
 
     tokio::spawn(async move {
         loop {

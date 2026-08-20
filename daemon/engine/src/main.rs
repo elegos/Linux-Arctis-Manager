@@ -2,6 +2,7 @@ mod audio;
 mod dbus;
 mod eq;
 mod eq_manager;
+mod stream_monitor;
 mod device_persistence;
 mod device_session;
 mod engine_error;
