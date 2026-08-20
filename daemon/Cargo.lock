@@ -376,6 +376,7 @@ dependencies = [
  "hid-transport",
  "lam-hidraw-helper",
  "nix",
+ "serde",
  "serde_json",
  "serde_yaml",
  "tempfile",
