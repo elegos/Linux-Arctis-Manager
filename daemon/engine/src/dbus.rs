@@ -124,8 +124,8 @@ impl SettingsInterface {
             let Some(entry) = state.devices.values().next() else {
                 return false;
             };
-            let mut values = HashMap::new();
-            values.insert(setting.to_string(), field_value);
+            // For multi-field structs, populate sibling fields from current status.
+            let mut values = build_write_values(&entry.config, &api_name, setting, field_value, &entry.status);
             entry
                 .cmd_tx
                 .send(DeviceCommand::WriteApi { api_name, values })
@@ -797,6 +797,19 @@ fn field_to_schema(fdef: &FieldDef, current_val: Option<&JsonValue>) -> JsonValu
             .unwrap_or(JsonValue::from(0i64))
     });
 
+    // Explicit values_mapping → discrete_map regardless of range.
+    if let Some(vm) = &fdef.values_mapping {
+        let mapping: Map<String, JsonValue> = vm
+            .iter()
+            .map(|(k, v)| (k.clone(), JsonValue::from(v.as_str())))
+            .collect();
+        return serde_json::json!({
+            "type": "discrete_map",
+            "default_value": default_val,
+            "values_mapping": JsonValue::Object(mapping)
+        });
+    }
+
     if let Some(range) = &fdef.range {
         if range.len() == 2 {
             let min_f = range[0].as_f64().unwrap_or(0.0);
@@ -936,6 +949,52 @@ pub(crate) fn parse_setting_value(
         FieldType::Float32 => Some(FieldValue::F32(json_val.as_f64()? as f32)),
         FieldType::ByteArray => None, // byte-array fields are not settable via D-Bus
     }
+}
+
+/// Build the full `values` map for a `WriteApi` command.
+///
+/// The codec requires every non-constant field in the struct. For the field
+/// being set (`changed_field`) we use `new_value`; for all other non-constant
+/// fields we read the current value from `status` (flat map of
+/// `field_name → {"value": ..., "type": ...}`).
+pub(crate) fn build_write_values(
+    config: &DeviceConfig,
+    api_name: &str,
+    changed_field: &str,
+    new_value: FieldValue,
+    status: &HashMap<String, serde_json::Value>,
+) -> HashMap<String, FieldValue> {
+    let mut values = HashMap::new();
+    values.insert(changed_field.to_string(), new_value);
+
+    let Some(structs) = config.structs.as_ref() else {
+        return values;
+    };
+    let Some(struct_def) = structs.get(api_name) else {
+        return values;
+    };
+
+    for fdef in outgoing_fields(struct_def, structs) {
+        if fdef.constant.is_some() || fdef.name == changed_field {
+            continue;
+        }
+        // Look up the current value from status and parse it into a FieldValue.
+        let raw_val = status
+            .get(&fdef.name)
+            .and_then(|obj| obj.get("value"))
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        let raw_str = raw_val.to_string();
+        if let Some(fv) = parse_setting_value(config, api_name, &fdef.name, &raw_str) {
+            values.insert(fdef.name.clone(), fv);
+        } else {
+            warn!(
+                "build_write_values: cannot resolve sibling field '{}' for api '{}' — struct write may fail",
+                fdef.name, api_name
+            );
+        }
+    }
+    values
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -1116,6 +1175,7 @@ mod tests {
                 constant: None,
                 range: None,
                 values: None,
+                values_mapping: None,
                 repeat: None,
                 size: None,
             })]),
@@ -1143,5 +1203,51 @@ mod tests {
             Some("set_vol".to_string())
         );
         assert_eq!(find_api_for_field(&config, "nonexistent"), None);
+    }
+
+    #[test]
+    fn build_write_values_fills_sibling_fields_from_status() {
+        use std::collections::HashMap as Map;
+
+        let make_field = |name: &str| FieldDef {
+            name: name.to_string(),
+            field_type: FieldType::Uint8,
+            constant: None,
+            range: None,
+            values: None,
+            values_mapping: None,
+            repeat: None,
+            size: None,
+        };
+
+        let mut structs = Map::new();
+        structs.insert(
+            "stream_mix".to_string(),
+            StructDef::Flat(vec![
+                FieldOrRef::Field(make_field("stream_main")),
+                FieldOrRef::Field(make_field("stream_aux")),
+                FieldOrRef::Field(make_field("stream_mic")),
+            ]),
+        );
+        let config = DeviceConfig {
+            structs: Some(structs),
+            ..DeviceConfig::default()
+        };
+
+        let mut status = Map::new();
+        status.insert("stream_aux".to_string(), serde_json::json!({"value": 50, "type": "uint8"}));
+        status.insert("stream_mic".to_string(), serde_json::json!({"value": 80, "type": "uint8"}));
+
+        let values = build_write_values(
+            &config,
+            "stream_mix",
+            "stream_main",
+            FieldValue::U8(70),
+            &status,
+        );
+
+        assert_eq!(values.get("stream_main"), Some(&FieldValue::U8(70)));
+        assert_eq!(values.get("stream_aux"), Some(&FieldValue::U8(50)));
+        assert_eq!(values.get("stream_mic"), Some(&FieldValue::U8(80)));
     }
 }

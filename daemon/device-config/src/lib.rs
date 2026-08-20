@@ -80,6 +80,10 @@ pub struct FieldDef {
     pub range: Option<Vec<serde_yaml::Value>>,
     #[serde(default)]
     pub values: Option<Vec<serde_yaml::Value>>,
+    /// Optional integer→label map for settings widgets (e.g. `{"0":"Off","1":"On","2":"Auto"}`).
+    /// When present, `field_to_schema` emits a `discrete_map` schema instead of a slider.
+    #[serde(default)]
+    pub values_mapping: Option<std::collections::HashMap<String, String>>,
     #[serde(default)]
     pub repeat: Option<u32>,
     /// Required for `bytearray` fields.
