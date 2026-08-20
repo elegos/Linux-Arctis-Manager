@@ -19,8 +19,10 @@ pub async fn request_fd(sock_path: &Path, hidraw_path: &str) -> io::Result<Owned
         .await?;
 
     // The helper replies with one data byte + the fd in SCM_RIGHTS.
+    // recv_scm_rights calls recvmsg which is a blocking syscall; use
+    // block_in_place so the tokio runtime can keep other tasks running.
     stream.readable().await?;
-    let (status, fd_opt) = recv_scm_rights(&stream)?;
+    let (status, fd_opt) = tokio::task::block_in_place(|| recv_scm_rights(&stream))?;
 
     if status != 0x01 {
         return Err(io::Error::new(
@@ -72,7 +74,7 @@ mod tests {
     use lam_hidraw_helper::mock;
     use tempfile::TempDir;
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn request_fd_returns_valid_fd_for_hidraw_path() {
         let dir = TempDir::new().unwrap();
         let sock_path = dir.path().join("helper.sock");
@@ -85,7 +87,7 @@ mod tests {
         assert!(fd.as_raw_fd() >= 0);
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn request_fd_returns_permission_denied_for_non_hidraw() {
         let dir = TempDir::new().unwrap();
         let sock_path = dir.path().join("helper.sock");
