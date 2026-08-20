@@ -7,8 +7,6 @@ from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QScrollArea,
 
 from linux_arctis_manager.config import ConfigSetting, SettingType
 from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
-from linux_arctis_manager.gui.qt_widgets.q_checkable_button_group import \
-    QCheckableButtonGroup
 from linux_arctis_manager.gui.qt_widgets.q_dual_state import QDualState
 from linux_arctis_manager.i18n import I18n
 
@@ -156,15 +154,23 @@ class QSettingsWidget(QWidget):
             widget_layout.addWidget(widget_value_label)
 
             slider.valueChanged.connect(lambda value: widget_value_label.setText(slider_value(value)))
-            slider.valueChanged.connect(lambda value: callback(config, value))
+            slider.sliderReleased.connect(lambda: callback(config, slider.value()))
         elif config.type == SettingType.DISCRETE_MAP:
-            widget = QCheckableButtonGroup()
+            widget = QComboBox()
+            mapping = config.get_kwargs().get('values_mapping', {})
+            ordered_keys = sorted(mapping.keys(), key=lambda k: int(k))
+            for k in ordered_keys:
+                label = I18n.get_instance().translate('settings_values', mapping[k])
+                widget.addItem(label, userData=int(k))
+            current_idx = next((i for i, k in enumerate(ordered_keys) if int(k) == value), 0)
+            widget.setCurrentIndex(current_idx)
 
-            for map_value, map_label in config.get_kwargs().get('values_mapping', {}).items():
-                map_value = int(map_value)
-                widget.addButton(value=map_value, label=map_label, selected=(value == map_value), i18n_section='settings_values')
+            def _discrete_map_changed(config: ConfigSetting, keys: list) -> Callable[[int], None]:
+                def _cb(index: int) -> None:
+                    callback(config, int(keys[index]))
+                return _cb
 
-            widget.new_value.connect(lambda value: callback(config, value))
+            widget.currentIndexChanged.connect(_discrete_map_changed(config, ordered_keys))
 
         elif config.type == SettingType.SELECT:
             widget = QComboBox()
@@ -182,6 +188,5 @@ class QSettingsWidget(QWidget):
         if widget:
             main_layout.addWidget(QLabel(I18n.get_instance().translate('settings', config.name)))
             main_layout.addWidget(widget)
-        
-        return main_widget if widget else None
+
         return main_widget if widget else None
