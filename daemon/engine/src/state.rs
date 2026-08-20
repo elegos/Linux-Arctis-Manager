@@ -10,6 +10,8 @@ use device_config::DeviceConfig;
 use serde_json::Value as JsonValue;
 use tokio::sync::mpsc;
 
+use crate::general_settings::GeneralSettings;
+
 // ── AppState ──────────────────────────────────────────────────────────────────
 
 pub struct AppState {
@@ -17,6 +19,9 @@ pub struct AppState {
     pub devices: HashMap<PathBuf, DeviceEntry>,
     /// Directories to search for device configs, in priority order (first = highest).
     pub config_dirs: Vec<PathBuf>,
+    pub general_settings: GeneralSettings,
+    /// Filesystem path where `general_settings` is persisted.
+    pub general_settings_path: PathBuf,
 }
 
 pub struct DeviceEntry {
