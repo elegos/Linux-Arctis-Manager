@@ -105,10 +105,12 @@ fn find_config(
     // the device entirely (reconnect loop handles device_init failures).
     if interface_num.is_some() {
         if let Some(cfg) = configs.iter().find(|c| pid_matches(c)) {
+            let iface_s = interface_num.map_or_else(|| "?".to_string(), |i| i.to_string());
             warn!(
-                "PID {:#06x} found on interface {:?}, expected command interface; \
-                 starting task anyway — device_init will retry when headset is ready",
-                pid, interface_num
+                "PID {:#06x} on interface {iface_s} matched by PID only \
+                 (expected command interface); starting task anyway — \
+                 device_init will retry when headset is ready",
+                pid
             );
             return Some(cfg);
         }
@@ -591,14 +593,24 @@ async fn run_main_loop(
     let mut tasks: HashMap<PathBuf, JoinHandle<()>> = HashMap::new();
 
     for dev in existing {
-        info!(
-            "device at startup: {} (VID={:#06x} PID={:#06x} iface={:?})",
-            dev.hidraw_path.display(),
-            dev.vid,
-            dev.pid,
-            dev.interface_num
-        );
+        let iface_s = dev
+            .interface_num
+            .map_or_else(|| "?".to_string(), |i| i.to_string());
         if let Some(cfg) = find_config(&configs, dev.pid, dev.interface_num) {
+            let name = cfg
+                .device
+                .as_ref()
+                .and_then(|d| d.variants.as_ref())
+                .and_then(|vs| vs.iter().find(|v| v.product_id == dev.pid))
+                .and_then(|v| v.name.as_deref())
+                .unwrap_or("unknown");
+            info!(
+                "device at startup: {} PID={:#06x} iface={} ({})",
+                dev.hidraw_path.display(),
+                dev.pid,
+                iface_s,
+                name
+            );
             let cfg = Arc::clone(cfg);
             let sock = helper_sock.clone();
             let path = dev.hidraw_path.clone();
@@ -608,7 +620,10 @@ async fn run_main_loop(
             let handle = tokio::spawn(run_device(dev, cfg, sock, state, stx, aud));
             tasks.insert(path, handle);
         } else {
-            info!("no config for PID {:#06x}, skipping", dev.pid);
+            info!(
+                "no config for PID={:#06x} iface={}, skipping",
+                dev.pid, iface_s
+            );
         }
     }
 
@@ -631,11 +646,24 @@ async fn run_main_loop(
             while let Some(event) = rx.recv().await {
                 match event {
                     hotplug::HotplugEvent::Added(dev) => {
-                        info!(
-                            "hotplug add: {} (PID={:#06x})",
-                            dev.hidraw_path.display(), dev.pid
-                        );
+                        let iface_s = dev
+                            .interface_num
+                            .map_or_else(|| "?".to_string(), |i| i.to_string());
                         if let Some(cfg) = find_config(&configs, dev.pid, dev.interface_num) {
+                            let name = cfg
+                                .device
+                                .as_ref()
+                                .and_then(|d| d.variants.as_ref())
+                                .and_then(|vs| vs.iter().find(|v| v.product_id == dev.pid))
+                                .and_then(|v| v.name.as_deref())
+                                .unwrap_or("unknown");
+                            info!(
+                                "hotplug add: {} PID={:#06x} iface={} ({})",
+                                dev.hidraw_path.display(),
+                                dev.pid,
+                                iface_s,
+                                name
+                            );
                             let cfg = Arc::clone(cfg);
                             let sock = helper_sock.clone();
                             let path = dev.hidraw_path.clone();
@@ -645,7 +673,10 @@ async fn run_main_loop(
                             let handle = tokio::spawn(run_device(dev, cfg, sock, state, stx, aud));
                             tasks.insert(path, handle);
                         } else {
-                            info!("no config for PID {:#06x}", dev.pid);
+                            info!(
+                                "no config for PID={:#06x} iface={}, skipping",
+                                dev.pid, iface_s
+                            );
                         }
                     }
                     hotplug::HotplugEvent::Removed(dev) => {
