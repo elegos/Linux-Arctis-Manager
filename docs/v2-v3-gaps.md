@@ -9,7 +9,7 @@
 
 | Interface | V2 class | V3 |
 |---|---|---|
-| `…Settings` | `ArctisManagerDbusSettingsService` | **Partial** — see Settings section |
+| `…Settings` | `ArctisManagerDbusSettingsService` | **Done** |
 | `…Status` | `ArctisManagerDbusStatusService` | **Done** |
 | `…Config` | `ArctisManagerDbusConfigService` | **Done** |
 | `…EQ` | `ArctisManagerDbusEQService` | **Done** |
