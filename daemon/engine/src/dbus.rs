@@ -97,8 +97,11 @@ impl SettingsInterface {
             .is_ok()
     }
 
+    async fn get_version(&self) -> String {
+        env!("LAM_VERSION").to_string()
+    }
+
     async fn get_list_options(&self, _list_name: &str) -> String {
-        // PipeWire/PulseAudio sink enumeration is not yet implemented.
         "[]".to_string()
     }
 }
@@ -122,11 +125,6 @@ impl ConfigInterface {
         let mut state = self.state.lock().await;
         state.configs = new_configs;
         true
-    }
-
-    #[zbus(property)]
-    fn version(&self) -> &str {
-        env!("CARGO_PKG_VERSION")
     }
 }
 
@@ -459,6 +457,16 @@ fn parse_setting_value(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn get_version_is_semver_like() {
+        let v = env!("LAM_VERSION");
+        assert!(!v.is_empty());
+        assert!(
+            v.split('.').count() >= 2,
+            "'{v}' has fewer than 2 version components"
+        );
+    }
     use device_config::{ApiDef, ApiOp, FieldType, Transport};
     use std::path::PathBuf;
     use tokio::sync::mpsc;

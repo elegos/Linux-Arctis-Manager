@@ -340,7 +340,7 @@ impl DeviceSession {
                                 "sync read timed out",
                             )),
                         })?;
-                    if expected_id.map_or(true, |id| response.first() == Some(&id)) {
+                    if expected_id.is_none_or(|id| response.first() == Some(&id)) {
                         return Ok(response);
                     }
                     // Wrong report ID — async notification buffered before response.

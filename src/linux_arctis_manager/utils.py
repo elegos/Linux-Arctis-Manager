@@ -8,7 +8,16 @@ def project_version() -> str:
     try:
         return version("linux-arctis-manager")
     except PackageNotFoundError:
-        return "dev"
+        pass
+    # Running from source: read the shared VERSION file at the repo root.
+    try:
+        import pathlib
+        v = (pathlib.Path(__file__).parents[2] / "VERSION").read_text().strip()
+        if v:
+            return v
+    except OSError:
+        pass
+    return "dev"
 
 
 def compare_versions(a: str, b: str) -> int:
