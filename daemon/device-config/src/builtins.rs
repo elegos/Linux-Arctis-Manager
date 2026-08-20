@@ -4,9 +4,11 @@
 /// Input: 40 bytes (10 × f32 LE).  Output: 10 bytes, one per EQ band.
 pub fn gains_to_firmware_values(bytes: &[u8]) -> Vec<u8> {
     bytes
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|c| {
-            let db = f32::from_le_bytes([c[0], c[1], c[2], c[3]]);
+            let db = f32::from_le_bytes(*c);
             ((2.0_f32 * (10.0_f32 + db)).round() as i32).clamp(0, 255) as u8
         })
         .collect()
