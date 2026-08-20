@@ -421,6 +421,7 @@ class ArctisManagerDbusVCService(ServiceInterface):
         self.logger = logging.getLogger('ArctisManagerDbusVCService')
         self._installing = False
         self._downloading = False
+        self._downloading_base = False
 
     @method('GetVCCapabilities')
     def get_vc_capabilities(self) -> 's':  # type: ignore
@@ -448,6 +449,7 @@ class ArctisManagerDbusVCService(ServiceInterface):
             sources = []
 
         from linux_arctis_manager.ai_deps import ai_env_exists
+        from linux_arctis_manager.voice_changer.rvc.model_downloader import base_models_status
         return json.dumps({
             'sources': sources,
             'ladspa': ladspa,
@@ -457,6 +459,7 @@ class ArctisManagerDbusVCService(ServiceInterface):
                 'models':       rvc_models,
                 'models_folder': str(RVCModelManager.models_folder()),
                 'ai_env_exists': ai_env_exists(),
+                'base_models':  base_models_status(),
             },
         })
 
@@ -698,6 +701,14 @@ class ArctisManagerDbusVCService(ServiceInterface):
     def signal_download_complete(self, result_json: 's') -> 's':  # type: ignore
         return result_json
 
+    @signal('BaseModelDownloadProgress')
+    def signal_base_model_progress(self, message: 's') -> 's':  # type: ignore
+        return message
+
+    @signal('BaseModelDownloadComplete')
+    def signal_base_model_complete(self, result_json: 's') -> 's':  # type: ignore
+        return result_json
+
     @method('SearchHFModels')
     async def search_hf_models(self, query: 's', sort_by: 's') -> 's':  # type: ignore
         from linux_arctis_manager.voice_changer.rvc.hf_search import search_models
@@ -761,6 +772,40 @@ class ArctisManagerDbusVCService(ServiceInterface):
         from linux_arctis_manager.voice_changer.rvc.hf_search import delete_model
         from linux_arctis_manager.voice_changer.rvc.model_manager import RVCModelManager
         return delete_model(name, RVCModelManager.models_folder())
+
+    @method('DownloadBaseModels')
+    def download_base_models_method(self) -> None:  # type: ignore
+        if self._downloading_base:
+            self.signal_base_model_progress('Already downloading, please wait...')
+            return
+        self._downloading_base = True
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = asyncio.get_event_loop()
+        threading.Thread(target=self._run_base_download, args=(loop,), daemon=True).start()
+
+    def _run_base_download(self, loop: asyncio.AbstractEventLoop) -> None:
+        from linux_arctis_manager.voice_changer.rvc.model_downloader import download_base_models
+
+        def progress(msg: str) -> None:
+            try:
+                loop.call_soon_threadsafe(self.signal_base_model_progress, msg)
+            except Exception:
+                pass
+
+        try:
+            download_base_models(progress)
+            result = json.dumps({'success': True, 'message': 'Base models downloaded successfully.'})
+        except Exception as e:
+            self.logger.error('DownloadBaseModels failed: %s', e)
+            result = json.dumps({'success': False, 'message': str(e)})
+        try:
+            loop.call_soon_threadsafe(self.signal_base_model_complete, result)
+        except Exception:
+            pass
+        finally:
+            self._downloading_base = False
 
     @method('GetHFToken')
     def get_hf_token_method(self) -> 's':  # type: ignore

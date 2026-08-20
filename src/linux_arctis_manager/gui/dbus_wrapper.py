@@ -30,6 +30,8 @@ class DbusWrapper(QObject):
     sig_ai_complete = Signal(bool, str)
     sig_download_progress = Signal(str)
     sig_download_complete = Signal(bool, str, str)  # (success, message, model_name)
+    sig_base_model_progress = Signal(str)
+    sig_base_model_complete = Signal(bool, str)
 
     logger = logging.getLogger('DbusWrapper')
 
@@ -46,6 +48,7 @@ class DbusWrapper(QObject):
         self._stop_vc_signal_future: asyncio.Future|None = None
 
         self._status_iface: ProxyInterface|None = None
+        self._settings_iface: ProxyInterface|None = None
 
     async def status_iface(self):
         if not self._status_iface:
@@ -57,13 +60,13 @@ class DbusWrapper(QObject):
         return self._status_iface
 
     async def settings_iface(self):
-        if not self._status_iface:
+        if not self._settings_iface:
             bus = await MessageBus().connect()
             introspection = await bus.introspect(DBUS_BUS_NAME, DBUS_SETTINGS_OBJECT_PATH)
             obj = bus.get_proxy_object(DBUS_BUS_NAME, DBUS_SETTINGS_OBJECT_PATH, introspection)
-            self._status_iface = obj.get_interface(DBUS_SETTINGS_INTERFACE_NAME)
+            self._settings_iface = obj.get_interface(DBUS_SETTINGS_INTERFACE_NAME)
 
-        return self._status_iface
+        return self._settings_iface
 
     def start(self):
         self.request_status()
@@ -119,10 +122,23 @@ class DbusWrapper(QObject):
                 except Exception:
                     self.sig_download_complete.emit(False, result_json, '')
 
-            iface.on_install_progress(on_progress)    # type: ignore
-            iface.on_install_complete(on_complete)     # type: ignore
-            iface.on_download_progress(on_dl_progress) # type: ignore
-            iface.on_download_complete(on_dl_complete)  # type: ignore
+            def on_base_progress(message: str) -> None:
+                self.sig_base_model_progress.emit(message)
+
+            def on_base_complete(result_json: str) -> None:
+                try:
+                    data = json.loads(result_json)
+                    self.sig_base_model_complete.emit(
+                        data.get('success', False), data.get('message', ''))
+                except Exception:
+                    self.sig_base_model_complete.emit(False, result_json)
+
+            iface.on_install_progress(on_progress)                      # type: ignore
+            iface.on_install_complete(on_complete)                       # type: ignore
+            iface.on_download_progress(on_dl_progress)                   # type: ignore
+            iface.on_download_complete(on_dl_complete)                   # type: ignore
+            iface.on_base_model_download_progress(on_base_progress)     # type: ignore
+            iface.on_base_model_download_complete(on_base_complete)     # type: ignore
 
             self._vc_signal_loop = asyncio.get_running_loop()
             self._stop_vc_signal_future = self._vc_signal_loop.create_future()
@@ -382,6 +398,11 @@ class DbusWrapper(QObject):
     def set_hf_token(token: str, qt_signal: SignalInstance) -> None:
         Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async(
             'SetHFToken', 's', [token], qt_signal, is_json=False))).start()
+
+    @staticmethod
+    def download_base_models() -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async(
+            'DownloadBaseModels', '', []))).start()
 
     @staticmethod
     async def _call_vc_async(member: str, signature: str, body: list,

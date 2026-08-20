@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env sh
 
 # Linux Arctis Manager - Automated Install Script
 
@@ -7,7 +7,7 @@ set -e
 echo "Installing Linux Arctis Manager..."
 
 # Check if pipx is installed
-if ! command -v pipx &> /dev/null; then
+if ! command -v pipx > /dev/null 2>&1; then
     echo "Error: pipx not found. Please install pipx first."
     exit 1
 fi
