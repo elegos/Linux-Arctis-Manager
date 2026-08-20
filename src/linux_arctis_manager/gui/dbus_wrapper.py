@@ -48,6 +48,7 @@ class DbusWrapper(QObject):
         self._stop_vc_signal_future: asyncio.Future|None = None
 
         self._status_iface: ProxyInterface|None = None
+        self._settings_iface: ProxyInterface|None = None
 
     async def status_iface(self):
         if not self._status_iface:
@@ -59,13 +60,13 @@ class DbusWrapper(QObject):
         return self._status_iface
 
     async def settings_iface(self):
-        if not self._status_iface:
+        if not self._settings_iface:
             bus = await MessageBus().connect()
             introspection = await bus.introspect(DBUS_BUS_NAME, DBUS_SETTINGS_OBJECT_PATH)
             obj = bus.get_proxy_object(DBUS_BUS_NAME, DBUS_SETTINGS_OBJECT_PATH, introspection)
-            self._status_iface = obj.get_interface(DBUS_SETTINGS_INTERFACE_NAME)
+            self._settings_iface = obj.get_interface(DBUS_SETTINGS_INTERFACE_NAME)
 
-        return self._status_iface
+        return self._settings_iface
 
     def start(self):
         self.request_status()
