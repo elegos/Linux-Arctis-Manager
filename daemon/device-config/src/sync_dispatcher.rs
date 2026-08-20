@@ -38,6 +38,9 @@ impl From<FieldValue> for EventValue {
 pub struct EmitEvent {
     pub signal: String,
     pub fields: HashMap<String, EventValue>,
+    /// Per-field display hint for the D-Bus status JSON (`percentage`, `on_off`, `label`).
+    /// Present only when the YAML declares `display_type` on the field.
+    pub display_types: HashMap<String, String>,
 }
 
 /// An engine-internal call to invoke after field extraction.
@@ -163,6 +166,7 @@ impl<'a> SyncDispatcher<'a> {
         };
 
         let mut fields = HashMap::new();
+        let mut display_types = HashMap::new();
         for f in entry.fields.iter().flatten() {
             let byte_idx = f.byte as usize;
             if byte_idx >= report.len() {
@@ -178,9 +182,16 @@ impl<'a> SyncDispatcher<'a> {
                 None => raw.into(),
             };
             fields.insert(f.name.clone(), value);
+            if let Some(dt) = &f.display_type {
+                display_types.insert(f.name.clone(), dt.clone());
+            }
         }
 
-        Ok(Some(EmitEvent { signal, fields }))
+        Ok(Some(EmitEvent {
+            signal,
+            fields,
+            display_types,
+        }))
     }
 
     fn build_side_effects(
@@ -453,5 +464,44 @@ sync_events:
         let report = [0x06u8, 0x27, 0x01];
         let result = d.dispatch(&report).unwrap().unwrap();
         assert_eq!(result.side_effects[0].arg, None);
+    }
+
+    #[test]
+    fn display_type_propagated_from_field_def() {
+        let c = cfg(r#"
+sync_events:
+  0xB7:
+    emit: battery_changed
+    fields:
+      - {name: headset_batt_level, byte: 2, display_type: percentage}
+      - {name: charger_batt_level, byte: 3}
+"#);
+        let d = SyncDispatcher::new(&c);
+        let report = [0x06u8, 0xB7, 75, 50, 0x00];
+        let result = d.dispatch(&report).unwrap().unwrap();
+        let emit = result.emit.unwrap();
+        assert_eq!(
+            emit.display_types
+                .get("headset_batt_level")
+                .map(String::as_str),
+            Some("percentage")
+        );
+        assert!(!emit.display_types.contains_key("charger_batt_level"));
+    }
+
+    #[test]
+    fn display_type_absent_by_default() {
+        let c = cfg(r#"
+sync_events:
+  0x27:
+    emit: high_gain
+    fields:
+      - {name: enabled, byte: 2}
+"#);
+        let d = SyncDispatcher::new(&c);
+        let report = [0x06u8, 0x27, 0x01];
+        let result = d.dispatch(&report).unwrap().unwrap();
+        let emit = result.emit.unwrap();
+        assert!(emit.display_types.is_empty());
     }
 }

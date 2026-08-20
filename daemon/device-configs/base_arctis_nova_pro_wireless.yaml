@@ -291,7 +291,7 @@ sync_events:
   0x27:
     emit: high_gain_changed
     fields:
-      - {name: device_gain, byte: 2, transform: gain_from_device}
+      - {name: device_gain, byte: 2, transform: gain_from_device, display_type: on_off}
 
   0x2E:
     emit: eq_preset_changed
@@ -301,12 +301,12 @@ sync_events:
   0x37:
     emit: mic_volume_changed
     fields:
-      - {name: mic_volume, byte: 2}
+      - {name: mic_volume, byte: 2, display_type: percentage}
 
   0x39:
     emit: sidetone_changed
     fields:
-      - {name: sidetone, byte: 2}
+      - {name: sidetone, byte: 2, display_type: percentage}
 
   0x43:
     emit: line_out_mode_changed
@@ -334,7 +334,7 @@ sync_events:
   0x85:
     emit: oled_brightness_changed
     fields:
-      - {name: oled_brightness, byte: 2}
+      - {name: oled_brightness, byte: 2, display_type: percentage}
 
   0x89:
     emit: home_screen_type_changed
@@ -344,12 +344,12 @@ sync_events:
   0xB2:
     emit: bluetooth_startup_changed
     fields:
-      - {name: bt_power_default, byte: 2}
+      - {name: bt_power_default, byte: 2, display_type: on_off}
 
   0xB3:
     emit: bt_call_default_changed
     fields:
-      - {name: bt_call_default, byte: 2}
+      - {name: bt_call_default, byte: 2, display_type: on_off}
 
   0xB5:
     emit: wireless_connection_changed
@@ -361,14 +361,14 @@ sync_events:
   0xB7:
     emit: battery_changed
     fields:
-      - {name: headset_batt_level, byte: 2, transform: battery_level_to_percent}
-      - {name: charger_batt_level, byte: 3, transform: battery_level_to_percent}
+      - {name: headset_batt_level, byte: 2, transform: battery_level_to_percent, display_type: percentage}
+      - {name: charger_batt_level, byte: 3, transform: battery_level_to_percent, display_type: percentage}
       - {name: charging_status,    byte: 4, transform: charging_status_to_label}
 
   0xBF:
     emit: muted_mic_brightness_changed
     fields:
-      - {name: muted_mic_brightness, byte: 2}
+      - {name: muted_mic_brightness, byte: 2, display_type: percentage}
 
   0xC1:
     emit: power_inactivity_timer_changed
@@ -383,10 +383,10 @@ sync_events:
 sync_read:
   - struct: audio_settings
     maps:
-      - {emit: high_gain_changed,    field: device_gain,   transform: gain_from_device}
+      - {emit: high_gain_changed,    field: device_gain,   transform: gain_from_device, display_type: on_off}
       - {emit: eq_preset_changed,    field: eq_preset}
-      - {emit: mic_volume_changed,   field: mic_volume}
-      - {emit: sidetone_changed,     field: sidetone}
+      - {emit: mic_volume_changed,   field: mic_volume,    display_type: percentage}
+      - {emit: sidetone_changed,     field: sidetone,      display_type: percentage}
       - {emit: line_out_mode_changed, field: line_out_mode}
       - emit: stream_mix_changed
         fields: [stream_main, stream_aux, stream_mic]
@@ -395,22 +395,23 @@ sync_read:
 
   - struct: ux_settings
     maps:
-      - {emit: dim_timer_changed,       field: dim_timer,       transform: timer_enum_to_minutes}
-      - {emit: oled_brightness_changed, field: oled_brightness}
+      - {emit: dim_timer_changed,        field: dim_timer,        transform: timer_enum_to_minutes}
+      - {emit: oled_brightness_changed,  field: oled_brightness,  display_type: percentage}
       - {emit: home_screen_type_changed, field: home_screen_type}
 
   - struct: wireless_settings
     maps:
-      - {emit: bluetooth_startup_changed,       field: bt_power_default}
-      - {emit: bt_call_default_changed,          field: bt_call_default}
-      - {emit: muted_mic_brightness_changed,     field: muted_mic_brightness}
-      - {emit: power_inactivity_timer_changed,   field: power_inactivity_timer, transform: timer_enum_to_minutes}
+      - {emit: bluetooth_startup_changed,       field: bt_power_default,         display_type: on_off}
+      - {emit: bt_call_default_changed,          field: bt_call_default,          display_type: on_off}
+      - {emit: muted_mic_brightness_changed,     field: muted_mic_brightness,     display_type: percentage}
+      - {emit: power_inactivity_timer_changed,   field: power_inactivity_timer,   transform: timer_enum_to_minutes}
       - {emit: wireless_mode_changed,            field: wireless_mode}
-      - {emit: wireless_connection_changed,      field: radio_connection_status, transform: radio_connection_to_label}
+      - {emit: wireless_connection_changed,      field: radio_connection_status,  transform: radio_connection_to_label}
       - emit: battery_changed
         fields: [headset_batt_level, charger_batt_level]
         transform: battery_level_to_percent
-      - {emit: headset_batt_status_changed,      field: headset_batt_status, transform: headset_batt_status_to_label}
+        display_type: percentage
+      - {emit: headset_batt_status_changed,      field: headset_batt_status,      transform: headset_batt_status_to_label}
 
 lifecycle:
   init:

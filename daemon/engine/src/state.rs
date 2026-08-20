@@ -66,8 +66,10 @@ pub enum SignalEvent {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /// Convert an `EventValue` into a `{"value": ..., "type": "..."}` JSON object.
-pub fn event_value_to_json(ev: &EventValue) -> JsonValue {
-    match ev {
+/// `display_type` overrides the raw Rust type string when present (e.g. `"percentage"`,
+/// `"on_off"`), so the GUI receives the hint it expects.
+pub fn event_value_to_json(ev: &EventValue, display_type: Option<&str>) -> JsonValue {
+    let mut j = match ev {
         EventValue::Field(FieldValue::U8(v)) => {
             serde_json::json!({"value": v, "type": "uint8"})
         }
@@ -86,14 +88,18 @@ pub fn event_value_to_json(ev: &EventValue) -> JsonValue {
         EventValue::Field(FieldValue::Array(v)) => {
             let arr: Vec<JsonValue> = v
                 .iter()
-                .map(|fv| event_value_to_json(&EventValue::Field(fv.clone())))
+                .map(|fv| event_value_to_json(&EventValue::Field(fv.clone()), None))
                 .collect();
             serde_json::json!({"value": arr, "type": "array"})
         }
         EventValue::Str(s) => {
             serde_json::json!({"value": s, "type": "label"})
         }
+    };
+    if let Some(dt) = display_type {
+        j["type"] = JsonValue::String(dt.to_string());
     }
+    j
 }
 
 #[cfg(test)]
@@ -118,15 +124,29 @@ mod tests {
 
     #[test]
     fn event_value_to_json_u8() {
-        let j = event_value_to_json(&EventValue::Field(FieldValue::U8(42)));
+        let j = event_value_to_json(&EventValue::Field(FieldValue::U8(42)), None);
         assert_eq!(j["value"], 42);
         assert_eq!(j["type"], "uint8");
     }
 
     #[test]
     fn event_value_to_json_str() {
-        let j = event_value_to_json(&EventValue::Str("CONNECTED".to_string()));
+        let j = event_value_to_json(&EventValue::Str("CONNECTED".to_string()), None);
         assert_eq!(j["value"], "CONNECTED");
         assert_eq!(j["type"], "label");
+    }
+
+    #[test]
+    fn event_value_to_json_display_type_override() {
+        let j = event_value_to_json(&EventValue::Field(FieldValue::U8(75)), Some("percentage"));
+        assert_eq!(j["value"], 75);
+        assert_eq!(j["type"], "percentage");
+    }
+
+    #[test]
+    fn event_value_to_json_on_off_override() {
+        let j = event_value_to_json(&EventValue::Field(FieldValue::U8(0)), Some("on_off"));
+        assert_eq!(j["value"], 0);
+        assert_eq!(j["type"], "on_off");
     }
 }

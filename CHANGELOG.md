@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added (v3 daemon)
 
 - v3: `representation` section in device YAML configs maps category names to status field lists; `GetStatus` now returns fields grouped by category instead of all under `"headset"`.
+- v3: `display_type` field on `SyncEventField` (in `sync_events`) and `SyncReadMap` (in `sync_read`) lets YAML authors declare the GUI hint (`percentage`, `on_off`, `label`) for each status field; the hint is propagated through `EmitEvent.display_types` and written into the `"type"` key of the status JSON that `GetStatus` / `StatusChanged` emits. Annotated battery, mic volume, sidetone, brightness, gain, and Bluetooth toggle fields in `base_arctis_nova_pro_wireless.yaml`.
 
 ### Added
 
