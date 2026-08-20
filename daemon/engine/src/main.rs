@@ -1,5 +1,6 @@
 mod audio;
 mod dbus;
+mod device_persistence;
 mod device_session;
 mod engine_error;
 mod general_settings;
@@ -142,13 +143,19 @@ pub fn config_dirs() -> Vec<PathBuf> {
     dirs
 }
 
-/// Path to the persisted general settings YAML file.
-pub fn general_settings_path() -> PathBuf {
+/// Base directory for all user-level Arctis Manager config files.
+/// `~/.config/arctis_manager` (respects XDG_CONFIG_HOME).
+pub fn user_settings_base_dir() -> PathBuf {
     std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
         .unwrap_or_else(|| PathBuf::from(".config"))
-        .join("arctis_manager/general_settings.yaml")
+        .join("arctis_manager")
+}
+
+/// Path to the persisted general settings YAML file.
+pub fn general_settings_path() -> PathBuf {
+    user_settings_base_dir().join("general_settings.yaml")
 }
 
 // ── Per-device task ───────────────────────────────────────────────────────────
@@ -194,6 +201,7 @@ async fn run_device(
             info.hidraw_path.clone(),
             DeviceEntry {
                 config: Arc::clone(&config),
+                vid: info.vid,
                 pid: info.pid,
                 name: friendly_name.clone(),
                 capabilities: capabilities.clone(),
@@ -310,8 +318,35 @@ async fn run_device(
             }
         }));
 
-        // Fresh command channel per session.
-        let (cmd_tx, cmd_rx) = mpsc::channel::<DeviceCommand>(16);
+        // Fresh command channel per session.  Buffer sized to hold all re-apply
+        // commands before the event loop starts consuming them.
+        let (cmd_tx, cmd_rx) = mpsc::channel::<DeviceCommand>(64);
+
+        // Re-apply persisted device settings before the event loop starts, so
+        // the device state matches what the user last configured.
+        let settings_file =
+            device_persistence::settings_file_path(&user_settings_base_dir(), info.vid, info.pid);
+        let overrides = device_persistence::load_device_settings(&settings_file);
+        if !overrides.is_empty() {
+            info!(
+                "re-applying {} persisted setting(s) for PID={:#06x}",
+                overrides.len(),
+                info.pid
+            );
+            for (field, json_val) in &overrides {
+                let raw = serde_json::to_string(json_val).unwrap_or_default();
+                if let Some(api_name) = dbus::find_api_for_field(&config, field) {
+                    if let Some(fv) = dbus::parse_setting_value(&config, &api_name, field, &raw) {
+                        let mut values = HashMap::new();
+                        values.insert(field.clone(), fv);
+                        let _ = cmd_tx
+                            .send(DeviceCommand::WriteApi { api_name, values })
+                            .await;
+                    }
+                }
+            }
+        }
+
         {
             let mut s = app_state.lock().await;
             if let Some(entry) = s.devices.get_mut(&info.hidraw_path) {
@@ -508,6 +543,7 @@ async fn main() {
         Arc::clone(&app_state),
         signal_rx,
         signal_tx.clone(),
+        user_settings_base_dir(),
     )
     .await
     {

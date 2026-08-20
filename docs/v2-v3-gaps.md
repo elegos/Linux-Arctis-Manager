@@ -53,8 +53,8 @@ V2 bug: stored `node.nick` as the device id — rename breaks redirect. V3 fix: 
 | Feature | V2 | V3 |
 |---|---|---|
 | Load defaults from YAML on first run | yes | yes (YAML `apis` field ranges) |
-| Persist user overrides to `<vid>_<pid>.yaml` | yes | **Missing** — settings lost on daemon restart |
-| Re-apply persisted settings on reconnect | yes | **Missing** |
+| Persist user overrides to `<vid>_<pid>.yaml` | yes | **Done** — saved to `settings/<vid:04x>_<pid:04x>.yaml` after each `SetSetting` |
+| Re-apply persisted settings on reconnect | yes | **Done** — loaded and sent as `WriteApi` before event loop starts |
 
 ---
 
@@ -94,7 +94,7 @@ V2 bug: stored `node.nick` as the device id — rename breaks redirect. V3 fix: 
 | YAML config loading + hot-reload via D-Bus | yes | **Done** |
 | Device selector: prefer PID match, fall back to product string | yes | **Done** — prefers PID+interface match, falls back to PID-only |
 | Reactive wireless reconnect (wait for dongle event) | polling | **Done** — blocks on `read_any_report(30s)`, wakes on dongle notification |
-| Device settings file persistence | yes | **Missing** |
+| Device settings file persistence | yes | **Done** — `device_persistence` module; `settings/<vid>_<pid>.yaml` |
 | USB kernel driver detach/reattach | yes (pyusb) | N/A — hidraw-helper sidecar replaces direct USB access |
 
 ---
