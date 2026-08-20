@@ -140,7 +140,7 @@ bands:
 | LADSPA `mbeq_1197` pipeline (10-band simple, 15-band advanced) | `EQManager` | **Done** — `eq::ladspa` + `eq_manager`: all 3 band modes, live gain update, routing swap |
 | Preset library (YAML files in `eq_presets/`) | `list_presets()`, `EQPreset` | **Done** — `eq::preset`: `BandMode` (fixed_10/parametric_10/fixed_5), save/load/list |
 | App-aware overrides (stream / executable / Steam game) | `EQAppOverride` | **Partial** — data model in `eq::settings` (`AppMatcher`, `AppOverride`); activation logic not yet wired |
-| PipeWire stream monitor (LADSPA backend app override) | `EQManager.start_stream_monitor()` | **Missing** |
+| PipeWire stream monitor (LADSPA backend app override) | `EQManager.start_stream_monitor()` | **Done** — `stream_monitor`: subscribes to `pactl subscribe`, re-snapshots clients on each `client` event, applies first matching `AppOverride` preset per channel, restores default when match lifts; reacts to `EQChanged` signal for live settings updates |
 | Foreground window monitor (hardware backend app override) | N/A | **Missing** |
 | `GetSteamGames` (Steam library scan) | `steam_library.py` | **Done** — ACF VDF parser, sorted by name |
 | `GetRunningStreams` (PulseAudio client list) | `get_running_streams()` | **Done** — `pactl -f json list clients`, filters internal PipeWire clients |
