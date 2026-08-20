@@ -1,0 +1,107 @@
+name: SAST (non-blocking)
+
+on:
+  push:
+  pull_request:
+
+# All jobs use continue-on-error: true — findings are surfaced as annotations
+# and (when permissions allow) uploaded to the GitHub Security tab, but never
+# block a merge.
+
+jobs:
+  # ── cargo-audit: Rust dependency CVE scan ─────────────────────────────────
+  cargo-audit:
+    name: cargo audit (RustSec)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write   # required for SARIF upload
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: daemon
+
+      - name: Run cargo audit
+        uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: daemon
+
+  # ── bandit: Python security lint ──────────────────────────────────────────
+  bandit:
+    name: bandit (Python)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install bandit
+        run: pip install bandit[sarif]
+
+      - name: Run bandit
+        # Exclude test files and the voice-changer ML pipeline (not attack surface)
+        run: |
+          bandit -r src/linux_arctis_manager \
+            --exclude src/linux_arctis_manager/voice_changer \
+            -f sarif \
+            -o bandit.sarif \
+            --severity-level medium \
+            --confidence-level medium \
+            || true
+
+      - name: Upload SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: bandit.sarif
+          category: bandit
+
+  # ── semgrep: pattern-based cross-language SAST ────────────────────────────
+  semgrep:
+    name: semgrep
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run semgrep
+        uses: semgrep/semgrep-action@v1
+        with:
+          # p/python covers subprocess injection, eval, path traversal, etc.
+          # p/rust covers unsafe blocks, integer overflow, unwrap-in-production, etc.
+          # p/secrets catches accidentally committed credentials.
+          config: >-
+            p/python
+            p/rust
+            p/secrets
+          generateSarif: "1"
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+
+      - name: Upload SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
