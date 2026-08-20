@@ -134,6 +134,9 @@ impl SettingsInterface {
         };
 
         if sent {
+            let json_val: serde_json::Value =
+                serde_json::from_str(value).unwrap_or(serde_json::Value::Null);
+
             // Persist the written value: load existing overrides, update, save.
             let (vid, pid) = {
                 let s = self.state.lock().await;
@@ -146,12 +149,27 @@ impl SettingsInterface {
             if vid != 0 || pid != 0 {
                 let file_path =
                     device_persistence::settings_file_path(&self.settings_base_dir, vid, pid);
-                let json_val: serde_json::Value =
-                    serde_json::from_str(value).unwrap_or(serde_json::Value::Null);
                 let mut overrides = device_persistence::load_device_settings(&file_path);
-                overrides.insert(setting.to_string(), json_val);
+                overrides.insert(setting.to_string(), json_val.clone());
                 if let Err(e) = device_persistence::save_device_settings(&file_path, &overrides) {
                     warn!("SetSetting: failed to persist device settings: {e}");
+                }
+            }
+
+            // Optimistic update: reflect the new value in the status map so that
+            // the SettingsChanged signal carries the new value rather than the
+            // stale one from the last sync read.  This prevents the GUI from
+            // reverting the widget to the old value on receipt of SettingsChanged.
+            {
+                let mut s = self.state.lock().await;
+                if let Some(entry) = s.devices.values_mut().next() {
+                    let slot = entry
+                        .status
+                        .entry(setting.to_string())
+                        .or_insert_with(|| serde_json::json!({"value": null, "type": null}));
+                    if let Some(v) = slot.get_mut("value") {
+                        *v = json_val;
+                    }
                 }
             }
 
