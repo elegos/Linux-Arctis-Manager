@@ -188,5 +188,5 @@ Everything in this section is **Missing** in V3.
 | Status | `QStatusWidget` | **Done** — fields grouped by category via YAML `representation` |
 | General | `QSettingsWidget(section='general')` | **Done** — general section populated with 3 fields and their schemas |
 | Device | `QSettingsWidget(section='device')` | **Done** — renders sliders/toggles from V3 settings_config |
-| Equalizer | `QEQWidget` | **Partial** — daemon-side D-Bus EQ interface done; GUI not yet updated |
+| Equalizer | `QEQWidget` | **Partial** — daemon D-Bus done; GUI adapter done; backend selector and app override write done; PipeWire stream monitor for app override activation still missing |
 | Microphone (NC + VC) | `QMicWidget`, `QNCWidget`, `QVCWidget` | **Missing** — no NC/VC interfaces |
