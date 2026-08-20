@@ -156,16 +156,16 @@ async fn pw_cli(args: &[&str]) -> Result<String, LadspaError> {
 
 /// Verify that the `mbeq_1197` LADSPA plugin is installed on this system.
 pub async fn check_plugin_available() -> bool {
-    // The plugin library is searched by pipewire/pulseaudio along LADSPA_PATH.
-    // Attempting to load a no-op module is the most reliable check.
-    tokio::process::Command::new("sh")
-        .arg("-c")
-        .arg("find ${LADSPA_PATH:-/usr/lib/ladspa:/usr/lib64/ladspa:/usr/local/lib/ladspa} \
-              -name 'mbeq_1197.so' 2>/dev/null | grep -q .")
-        .status()
-        .await
-        .map(|s| s.success())
-        .unwrap_or(false)
+    // Split LADSPA_PATH on ':' and search each directory separately.
+    let ladspa_path = std::env::var("LADSPA_PATH")
+        .unwrap_or_else(|_| "/usr/lib/ladspa:/usr/lib64/ladspa:/usr/local/lib/ladspa".to_owned());
+    for dir in ladspa_path.split(':') {
+        let candidate = std::path::Path::new(dir).join("mbeq_1197.so");
+        if candidate.exists() {
+            return true;
+        }
+    }
+    false
 }
 
 /// Load a `module-ladspa-sink` for one channel and return the module index.

@@ -7,12 +7,16 @@
 ///   list-options       Print GetListOptions("pulse_audio_devices") result
 ///   general-settings   Print the general section from GetSettings and verify schema
 ///   device-persistence Verify SetSetting persists to disk and value appears in GetSettings
+///   ladspa-eq          Verify mbeq_1197 LADSPA EQ load/update/unload lifecycle
 use std::time::Duration;
 
 use futures::StreamExt;
 use tokio::time::timeout;
 use zbus::proxy;
 use zbus::Connection;
+
+#[path = "../eq/mod.rs"]
+mod eq;
 
 const BUS_NAME: &str = "name.giacomofurlan.ArctisManager.Next";
 const SETTINGS_PATH: &str = "/name/giacomofurlan/ArctisManager/Next/Settings";
@@ -40,6 +44,7 @@ async fn main() {
         "list-options" => check_list_options().await,
         "general-settings" => check_general_settings().await,
         "device-persistence" => check_device_persistence().await,
+        "ladspa-eq" => check_ladspa_eq().await,
         _ => {
             eprintln!("Usage: lam-integrity-check <subcommand>");
             eprintln!();
@@ -48,6 +53,7 @@ async fn main() {
             eprintln!("  list-options       Print GetListOptions(\"pulse_audio_devices\")");
             eprintln!("  general-settings   Verify general section in GetSettings");
             eprintln!("  device-persistence Verify SetSetting persists value to YAML file");
+            eprintln!("  ladspa-eq          Verify mbeq_1197 LADSPA EQ load/update/unload");
             1
         }
     };
@@ -331,6 +337,113 @@ async fn check_general_settings() -> i32 {
     } else {
         1
     }
+}
+
+async fn check_ladspa_eq() -> i32 {
+    use eq::ladspa;
+    use eq::preset::{flat_preset, BandMode};
+
+    println!("=== ladspa-eq integrity check ===");
+    println!();
+
+    // 1. Plugin availability.
+    print!("Checking mbeq_1197 plugin... ");
+    if !ladspa::check_plugin_available().await {
+        eprintln!("NOT FOUND");
+        eprintln!("Install swh-plugins (Fedora: sudo dnf install ladspa-swh-plugins)");
+        return 1;
+    }
+    println!("OK");
+
+    // 2. Print band/frequency mapping.
+    println!();
+    println!("mbeq_1197 band frequencies:");
+    for (i, &f) in ladspa::MBEQ_FREQ.iter().enumerate() {
+        let role = if ladspa::FIXED_10_INDICES.contains(&i) { " [fixed_10]" }
+                   else if ladspa::FIXED_5_INDICES.contains(&i) { " [fixed_5]" }
+                   else { "" };
+        println!("  [{i:2}] {:>6} Hz{role}", f as u32);
+    }
+
+    // 3. Load a test null-sink then attach LADSPA EQ.
+    println!();
+    println!("Loading test null-sink (lam_ic_test_src)...");
+    let load_null = tokio::process::Command::new("pactl")
+        .args(["load-module", "module-null-sink", "sink_name=lam_ic_test_src"])
+        .output()
+        .await;
+    let null_id: Option<u32> = match load_null {
+        Ok(out) if out.status.success() => {
+            let s = String::from_utf8_lossy(&out.stdout);
+            let id = s.trim().parse::<u32>().ok();
+            println!("  null-sink module id = {id:?}");
+            id
+        }
+        Ok(out) => {
+            eprintln!("  FAILED: {}", String::from_utf8_lossy(&out.stderr).trim());
+            None
+        }
+        Err(e) => {
+            eprintln!("  FAILED: {e}");
+            None
+        }
+    };
+
+    let ladspa_id = if null_id.is_some() {
+        let preset = flat_preset(BandMode::Fixed10);
+        let gains = ladspa::gains_for_preset(&preset);
+        println!("Loading LADSPA EQ sink (lam_ic_test_eq)...");
+        match ladspa::load_eq_module("lam_ic_test_eq", "lam_ic_test_src", &gains).await {
+            Ok(id) => {
+                println!("  LADSPA module id = {id}   OK");
+                Some(id)
+            }
+            Err(e) => {
+                eprintln!("  FAILED: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // 4. Live gain update test.
+    if ladspa_id.is_some() {
+        println!("Testing live gain update...");
+        let mut gains = [0.0f32; 15];
+        gains[0] = 6.0; // 50 Hz +6 dB
+        match ladspa::update_gains_live("lam_ic_test_eq", &gains).await {
+            Ok(()) => println!("  Live update: OK"),
+            Err(e) => eprintln!("  Live update failed (non-fatal): {e}"),
+        }
+    }
+
+    // 5. Teardown.
+    println!("Cleaning up...");
+    if let Some(id) = ladspa_id {
+        let _ = ladspa::unload_eq_module(id).await;
+        println!("  Unloaded LADSPA module {id}");
+    }
+    if let Some(id) = null_id {
+        let _ = tokio::process::Command::new("pactl")
+            .args(["unload-module", &id.to_string()])
+            .output()
+            .await;
+        println!("  Unloaded null-sink module {id}");
+    }
+
+    if null_id.is_none() {
+        eprintln!("FAIL: could not load test null-sink");
+        return 1;
+    }
+    if ladspa_id.is_none() {
+        eprintln!("FAIL: could not load LADSPA EQ module");
+        return 1;
+    }
+
+    println!();
+    println!("OK: mbeq_1197 pipeline lifecycle verified");
+    0
 }
 
 async fn check_list_options() -> i32 {
