@@ -16,9 +16,9 @@ use zbus::{connection, interface};
 
 use crate::audio::AudioSetup;
 use crate::device_persistence;
-use crate::eq_manager::{self as eq_manager, EqRuntime};
 use crate::eq::preset::{list_presets, load_preset, preset_path, save_preset, EqPreset};
 use crate::eq::settings::{load_eq_settings, save_eq_settings};
+use crate::eq_manager::{self as eq_manager, EqRuntime};
 use crate::general_settings::GeneralSettings;
 use crate::state::{AppState, DeviceCommand, SignalEvent};
 
@@ -192,6 +192,7 @@ struct EqInterface {
     settings_base_dir: std::path::PathBuf,
     eq_runtime: Arc<Mutex<EqRuntime>>,
     audio_shared: Arc<Mutex<Option<AudioSetup>>>,
+    focus_backend: crate::focus_monitor::FocusBackend,
 }
 
 #[interface(name = "name.giacomofurlan.ArctisManager.Next.EQ")]
@@ -199,9 +200,8 @@ impl EqInterface {
     /// Returns EQ capabilities of the connected device.
     /// JSON: `{"has_hw_eq": bool, "hw_band_mode": "fixed_10"|"parametric_10"|"fixed_5"|null}`.
     async fn get_eq_capabilities(&self) -> String {
+        let ladspa_available = crate::eq::ladspa::check_plugin_available().await;
         let state = self.state.lock().await;
-        // Detect hardware EQ by checking for known EQ API keys in the connected device config.
-        // `custom_eq` → 10-band fixed (Nova Pro family).
         let (has_hw_eq, hw_band_mode): (bool, Option<&str>) = state
             .devices
             .values()
@@ -214,11 +214,15 @@ impl EqInterface {
                 }
             })
             .unwrap_or((false, None));
+        let fb = &self.focus_backend;
         serde_json::to_string(&serde_json::json!({
+            "ladspa_available": ladspa_available,
             "has_hw_eq": has_hw_eq,
             "hw_band_mode": hw_band_mode,
+            "hw_override_backend": crate::focus_monitor::backend_id(fb),
+            "hw_override_unsupported_reason": crate::focus_monitor::unsupported_reason(fb),
         }))
-        .unwrap_or_else(|_| r#"{"has_hw_eq":false,"hw_band_mode":null}"#.to_string())
+        .unwrap_or_else(|_| r#"{"ladspa_available":false,"has_hw_eq":false,"hw_band_mode":null,"hw_override_backend":"unsupported","hw_override_unsupported_reason":null}"#.to_string())
     }
 
     /// Returns the full EQ settings JSON (both channels).
@@ -237,7 +241,11 @@ impl EqInterface {
             return false;
         }
         let mut settings = load_eq_settings(&self.settings_base_dir);
-        let ch = if channel == "media" { &mut settings.media } else { &mut settings.chat };
+        let ch = if channel == "media" {
+            &mut settings.media
+        } else {
+            &mut settings.chat
+        };
 
         let ok = match key {
             "enabled" => {
@@ -294,7 +302,16 @@ impl EqInterface {
         }
 
         // Apply or disable EQ pipeline.
-        let ch_settings = if channel == "media" { &settings.media } else { &settings.chat }.clone();
+        let ch_settings = if channel == "media" {
+            &settings.media
+        } else {
+            &settings.chat
+        }
+        .clone();
+        let hw_ctx = {
+            let st = self.state.lock().await;
+            eq_manager::build_hw_eq_context(&st)
+        };
         if ch_settings.enabled {
             eq_manager::apply_channel_eq(
                 &ch_settings,
@@ -302,10 +319,17 @@ impl EqInterface {
                 &self.settings_base_dir,
                 &self.audio_shared,
                 &self.eq_runtime,
+                hw_ctx.as_ref(),
             )
             .await;
         } else {
-            eq_manager::disable_channel_eq(channel, &self.audio_shared, &self.eq_runtime).await;
+            eq_manager::disable_channel_eq(
+                channel,
+                &self.audio_shared,
+                &self.eq_runtime,
+                hw_ctx.as_ref(),
+            )
+            .await;
         }
 
         let json = serde_json::to_string(&settings).unwrap_or_default();
@@ -385,14 +409,18 @@ async fn running_streams_json() -> String {
         .args(["-f", "json", "list", "clients"])
         .output()
         .await;
-    let Ok(out) = out else { return "[]".to_string() };
+    let Ok(out) = out else {
+        return "[]".to_string();
+    };
     if !out.status.success() {
         return "[]".to_string();
     }
     let Ok(clients) = serde_json::from_slice::<serde_json::Value>(&out.stdout) else {
         return "[]".to_string();
     };
-    let Some(arr) = clients.as_array() else { return "[]".to_string() };
+    let Some(arr) = clients.as_array() else {
+        return "[]".to_string();
+    };
     let result: Vec<serde_json::Value> = arr
         .iter()
         .filter_map(|c| {
@@ -413,16 +441,22 @@ async fn running_streams_json() -> String {
 
 fn steam_games_json() -> String {
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
-    let Some(home) = home else { return "[]".to_string() };
+    let Some(home) = home else {
+        return "[]".to_string();
+    };
     let steamapps = home.join(".steam/steam/steamapps");
-    let Ok(entries) = std::fs::read_dir(&steamapps) else { return "[]".to_string() };
+    let Ok(entries) = std::fs::read_dir(&steamapps) else {
+        return "[]".to_string();
+    };
     let mut games: Vec<serde_json::Value> = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().map_or(true, |e| e != "acf") {
+        if path.extension().is_none_or(|e| e != "acf") {
             continue;
         }
-        let Ok(content) = std::fs::read_to_string(&path) else { continue };
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
         // Parse minimal VDF: look for "appid" and "name" lines.
         let app_id: Option<u32> = content
             .lines()
@@ -487,12 +521,19 @@ pub async fn start_dbus_service(
     audio_shared: Arc<Mutex<Option<AudioSetup>>>,
 ) -> zbus::Result<zbus::Connection> {
     let eq_runtime = EqRuntime::new();
+    let focus_backend = crate::focus_monitor::detect();
 
-    // Clones for the stream monitor (spawned after conn is built).
+    // Clones for background monitors (spawned after conn is built).
     let monitor_audio = Arc::clone(&audio_shared);
     let monitor_eq_rt = Arc::clone(&eq_runtime);
     let monitor_base = settings_base_dir.clone();
+    let monitor_state = Arc::clone(&state);
     let monitor_rx = signal_tx.subscribe();
+    let focus_audio = Arc::clone(&audio_shared);
+    let focus_eq_rt = Arc::clone(&eq_runtime);
+    let focus_base = settings_base_dir.clone();
+    let focus_state = Arc::clone(&state);
+    let focus_rx = signal_tx.subscribe();
 
     let conn = connection::Builder::session()?
         .name(BUS_NAME)?
@@ -525,6 +566,7 @@ pub async fn start_dbus_service(
                 settings_base_dir,
                 eq_runtime: Arc::clone(&eq_runtime),
                 audio_shared,
+                focus_backend: focus_backend.clone(),
             },
         )?
         .build()
@@ -538,7 +580,15 @@ pub async fn start_dbus_service(
         monitor_base,
         monitor_audio,
         monitor_eq_rt,
+        monitor_state,
         monitor_rx,
+    ));
+    tokio::spawn(crate::focus_monitor::run(
+        focus_base,
+        focus_audio,
+        focus_eq_rt,
+        focus_state,
+        focus_rx,
     ));
 
     tokio::spawn(async move {

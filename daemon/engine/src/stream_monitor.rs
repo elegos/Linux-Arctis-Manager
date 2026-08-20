@@ -18,9 +18,9 @@ use tokio::sync::{broadcast, Mutex};
 use tracing::{info, warn};
 
 use crate::audio::AudioSetup;
-use crate::eq::settings::{load_eq_settings, AppMatcher, ChannelEqSettings, EqSettings};
+use crate::eq::settings::{load_eq_settings, AppMatcher, ChannelEqSettings, EqBackend, EqSettings};
 use crate::eq_manager::{self as eq_manager, EqRuntime};
-use crate::state::SignalEvent;
+use crate::state::{AppState, SignalEvent};
 
 // ── Client snapshot ───────────────────────────────────────────────────────────
 
@@ -84,7 +84,8 @@ fn matches(client: &PwClient, matcher: &AppMatcher) -> bool {
 /// Read `SteamAppId` from `/proc/<pid>/environ` to identify a Steam game client.
 fn steam_app_id_for_pid(pid: u32) -> Option<u32> {
     let env = std::fs::read_to_string(format!("/proc/{pid}/environ")).ok()?;
-    env.split('\0').find_map(|var| var.strip_prefix("SteamAppId=")?.parse().ok())
+    env.split('\0')
+        .find_map(|var| var.strip_prefix("SteamAppId=")?.parse().ok())
 }
 
 // ── Override application ──────────────────────────────────────────────────────
@@ -97,11 +98,20 @@ async fn check_and_apply(
     settings: &EqSettings,
     audio_shared: &Arc<Mutex<Option<AudioSetup>>>,
     eq_rt: &Arc<Mutex<EqRuntime>>,
+    app_state: &Arc<Mutex<AppState>>,
     active: &mut HashMap<String, Option<String>>,
 ) {
     let clients = list_pw_clients().await;
+    let hw_ctx = {
+        let st = app_state.lock().await;
+        eq_manager::build_hw_eq_context(&st)
+    };
 
     for (channel, ch_settings) in [("media", &settings.media), ("chat", &settings.chat)] {
+        // Hardware-backend channels are driven by focus_monitor, not stream presence.
+        if matches!(ch_settings.backend, EqBackend::Hardware) {
+            continue;
+        }
         if ch_settings.app_overrides.is_empty() {
             continue;
         }
@@ -127,14 +137,30 @@ async fn check_and_apply(
                 let mut ovr = ch_settings.clone();
                 ovr.preset = preset.to_owned();
                 ovr.enabled = true;
-                eq_manager::apply_channel_eq(&ovr, channel, base_dir, audio_shared, eq_rt).await;
+                eq_manager::apply_channel_eq(
+                    &ovr,
+                    channel,
+                    base_dir,
+                    audio_shared,
+                    eq_rt,
+                    hw_ctx.as_ref(),
+                )
+                .await;
                 active.insert(channel.to_string(), Some(preset.to_owned()));
             }
 
             // Override lifted — restore channel default.
             (None, Some(_)) => {
                 info!("stream monitor: {channel} → restoring default");
-                restore_channel(ch_settings, channel, base_dir, audio_shared, eq_rt).await;
+                restore_channel(
+                    ch_settings,
+                    channel,
+                    base_dir,
+                    audio_shared,
+                    eq_rt,
+                    hw_ctx.as_ref(),
+                )
+                .await;
                 active.insert(channel.to_string(), None);
             }
         }
@@ -147,11 +173,12 @@ async fn restore_channel(
     base_dir: &Path,
     audio_shared: &Arc<Mutex<Option<AudioSetup>>>,
     eq_rt: &Arc<Mutex<EqRuntime>>,
+    hw_ctx: Option<&eq_manager::HwEqContext>,
 ) {
     if ch.enabled {
-        eq_manager::apply_channel_eq(ch, channel, base_dir, audio_shared, eq_rt).await;
+        eq_manager::apply_channel_eq(ch, channel, base_dir, audio_shared, eq_rt, hw_ctx).await;
     } else {
-        eq_manager::disable_channel_eq(channel, audio_shared, eq_rt).await;
+        eq_manager::disable_channel_eq(channel, audio_shared, eq_rt, hw_ctx).await;
     }
 }
 
@@ -161,6 +188,7 @@ pub async fn run(
     settings_base_dir: PathBuf,
     audio_shared: Arc<Mutex<Option<AudioSetup>>>,
     eq_rt: Arc<Mutex<EqRuntime>>,
+    app_state: Arc<Mutex<AppState>>,
     mut signal_rx: broadcast::Receiver<SignalEvent>,
 ) {
     let mut eq_settings = load_eq_settings(&settings_base_dir);
@@ -184,7 +212,15 @@ pub async fn run(
     let mut lines = BufReader::new(stdout).lines();
 
     // Initial check in case streams are already running.
-    check_and_apply(&settings_base_dir, &eq_settings, &audio_shared, &eq_rt, &mut active).await;
+    check_and_apply(
+        &settings_base_dir,
+        &eq_settings,
+        &audio_shared,
+        &eq_rt,
+        &app_state,
+        &mut active,
+    )
+    .await;
 
     loop {
         tokio::select! {
@@ -193,7 +229,7 @@ pub async fn run(
                     Ok(Some(l)) if l.contains("client") => {
                         check_and_apply(
                             &settings_base_dir, &eq_settings,
-                            &audio_shared, &eq_rt, &mut active,
+                            &audio_shared, &eq_rt, &app_state, &mut active,
                         ).await;
                     }
                     Ok(None) | Err(_) => {
@@ -211,7 +247,7 @@ pub async fn run(
                         }
                         check_and_apply(
                             &settings_base_dir, &eq_settings,
-                            &audio_shared, &eq_rt, &mut active,
+                            &audio_shared, &eq_rt, &app_state, &mut active,
                         ).await;
                     }
                     Err(broadcast::error::RecvError::Closed) => break,
@@ -232,22 +268,51 @@ mod tests {
     use crate::eq::settings::AppMatcher;
 
     fn client(name: &str, binary: &str, pid: u32) -> PwClient {
-        PwClient { name: name.to_owned(), binary: binary.to_owned(), pid }
+        PwClient {
+            name: name.to_owned(),
+            binary: binary.to_owned(),
+            pid,
+        }
     }
 
     #[test]
     fn stream_matcher_matches_by_name() {
         let c = client("Spotify", "spotify", 1234);
-        assert!(matches(&c, &AppMatcher::Stream { name: "Spotify".into() }));
-        assert!(!matches(&c, &AppMatcher::Stream { name: "Firefox".into() }));
+        assert!(matches(
+            &c,
+            &AppMatcher::Stream {
+                name: "Spotify".into()
+            }
+        ));
+        assert!(!matches(
+            &c,
+            &AppMatcher::Stream {
+                name: "Firefox".into()
+            }
+        ));
     }
 
     #[test]
     fn executable_matcher_uses_basename() {
         let c = client("Firefox", "firefox", 1234);
-        assert!(matches(&c, &AppMatcher::Executable { path: "/usr/bin/firefox".into() }));
-        assert!(matches(&c, &AppMatcher::Executable { path: "firefox".into() }));
-        assert!(!matches(&c, &AppMatcher::Executable { path: "/usr/bin/spotify".into() }));
+        assert!(matches(
+            &c,
+            &AppMatcher::Executable {
+                path: "/usr/bin/firefox".into()
+            }
+        ));
+        assert!(matches(
+            &c,
+            &AppMatcher::Executable {
+                path: "firefox".into()
+            }
+        ));
+        assert!(!matches(
+            &c,
+            &AppMatcher::Executable {
+                path: "/usr/bin/spotify".into()
+            }
+        ));
     }
 
     #[test]

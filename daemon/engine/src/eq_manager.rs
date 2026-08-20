@@ -1,19 +1,58 @@
 // EQ audio runtime state: tracks which LADSPA modules and loopbacks are active
 // for each channel so the D-Bus interface can swap them when EQ is toggled.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, Mutex};
 use tracing::{info, warn};
+
+use device_config::codec::FieldValue;
 
 use crate::audio::{self, AudioSetup};
 use crate::eq::ladspa;
-use crate::eq::preset::{load_preset, preset_path};
+use crate::eq::preset::{load_preset, preset_path, BandMode};
 use crate::eq::settings::{ChannelEqSettings, EqBackend};
+use crate::state::{AppState, DeviceCommand};
 
 /// Sink names for the EQ virtual sinks.
 pub const MEDIA_EQ_SINK: &str = "Arctis_Media_EQ_internal";
 pub const CHAT_EQ_SINK: &str = "Arctis_Chat_EQ_internal";
+
+// ── Hardware EQ context ───────────────────────────────────────────────────────
+
+/// Everything `apply_channel_eq` needs to drive hardware EQ on a device.
+/// Constructed by the caller from `AppState`; `apply_channel_eq` stays agnostic
+/// of `AppState` itself.
+pub struct HwEqContext {
+    /// Channel to the active device session.
+    pub cmd_tx: mpsc::Sender<DeviceCommand>,
+    /// Band mode the device hardware natively supports.
+    pub native_band_mode: BandMode,
+    /// Number of gain bands (determines field names `gain1`..`gainN`).
+    pub num_bands: u8,
+    /// Preset slot number to activate after writing gains (NovaPro: 18 = custom).
+    pub custom_slot: u8,
+    /// Whether `selected_eq_preset` API is available to commit the custom slot.
+    pub has_preset_select: bool,
+}
+
+/// Build a `HwEqContext` from the first connected device, or `None` if the
+/// device has no hardware EQ API.
+pub fn build_hw_eq_context(state: &AppState) -> Option<HwEqContext> {
+    let entry = state.devices.values().next()?;
+    let apis = entry.config.apis.as_ref()?;
+    if !apis.contains_key("custom_eq") {
+        return None;
+    }
+    Some(HwEqContext {
+        cmd_tx: entry.cmd_tx.clone(),
+        native_band_mode: BandMode::Fixed10,
+        num_bands: 10,
+        custom_slot: 18,
+        has_preset_select: apis.contains_key("selected_eq_preset"),
+    })
+}
 
 // ── Per-channel runtime ───────────────────────────────────────────────────────
 
@@ -62,9 +101,9 @@ pub async fn apply_channel_eq(
     base_dir: &std::path::Path,
     audio_shared: &Arc<Mutex<Option<AudioSetup>>>,
     eq_rt: &Arc<Mutex<EqRuntime>>,
+    hw_ctx: Option<&HwEqContext>,
 ) -> bool {
     let preset_name = &ch_settings.preset;
-    let _band_mode = ch_settings.band_mode;
 
     // Load the preset.
     let preset_file = preset_path(base_dir, preset_name);
@@ -76,11 +115,64 @@ pub async fn apply_channel_eq(
         }
     };
 
-    // Resolve backend: hardware EQ not yet supported in v3 device configs,
-    // so auto/hardware both fall back to LADSPA for now.
-    let use_ladspa = !matches!(ch_settings.backend, EqBackend::Hardware);
-    if !use_ladspa {
-        warn!("eq: hardware backend not yet implemented; falling back to LADSPA");
+    // Hardware path: Auto resolves to hardware when a context is available;
+    // explicit Hardware requires it.  Ladspa always bypasses hardware.
+    let want_hw = !matches!(ch_settings.backend, EqBackend::Ladspa);
+    if want_hw {
+        if let Some(ctx) = hw_ctx {
+            if preset.band_mode != ctx.native_band_mode {
+                warn!(
+                    "eq: preset band_mode {:?} != device native {:?} for {channel}",
+                    preset.band_mode, ctx.native_band_mode
+                );
+                if matches!(ch_settings.backend, EqBackend::Hardware) {
+                    return false; // hard failure for explicit hardware request
+                }
+                // Auto falls through to LADSPA.
+            } else {
+                // Build gain fields: gain1..gainN clamped to device range ±10 dB.
+                let gains: HashMap<String, FieldValue> = preset
+                    .bands
+                    .iter()
+                    .enumerate()
+                    .take(ctx.num_bands as usize)
+                    .map(|(i, b)| {
+                        (
+                            format!("gain{}", i + 1),
+                            FieldValue::F32(b.gain.clamp(-10.0, 10.0)),
+                        )
+                    })
+                    .collect();
+                if ctx
+                    .cmd_tx
+                    .send(DeviceCommand::WriteApi {
+                        api_name: "custom_eq".to_string(),
+                        values: gains,
+                    })
+                    .await
+                    .is_err()
+                {
+                    warn!("eq: HW EQ write failed for {channel}");
+                    return false;
+                }
+                if ctx.has_preset_select {
+                    let slot =
+                        HashMap::from([("eq_preset".to_string(), FieldValue::U8(ctx.custom_slot))]);
+                    let _ = ctx
+                        .cmd_tx
+                        .send(DeviceCommand::WriteApi {
+                            api_name: "selected_eq_preset".to_string(),
+                            values: slot,
+                        })
+                        .await;
+                }
+                info!("eq: HW EQ applied for {channel} (preset='{preset_name}')");
+                return true;
+            }
+        } else if matches!(ch_settings.backend, EqBackend::Hardware) {
+            warn!("eq: hardware backend requested but no HW EQ context for {channel}");
+            return false;
+        }
     }
 
     let gains = ladspa::gains_for_preset(&preset);
@@ -99,7 +191,11 @@ pub async fn apply_channel_eq(
                 return false;
             }
             Some(s) => {
-                let lb = if channel == "media" { s.media_loopback } else { s.chat_loopback };
+                let lb = if channel == "media" {
+                    s.media_loopback
+                } else {
+                    s.chat_loopback
+                };
                 (s.physical_sink.clone(), lb)
             }
         }
@@ -108,7 +204,11 @@ pub async fn apply_channel_eq(
     // Check whether the LADSPA module is already live.
     let existing_ladspa_id = {
         let rt = eq_rt.lock().await;
-        if channel == "media" { rt.media.ladspa_module_id } else { rt.chat.ladspa_module_id }
+        if channel == "media" {
+            rt.media.ladspa_module_id
+        } else {
+            rt.chat.ladspa_module_id
+        }
     };
 
     if let Some(id) = existing_ladspa_id {
@@ -146,10 +246,15 @@ pub async fn apply_channel_eq(
             warn!("eq: failed to create EQ loopback for {channel}");
             // Attempt to restore the original loopback.
             let restore_args = format!("source={source} sink={physical} latency_msec=0");
-            if let Some(id) = crate::audio::load_module_pub("module-loopback", &restore_args).await {
+            if let Some(id) = crate::audio::load_module_pub("module-loopback", &restore_args).await
+            {
                 let mut guard = audio_shared.lock().await;
                 if let Some(s) = guard.as_mut() {
-                    if channel == "media" { s.media_loopback = id; } else { s.chat_loopback = id; }
+                    if channel == "media" {
+                        s.media_loopback = id;
+                    } else {
+                        s.chat_loopback = id;
+                    }
                 }
             }
             return false;
@@ -160,12 +265,20 @@ pub async fn apply_channel_eq(
     {
         let mut guard = audio_shared.lock().await;
         if let Some(s) = guard.as_mut() {
-            if channel == "media" { s.media_loopback = new_lb_id; } else { s.chat_loopback = new_lb_id; }
+            if channel == "media" {
+                s.media_loopback = new_lb_id;
+            } else {
+                s.chat_loopback = new_lb_id;
+            }
         }
     }
     {
         let mut rt = eq_rt.lock().await;
-        let ch = if channel == "media" { &mut rt.media } else { &mut rt.chat };
+        let ch = if channel == "media" {
+            &mut rt.media
+        } else {
+            &mut rt.chat
+        };
         ch.ladspa_module_id = Some(ladspa_id);
         ch.eq_loopback_id = Some(new_lb_id);
         ch.active = true;
@@ -175,16 +288,34 @@ pub async fn apply_channel_eq(
     true
 }
 
-/// Disable EQ on a channel: remove the LADSPA sink and EQ loopback, restore
-/// the direct loopback to the physical sink.
+/// Disable EQ on a channel: reset hardware EQ to flat (preset 0) if active,
+/// remove the LADSPA sink and EQ loopback, restore the direct loopback.
 pub async fn disable_channel_eq(
     channel: &str,
     audio_shared: &Arc<Mutex<Option<AudioSetup>>>,
     eq_rt: &Arc<Mutex<EqRuntime>>,
+    hw_ctx: Option<&HwEqContext>,
 ) {
+    // Reset device EQ to the neutral preset slot (0 = flat/off).
+    if let Some(ctx) = hw_ctx {
+        if ctx.has_preset_select {
+            let slot = HashMap::from([("eq_preset".to_string(), FieldValue::U8(0))]);
+            let _ = ctx
+                .cmd_tx
+                .send(DeviceCommand::WriteApi {
+                    api_name: "selected_eq_preset".to_string(),
+                    values: slot,
+                })
+                .await;
+        }
+    }
     let (ladspa_id, eq_lb_id) = {
         let rt = eq_rt.lock().await;
-        let ch = if channel == "media" { &rt.media } else { &rt.chat };
+        let ch = if channel == "media" {
+            &rt.media
+        } else {
+            &rt.chat
+        };
         (ch.ladspa_module_id, ch.eq_loopback_id)
     };
 
@@ -192,11 +323,14 @@ pub async fn disable_channel_eq(
         let guard = audio_shared.lock().await;
         match guard.as_ref() {
             None => return,
-            Some(s) => (s.physical_sink.clone(), if channel == "media" {
-                audio::MEDIA_SINK.to_owned()
-            } else {
-                "Arctis_Chat".to_owned()
-            }),
+            Some(s) => (
+                s.physical_sink.clone(),
+                if channel == "media" {
+                    audio::MEDIA_SINK.to_owned()
+                } else {
+                    "Arctis_Chat".to_owned()
+                },
+            ),
         }
     };
 
@@ -221,13 +355,21 @@ pub async fn disable_channel_eq(
         let mut guard = audio_shared.lock().await;
         if let Some(s) = guard.as_mut() {
             if let Some(id) = restored_lb_id {
-                if channel == "media" { s.media_loopback = id; } else { s.chat_loopback = id; }
+                if channel == "media" {
+                    s.media_loopback = id;
+                } else {
+                    s.chat_loopback = id;
+                }
             }
         }
     }
     {
         let mut rt = eq_rt.lock().await;
-        let ch = if channel == "media" { &mut rt.media } else { &mut rt.chat };
+        let ch = if channel == "media" {
+            &mut rt.media
+        } else {
+            &mut rt.chat
+        };
         ch.ladspa_module_id = None;
         ch.eq_loopback_id = None;
         ch.active = false;
