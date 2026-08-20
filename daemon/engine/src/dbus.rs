@@ -125,7 +125,13 @@ impl SettingsInterface {
                 return false;
             };
             // For multi-field structs, populate sibling fields from current status.
-            let values = build_write_values(&entry.config, &api_name, setting, field_value, &entry.status);
+            let values = build_write_values(
+                &entry.config,
+                &api_name,
+                setting,
+                field_value,
+                &entry.status,
+            );
             entry
                 .cmd_tx
                 .send(DeviceCommand::WriteApi { api_name, values })
@@ -1235,8 +1241,14 @@ mod tests {
         };
 
         let mut status = Map::new();
-        status.insert("stream_aux".to_string(), serde_json::json!({"value": 50, "type": "uint8"}));
-        status.insert("stream_mic".to_string(), serde_json::json!({"value": 80, "type": "uint8"}));
+        status.insert(
+            "stream_aux".to_string(),
+            serde_json::json!({"value": 50, "type": "uint8"}),
+        );
+        status.insert(
+            "stream_mic".to_string(),
+            serde_json::json!({"value": 80, "type": "uint8"}),
+        );
 
         let values = build_write_values(
             &config,
