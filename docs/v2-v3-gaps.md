@@ -139,7 +139,7 @@ bands:
 | Hardware EQ via HID (fixed_10, parametric_10, fixed_5) | N/A | **Done** — `HwEqContext` struct; `build_hw_eq_context` reads device `apis`; `apply_channel_eq` sends `WriteApi("custom_eq", gain1..N)` + `WriteApi("selected_eq_preset", slot=18)`; Auto falls back to LADSPA on band-mode mismatch; `disable_channel_eq` resets to preset 0 |
 | LADSPA `mbeq_1197` pipeline (10-band simple, 15-band advanced) | `EQManager` | **Done** — `eq::ladspa` + `eq_manager`: all 3 band modes, live gain update, routing swap |
 | Preset library (YAML files in `eq_presets/`) | `list_presets()`, `EQPreset` | **Done** — `eq::preset`: `BandMode` (fixed_10/parametric_10/fixed_5), save/load/list |
-| App-aware overrides (stream / executable / Steam game) | `EQAppOverride` | **Partial** — data model + LADSPA activation done; hardware-backend activation (foreground window monitor) missing |
+| App-aware overrides (stream / executable / Steam game) | `EQAppOverride` | **Done** — data model + LADSPA activation (stream_monitor) + hardware activation (focus_monitor) |
 | PipeWire stream monitor (LADSPA backend app override) | `EQManager.start_stream_monitor()` | **Done** — `stream_monitor`: subscribes to `pactl subscribe`, re-snapshots clients on each `client` event, applies first matching `AppOverride` preset per channel, restores default when match lifts; reacts to `EQChanged` signal for live settings updates |
 | Foreground window monitor (hardware backend app override) | N/A | **Done** — `focus_monitor`: Hyprland IPC / Sway IPC / X11 xprop backends; GNOME Wayland unsupported (note in UI); focus stack per channel |
 | `GetSteamGames` (Steam library scan) | `steam_library.py` | **Done** — ACF VDF parser, sorted by name |
