@@ -1,6 +1,7 @@
 mod audio;
 mod dbus;
 mod eq;
+mod eq_manager;
 mod device_persistence;
 mod device_session;
 mod engine_error;
@@ -174,6 +175,7 @@ async fn run_device(
     helper_sock: PathBuf,
     app_state: Arc<Mutex<AppState>>,
     signal_tx: broadcast::Sender<SignalEvent>,
+    audio_shared: Arc<Mutex<Option<audio::AudioSetup>>>,
 ) {
     let path_str = info.hidraw_path.to_string_lossy().to_string();
     info!("monitoring {path_str} (PID={:#06x})", info.pid);
@@ -304,20 +306,22 @@ async fn run_device(
         }
 
         // Create virtual audio sinks and apply the initial chatmix balance.
-        // Wrapped in Arc<Mutex> so the event-forwarding task can drive the
-        // audio lifecycle directly from radio_connection_status events.
-        let audio_shared = Arc::new(Mutex::new(match audio::setup_sinks().await {
-            Ok(setup) => {
-                if let (Some(game), Some(chat)) = chatmix_from_events(&init_events) {
-                    audio::set_chatmix(game, chat).await;
+        // Uses the shared audio state passed from main() so the EQ interface can
+        // also access the physical sink name and loopback module IDs.
+        {
+            let mut guard = audio_shared.lock().await;
+            if guard.is_none() {
+                match audio::setup_sinks().await {
+                    Ok(setup) => {
+                        if let (Some(game), Some(chat)) = chatmix_from_events(&init_events) {
+                            audio::set_chatmix(game, chat).await;
+                        }
+                        *guard = Some(setup);
+                    }
+                    Err(e) => warn!("audio setup failed for {path_str}: {e}"),
                 }
-                Some(setup)
             }
-            Err(e) => {
-                warn!("audio setup failed for {path_str}: {e}");
-                None
-            }
-        }));
+        }
 
         // Fresh command channel per session.  Buffer sized to hold all re-apply
         // commands before the event loop starts consuming them.
@@ -539,12 +543,17 @@ async fn main() {
 
     let (signal_tx, signal_rx) = broadcast::channel::<SignalEvent>(64);
 
+    // Global audio shared state: set when a device session sets up virtual sinks;
+    // cleared on disconnect.  Shared with the EQ D-Bus interface for routing.
+    let audio_shared: Arc<Mutex<Option<audio::AudioSetup>>> = Arc::new(Mutex::new(None));
+
     // Start D-Bus service.  On failure, continue without it (headless / test env).
     let _dbus_conn = match dbus::start_dbus_service(
         Arc::clone(&app_state),
         signal_rx,
         signal_tx.clone(),
         user_settings_base_dir(),
+        Arc::clone(&audio_shared),
     )
     .await
     {
@@ -558,7 +567,7 @@ async fn main() {
         }
     };
 
-    run_main_loop(configs, helper_sock, app_state, signal_tx).await;
+    run_main_loop(configs, helper_sock, app_state, signal_tx, audio_shared).await;
 }
 
 async fn run_main_loop(
@@ -566,6 +575,7 @@ async fn run_main_loop(
     helper_sock: PathBuf,
     app_state: Arc<Mutex<AppState>>,
     signal_tx: broadcast::Sender<SignalEvent>,
+    audio_shared: Arc<Mutex<Option<audio::AudioSetup>>>,
 ) {
     let existing = match hotplug::scan_existing(&[]) {
         Ok(devs) => devs,
@@ -591,7 +601,8 @@ async fn run_main_loop(
             let path = dev.hidraw_path.clone();
             let state = Arc::clone(&app_state);
             let stx = signal_tx.clone();
-            let handle = tokio::spawn(run_device(dev, cfg, sock, state, stx));
+            let aud = Arc::clone(&audio_shared);
+            let handle = tokio::spawn(run_device(dev, cfg, sock, state, stx, aud));
             tasks.insert(path, handle);
         } else {
             info!("no config for PID {:#06x}, skipping", dev.pid);
@@ -619,7 +630,8 @@ async fn run_main_loop(
                             let path = dev.hidraw_path.clone();
                             let state = Arc::clone(&app_state);
                             let stx = signal_tx.clone();
-                            let handle = tokio::spawn(run_device(dev, cfg, sock, state, stx));
+                            let aud = Arc::clone(&audio_shared);
+                            let handle = tokio::spawn(run_device(dev, cfg, sock, state, stx, aud));
                             tasks.insert(path, handle);
                         } else {
                             info!("no config for PID {:#06x}", dev.pid);

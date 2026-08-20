@@ -10,7 +10,7 @@ use tokio::process::Command;
 use tracing::{info, warn};
 
 pub const MEDIA_SINK: &str = "Arctis_Media";
-const CHAT_SINK: &str = "Arctis_Chat";
+pub(crate) const CHAT_SINK: &str = "Arctis_Chat";
 const STEELSERIES_VID: &str = "0x1038";
 
 // ── Error type ────────────────────────────────────────────────────────────────
@@ -91,12 +91,17 @@ pub async fn list_audio_sinks() -> Vec<AudioSink> {
 
 /// PulseAudio module indices loaded for one device session.
 /// Used to unload exactly what we created on device disconnect.
+/// Fields are public so that the EQ manager can swap loopback targets.
 #[derive(Debug, Clone)]
 pub struct AudioSetup {
-    media_null: u32,
-    chat_null: u32,
-    media_loopback: u32,
-    chat_loopback: u32,
+    /// Stable ALSA node name of the physical Arctis output sink.
+    pub physical_sink: String,
+    pub media_null: u32,
+    pub chat_null: u32,
+    /// Active loopback from `Arctis_Media.monitor` → current downstream.
+    pub media_loopback: u32,
+    /// Active loopback from `Arctis_Chat.monitor` → current downstream.
+    pub chat_loopback: u32,
 }
 
 // ── pactl helpers ─────────────────────────────────────────────────────────────
@@ -210,6 +215,7 @@ pub async fn setup_sinks() -> Result<AudioSetup, AudioError> {
     let (chat_null, chat_loopback) = ensure_sink(CHAT_SINK, "Arctis Chat", &physical).await?;
 
     Ok(AudioSetup {
+        physical_sink: physical,
         media_null,
         chat_null,
         media_loopback,
@@ -268,6 +274,16 @@ pub async fn set_default_sink(node_name: &str) {
     } else {
         info!("audio: default sink → {node_name}");
     }
+}
+
+/// Load a PulseAudio module by name with an arg string; public wrapper for the EQ manager.
+pub async fn load_module_pub(module: &str, args: &str) -> Option<u32> {
+    load_module(module, args).await
+}
+
+/// Unload a PulseAudio module by its numeric index.
+pub async fn unload_module_by_id(id: u32) -> Result<(), AudioError> {
+    pactl(&["unload-module", &id.to_string()]).await.map(|_| ())
 }
 
 /// Update the game/chat volume split on the virtual sinks.
