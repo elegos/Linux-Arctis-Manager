@@ -260,6 +260,16 @@ impl EqInterface {
                     false
                 }
             }
+            "app_overrides" => {
+                use crate::eq::settings::AppOverride;
+                if let Ok(overrides) = serde_json::from_str::<Vec<AppOverride>>(value) {
+                    ch.app_overrides = overrides;
+                    true
+                } else {
+                    warn!("SetEQSetting: invalid app_overrides JSON");
+                    false
+                }
+            }
             _ => false,
         };
 

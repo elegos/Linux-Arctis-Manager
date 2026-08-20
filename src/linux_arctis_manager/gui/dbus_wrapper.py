@@ -45,19 +45,23 @@ def _v3_settings_to_gui(s3: dict) -> dict:
     for ch in ('media', 'chat'):
         cd = s3.get(ch, {})
         bm = cd.get('band_mode', 'fixed_10')
+        p = cd.get('preset', 'Flat')
         result[ch] = {
             'enabled': cd.get('enabled', False),
             'mode': _BAND_MODE_TO_MODE.get(bm, 'simple'),
-            'preset_name': cd.get('preset') or None if cd.get('preset') != 'flat' else None,
+            'preset_name': None if p.lower() == 'flat' else p,
+            'backend': cd.get('backend', 'auto'),
         }
+        # V3 AppMatcher is internally-tagged: {"type": "stream", "name": "..."}
         for ov in cd.get('app_overrides', []):
             matcher = ov.get('matcher', {})
-            if 'stream' in matcher:
-                mt, val, app_id, gname = 'stream', matcher['stream'].get('name', ''), None, ''
-            elif 'executable' in matcher:
-                mt, val, app_id, gname = 'executable', matcher['executable'].get('path', ''), None, ''
-            elif 'steam_game' in matcher:
-                mt, val, app_id = 'steam', '', matcher['steam_game'].get('app_id')
+            mt_type = matcher.get('type', '')
+            if mt_type == 'stream':
+                mt, val, app_id, gname = 'stream', matcher.get('name', ''), None, ''
+            elif mt_type == 'executable':
+                mt, val, app_id, gname = 'executable', matcher.get('path', ''), None, ''
+            elif mt_type == 'steam_game':
+                mt, val, app_id = 'steam', '', matcher.get('app_id')
                 gname = ''
             else:
                 continue
@@ -66,6 +70,25 @@ def _v3_settings_to_gui(s3: dict) -> dict:
                 'steam_app_id': app_id, 'steam_game_name': gname,
                 'preset_name': ov.get('preset', ''), 'channel': ch,
             })
+    return result
+
+
+def _gui_overrides_to_v3(overrides: list, channel: str) -> list:
+    """Convert GUI V2 app overrides for one channel to V3 AppOverride format."""
+    result = []
+    for ov in overrides:
+        if ov.get('channel') != channel:
+            continue
+        mt = ov.get('matcher_type', '')
+        if mt == 'stream':
+            matcher = {'type': 'stream', 'name': ov.get('value', '')}
+        elif mt == 'executable':
+            matcher = {'type': 'executable', 'path': ov.get('value', '')}
+        elif mt == 'steam':
+            matcher = {'type': 'steam_game', 'app_id': ov.get('steam_app_id')}
+        else:
+            continue
+        result.append({'matcher': matcher, 'preset': ov.get('preset_name', '')})
     return result
 
 
@@ -393,14 +416,18 @@ class DbusWrapper(QObject):
                 for ch in ('media', 'chat'):
                     cd = settings.get(ch, {})
                     bm = _MODE_TO_BAND_MODE.get(cd.get('mode', 'simple'), 'fixed_10')
-                    preset = cd.get('preset_name') or 'flat'
+                    preset = cd.get('preset_name') or 'Flat'
+                    backend = cd.get('backend', 'auto')
                     for key, val in (
                         ('enabled', cd.get('enabled', False)),
                         ('band_mode', bm),
                         ('preset', preset),
+                        ('backend', backend),
                     ):
                         await DbusWrapper._eq_call_raw('SetEQSetting', 'sss', [ch, key, json.dumps(val)])
-                # app_overrides: not yet supported by V3 SetEQSetting — skipped.
+                    overrides_v3 = _gui_overrides_to_v3(settings.get('app_overrides', []), ch)
+                    await DbusWrapper._eq_call_raw(
+                        'SetEQSetting', 'sss', [ch, 'app_overrides', json.dumps(overrides_v3)])
             except Exception as e:
                 DbusWrapper.logger.warning(f'EQ set_eq_settings failed: {e}')
         Thread(target=lambda: asyncio.run(_call())).start()
