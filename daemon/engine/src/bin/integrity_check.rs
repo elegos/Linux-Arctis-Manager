@@ -5,6 +5,7 @@
 /// Subcommands:
 ///   settings-signal   Verify that SettingsChanged is emitted after SetSetting()
 ///   list-options      Print GetListOptions("pulse_audio_devices") result
+///   general-settings  Print the general section from GetSettings and verify schema
 use std::time::Duration;
 
 use futures::StreamExt;
@@ -36,12 +37,14 @@ async fn main() {
     let code = match subcommand.as_str() {
         "settings-signal" => check_settings_signal().await,
         "list-options" => check_list_options().await,
+        "general-settings" => check_general_settings().await,
         _ => {
             eprintln!("Usage: lam-integrity-check <subcommand>");
             eprintln!();
             eprintln!("Subcommands:");
             eprintln!("  settings-signal   Verify SettingsChanged D-Bus signal delivery");
             eprintln!("  list-options      Print GetListOptions(\"pulse_audio_devices\")");
+            eprintln!("  general-settings  Verify general section in GetSettings");
             1
         }
     };
@@ -131,6 +134,89 @@ async fn check_settings_signal() -> i32 {
             eprintln!("TIMEOUT: no SettingsChanged signal received within 30 s");
             1
         }
+    }
+}
+
+async fn check_general_settings() -> i32 {
+    println!("=== general-settings integrity check ===");
+    println!();
+
+    let conn = match Connection::session().await {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("ERROR: cannot connect to session bus: {e}");
+            return 1;
+        }
+    };
+
+    let proxy = match SettingsProxy::new(&conn).await {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("ERROR: cannot create Settings proxy: {e}");
+            eprintln!("Is lam-daemon running?");
+            return 1;
+        }
+    };
+
+    let raw = match proxy.get_settings().await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("ERROR: GetSettings failed: {e}");
+            return 1;
+        }
+    };
+
+    let parsed: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("ERROR: GetSettings returned invalid JSON: {e}");
+            return 1;
+        }
+    };
+
+    let general = &parsed["general"];
+    println!("general section:");
+    println!(
+        "{}",
+        serde_json::to_string_pretty(general).unwrap_or_else(|_| general.to_string())
+    );
+    println!();
+
+    let required_fields = [
+        "redirect_audio_on_connect",
+        "redirect_audio_on_disconnect",
+        "redirect_audio_on_disconnect_device",
+    ];
+    let mut ok = true;
+    for field in &required_fields {
+        if general.get(field).is_none() {
+            eprintln!("MISSING field in general: {field}");
+            ok = false;
+        }
+    }
+
+    let sc = &parsed["settings_config"];
+    for field in &required_fields {
+        if sc.get(field).is_none() {
+            eprintln!("MISSING field in settings_config: {field}");
+            ok = false;
+        }
+    }
+
+    if ok {
+        println!("OK: all 3 general fields present in general and settings_config");
+        let dev_type = sc["redirect_audio_on_disconnect_device"]["type"].as_str();
+        if dev_type != Some("select") {
+            eprintln!(
+                "WARNING: redirect_audio_on_disconnect_device type expected 'select', got {:?}",
+                dev_type
+            );
+        } else {
+            println!("OK: redirect_audio_on_disconnect_device has type 'select'");
+        }
+        0
+    } else {
+        1
     }
 }
 

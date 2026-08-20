@@ -2,6 +2,7 @@ mod audio;
 mod dbus;
 mod device_session;
 mod engine_error;
+mod general_settings;
 mod hidraw_client;
 mod hotplug;
 mod state;
@@ -141,6 +142,15 @@ pub fn config_dirs() -> Vec<PathBuf> {
     dirs
 }
 
+/// Path to the persisted general settings YAML file.
+pub fn general_settings_path() -> PathBuf {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+        .unwrap_or_else(|| PathBuf::from(".config"))
+        .join("arctis_manager/general_settings.yaml")
+}
+
 // ── Per-device task ───────────────────────────────────────────────────────────
 
 /// Initialise and run the event loop for one device.  Registers the device in
@@ -272,6 +282,18 @@ async fn run_device(
         }
         let _ = signal_tx.send(SignalEvent::StatusChanged);
 
+        // Redirect default sink to Arctis_Media on headset connect, if enabled.
+        {
+            let redirect = app_state
+                .lock()
+                .await
+                .general_settings
+                .redirect_audio_on_connect;
+            if redirect {
+                audio::set_default_sink(audio::MEDIA_SINK).await;
+            }
+        }
+
         // Create virtual audio sinks and apply the initial chatmix balance.
         // Wrapped in Arc<Mutex> so the event-forwarding task can drive the
         // audio lifecycle directly from radio_connection_status events.
@@ -340,6 +362,21 @@ async fn run_device(
                         if let Some(s) = setup {
                             info!("headset wireless off: removing virtual sinks");
                             audio::teardown_sinks(s).await;
+                        }
+                        // Redirect to user-chosen sink on wireless disconnect.
+                        let (do_redirect, target) = {
+                            let s = state_for_events.lock().await;
+                            (
+                                s.general_settings.redirect_audio_on_disconnect,
+                                s.general_settings
+                                    .redirect_audio_on_disconnect_device
+                                    .clone(),
+                            )
+                        };
+                        if do_redirect {
+                            if let Some(ref sink) = target {
+                                audio::set_default_sink(sink).await;
+                            }
                         }
                     } else if status == "PAIRED_CONNECTED" || status == "CONNECTED" {
                         let needs = audio_for_task.lock().await.is_none();
@@ -452,10 +489,16 @@ async fn main() {
 
     let helper_sock = helper_sock_path();
 
+    let gs_path = general_settings_path();
+    let gs = general_settings::GeneralSettings::load_from_file(&gs_path);
+    info!("general settings loaded from {}", gs_path.display());
+
     let app_state = Arc::new(Mutex::new(AppState {
         configs: configs.clone(),
         devices: HashMap::new(),
         config_dirs: cfg_dirs,
+        general_settings: gs,
+        general_settings_path: gs_path,
     }));
 
     let (signal_tx, signal_rx) = broadcast::channel::<SignalEvent>(64);

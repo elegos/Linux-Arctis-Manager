@@ -9,7 +9,7 @@ use serde::Serialize;
 use tokio::process::Command;
 use tracing::{info, warn};
 
-const MEDIA_SINK: &str = "Arctis_Media";
+pub const MEDIA_SINK: &str = "Arctis_Media";
 const CHAT_SINK: &str = "Arctis_Chat";
 const STEELSERIES_VID: &str = "0x1038";
 
@@ -250,6 +250,15 @@ async fn get_module_indices(name: &str, physical: &str) -> Result<(u32, u32), Au
         .map(|(i, _, _)| *i)
         .ok_or_else(|| AudioError::Pactl(format!("cannot find loopback index for {name}")))?;
     Ok((null_idx, lb_idx))
+}
+
+/// Set the PulseAudio/PipeWire default output sink by its stable node name.
+pub async fn set_default_sink(node_name: &str) {
+    if let Err(e) = pactl(&["set-default-sink", node_name]).await {
+        warn!("audio: set-default-sink {node_name}: {e}");
+    } else {
+        info!("audio: default sink → {node_name}");
+    }
 }
 
 /// Update the game/chat volume split on the virtual sinks.

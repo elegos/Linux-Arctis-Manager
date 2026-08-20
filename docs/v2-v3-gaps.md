@@ -24,10 +24,10 @@
 |---|---|---|
 | `GetSettings` — `device` section (current field values) | `device_settings.settings` | **Done** — plain values from YAML `apis` |
 | `GetSettings` — `settings_config` (device schemas) | per-device YAML `settings` list | **Done** — inferred from YAML `apis` field defs; maps to `slider`/`toggle`/`discrete_map` |
-| `GetSettings` — `general` section | `GeneralSettings.to_dict()` | **Missing** — always `{}` |
-| `GetSettings` — `settings_config` for general fields | `GeneralSettings.settings_config` | **Missing** |
+| `GetSettings` — `general` section | `GeneralSettings.to_dict()` | **Done** — returns all 3 fields with current values |
+| `GetSettings` — `settings_config` for general fields | `GeneralSettings.settings_config` | **Done** — toggle/select schemas included |
 | `SetSetting` (device fields) | writes `device_settings` + sends HID | **Done** — `WriteApi` command via DSL |
-| `SetSetting` (general fields) | writes `GeneralSettings` + persists | **Missing** |
+| `SetSetting` (general fields) | writes `GeneralSettings` + persists | **Done** — persists to `general_settings.yaml` |
 | `GetListOptions("pulse_audio_devices")` | enumerates PulseAudio sinks | **Done** — returns `{id: node.name, name: node.nick}`; stable across renames (v2 stored `node.nick` as both id and name — bug fixed) |
 | `GetVersion` | method on Settings interface | **Done** — method on Settings; version sourced from shared `VERSION` file at build time |
 | `SettingsChanged` signal | fired on any setting write | **Done** — emitted by `SetSetting` and `ReloadConfigs`; GUI subscribes |
@@ -38,9 +38,9 @@
 
 | Field | Type | V3 |
 |---|---|---|
-| `redirect_audio_on_connect` | toggle | **Missing** |
-| `redirect_audio_on_disconnect` | toggle | **Missing** |
-| `redirect_audio_on_disconnect_device` | select (PulseAudio sink `node.nick`) | **Missing** — V3 will store `node.name` (stable ALSA path) instead of `node.nick`; `GetListOptions` already returns correct pairs |
+| `redirect_audio_on_connect` | toggle | **Done** — redirects default sink to `Arctis_Media` on headset connect |
+| `redirect_audio_on_disconnect` | toggle | **Done** — redirects default sink to chosen device on wireless disconnect |
+| `redirect_audio_on_disconnect_device` | select (PulseAudio sink `node.name`) | **Done** — stores `node.name` (stable ALSA path); v2 bug with `node.nick` fixed |
 
 V2 action on connect: `pactl set-default-sink Arctis_Media`.
 V2 action on disconnect: `pactl set-default-sink <chosen_device>`.
@@ -78,7 +78,7 @@ V2 bug: stored `node.nick` as the device id — rename breaks redirect. V3 fix: 
 | Chatmix volume split | yes | **Done** |
 | Wireless audio lifecycle (create on connect, teardown on disconnect) | yes | **Done** |
 | Physical sink discovery with retry | yes | **Done** |
-| Redirect default sink on headset connect/disconnect | yes (`GeneralSettings`) | **Missing** |
+| Redirect default sink on headset connect/disconnect | yes (`GeneralSettings`) | **Done** — hooks in `run_device` and event-forwarding task |
 | EQ LADSPA loopback routing (`Arctis_Media` → mbeq) | yes | **Missing** |
 | NC virtual mic source (`Arctis_NC_Mic`) | yes | **Missing** |
 | VC virtual sink (`Arctis_VC_Sink`) | yes | **Missing** |
@@ -155,7 +155,7 @@ Everything in this section is **Missing** in V3.
 | Tab | Widget | V3 daemon coverage |
 |---|---|---|
 | Status | `QStatusWidget` | **Done** — fields grouped by category via YAML `representation` |
-| General | `QSettingsWidget(section='general')` | **Missing** — `general` section always empty |
+| General | `QSettingsWidget(section='general')` | **Done** — general section populated with 3 fields and their schemas |
 | Device | `QSettingsWidget(section='device')` | **Done** — renders sliders/toggles from V3 settings_config |
 | Equalizer | `QEQWidget` | **Missing** — no EQ D-Bus interface |
 | Microphone (NC + VC) | `QMicWidget`, `QNCWidget`, `QVCWidget` | **Missing** — no NC/VC interfaces |

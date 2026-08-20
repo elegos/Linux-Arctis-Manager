@@ -14,6 +14,7 @@ use tracing::{error, warn};
 use zbus::object_server::SignalEmitter;
 use zbus::{connection, interface};
 
+use crate::general_settings::GeneralSettings;
 use crate::state::{AppState, DeviceCommand, SignalEvent};
 
 // ── D-Bus constants ───────────────────────────────────────────────────────────
@@ -66,6 +67,32 @@ impl SettingsInterface {
     }
 
     async fn set_setting(&self, setting: &str, value: &str) -> bool {
+        // General settings are persisted to disk and do not require a connected device.
+        if GeneralSettings::is_general_field(setting) {
+            let (ok, path) = {
+                let mut state = self.state.lock().await;
+                let ok = state.general_settings.set_field(setting, value);
+                (ok, state.general_settings_path.clone())
+            };
+            if !ok {
+                warn!("SetSetting: could not apply general field '{setting}' = '{value}'");
+                return false;
+            }
+            if let Err(e) = {
+                let state = self.state.lock().await;
+                state.general_settings.save_to_file(&path)
+            } {
+                warn!("SetSetting: failed to persist general settings: {e}");
+            }
+            let json = {
+                let s = self.state.lock().await;
+                build_settings_json(&s)
+            };
+            let _ = self.signal_tx.send(SE::SettingsChanged { json });
+            return true;
+        }
+
+        // Device settings require a connected device and a matching API.
         let (api_name, field_value) = {
             let state = self.state.lock().await;
             let Some(entry) = state.devices.values().next() else {
@@ -289,14 +316,18 @@ fn build_status_json(state: &AppState) -> String {
 }
 
 fn build_settings_json(state: &AppState) -> String {
+    // Start with the general section, always present regardless of device connection.
+    let general_json = state.general_settings.to_json();
+    let general_config = GeneralSettings::settings_config_json();
+
     let mut result = serde_json::json!({
-        "general": {},
+        "general": general_json,
         "device": {},
-        "settings_config": {}
+        "settings_config": general_config
     });
 
     let Some(entry) = state.devices.values().next() else {
-        return result.to_string();
+        return serde_json::to_string(&result).unwrap_or_else(|_| result.to_string());
     };
 
     let (Some(apis), Some(structs)) = (&entry.config.apis, &entry.config.structs) else {
@@ -304,7 +335,7 @@ fn build_settings_json(state: &AppState) -> String {
     };
 
     let mut device_map = Map::new();
-    let mut config_map = Map::new();
+    let config_map = result["settings_config"].as_object_mut().unwrap();
 
     for (api_name, api_def) in apis {
         if api_def.write.is_none() {
@@ -337,7 +368,6 @@ fn build_settings_json(state: &AppState) -> String {
     }
 
     result["device"] = JsonValue::Object(device_map);
-    result["settings_config"] = JsonValue::Object(config_map);
 
     serde_json::to_string(&result).unwrap_or_else(|_| result.to_string())
 }
@@ -570,6 +600,8 @@ mod tests {
             configs: vec![],
             devices: HashMap::new(),
             config_dirs: vec![PathBuf::from("/tmp")],
+            general_settings: crate::general_settings::GeneralSettings::default(),
+            general_settings_path: PathBuf::from("/tmp/gs.yaml"),
         };
         assert_eq!(build_status_json(&state), "{}");
     }
@@ -591,6 +623,8 @@ mod tests {
             configs: vec![],
             devices,
             config_dirs: vec![PathBuf::from("/tmp")],
+            general_settings: crate::general_settings::GeneralSettings::default(),
+            general_settings_path: PathBuf::from("/tmp/gs.yaml"),
         };
         let json: JsonValue = serde_json::from_str(&build_status_json(&state)).unwrap();
         // Fields are nested under the "headset" category for GUI compatibility.
@@ -633,12 +667,46 @@ mod tests {
             configs: vec![],
             devices,
             config_dirs: vec![std::path::PathBuf::from("/tmp")],
+            general_settings: crate::general_settings::GeneralSettings::default(),
+            general_settings_path: std::path::PathBuf::from("/tmp/gs.yaml"),
         };
         let json: JsonValue = serde_json::from_str(&build_status_json(&state)).unwrap();
         assert_eq!(json["headset"]["battery"]["value"], 80);
         assert_eq!(json["wireless"]["wireless_mode"]["value"], "speed");
         // mic category was not in representation, so must be absent
         assert!(json.get("mic").is_none());
+    }
+
+    #[test]
+    fn build_settings_json_general_section_populated() {
+        use crate::general_settings::GeneralSettings;
+        let state = AppState {
+            configs: vec![],
+            devices: HashMap::new(),
+            config_dirs: vec![PathBuf::from("/tmp")],
+            general_settings: GeneralSettings {
+                redirect_audio_on_connect: true,
+                redirect_audio_on_disconnect: false,
+                redirect_audio_on_disconnect_device: Some("alsa_output.test".to_owned()),
+            },
+            general_settings_path: PathBuf::from("/tmp/gs.yaml"),
+        };
+        let json: JsonValue = serde_json::from_str(&build_settings_json(&state)).unwrap();
+        assert_eq!(json["general"]["redirect_audio_on_connect"], true);
+        assert_eq!(json["general"]["redirect_audio_on_disconnect"], false);
+        assert_eq!(
+            json["general"]["redirect_audio_on_disconnect_device"],
+            "alsa_output.test"
+        );
+        // settings_config must include the 3 general fields
+        assert_eq!(
+            json["settings_config"]["redirect_audio_on_connect"]["type"],
+            "toggle"
+        );
+        assert_eq!(
+            json["settings_config"]["redirect_audio_on_disconnect_device"]["type"],
+            "select"
+        );
     }
 
     #[test]
