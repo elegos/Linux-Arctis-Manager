@@ -2,8 +2,8 @@ from threading import Lock
 from typing import Callable
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QSlider,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QScrollArea,
+                               QSlider, QVBoxLayout, QWidget)
 
 from linux_arctis_manager.config import ConfigSetting, SettingType
 from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
@@ -27,7 +27,6 @@ class QSettingsWidget(QWidget):
         super().__init__(parent)
 
         layout = QVBoxLayout()
-        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.setLayout(layout)
 
         title = I18n.get_instance().translate('ui', i18n_section_name)
@@ -38,8 +37,15 @@ class QSettingsWidget(QWidget):
         title_widget.setFont(title_font)
         layout.addWidget(title_widget)
 
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll_content = QWidget()
         self.main_layout = QVBoxLayout()
-        layout.addLayout(self.main_layout)
+        self.main_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        scroll_content.setLayout(self.main_layout)
+        scroll.setWidget(scroll_content)
+        layout.addWidget(scroll)
 
         self.title = I18n.get_instance().translate('ui', i18n_section_name)
         self.dbus_settings_section = dbus_settings_section
@@ -167,6 +173,8 @@ class QSettingsWidget(QWidget):
                 widget.addItems([o['name'] for o in options])
                 option = next((o for o in options if o['id'] == value), None)
                 widget.setCurrentIndex(options.index(option or options[0]))
+                if option is None:
+                    callback(config, options[0]['id'])
             widget.currentIndexChanged.connect(lambda index: callback(config, self._option_lists[config.options_source][index]['id']))
         else:
             widget = QLabel(f'UNKNOWN TYPE: {config.type}')
