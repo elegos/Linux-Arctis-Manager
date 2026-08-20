@@ -27,12 +27,7 @@ pub struct AppState {
 pub struct DeviceEntry {
     pub config: Arc<DeviceConfig>,
     pub vid: u16,
-    #[allow(dead_code)] // read by upcoming status/hotplug signal extensions
     pub pid: u16,
-    #[allow(dead_code)]
-    pub name: String,
-    #[allow(dead_code)]
-    pub capabilities: Vec<String>,
     /// Flat map of field_name → `{"value": ..., "type": "..."}`.
     pub status: HashMap<String, JsonValue>,
     /// Channel for sending API-write commands from the D-Bus layer to the
