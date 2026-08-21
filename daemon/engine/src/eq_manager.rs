@@ -215,8 +215,8 @@ pub async fn apply_channel_eq(
         // Already loaded: push gains live.
         if let Err(e) = ladspa::update_gains_live(eq_sink, &gains).await {
             warn!("eq: live update failed for {channel} ({e}); reloading");
-            // Fall through to reload path.
-            let _ = id;
+            let _ = ladspa::unload_eq_module(id).await;
+            // Fall through to full reload path.
         } else {
             info!("eq: live gains updated for {channel}");
             return true;
@@ -346,12 +346,14 @@ pub async fn disable_channel_eq(
         let _ = ladspa::unload_eq_module(id).await;
     }
 
-    // Restore direct loopback: channel.monitor → physical.
-    let source = format!("{source_sink}.monitor");
-    let args = format!("source={source} sink={physical} latency_msec=0");
-    let restored_lb_id = crate::audio::load_module_pub("module-loopback", &args).await;
+    // Only restore direct loopback when EQ was actually active. If neither
+    // ladspa_id nor eq_lb_id was set the direct loopback is already in place;
+    // creating another one would accumulate duplicate loopbacks.
+    if ladspa_id.is_some() || eq_lb_id.is_some() {
+        let source = format!("{source_sink}.monitor");
+        let args = format!("source={source} sink={physical} latency_msec=0");
+        let restored_lb_id = crate::audio::load_module_pub("module-loopback", &args).await;
 
-    {
         let mut guard = audio_shared.lock().await;
         if let Some(s) = guard.as_mut() {
             if let Some(id) = restored_lb_id {
