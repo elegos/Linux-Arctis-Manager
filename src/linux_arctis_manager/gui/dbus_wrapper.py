@@ -421,27 +421,35 @@ class DbusWrapper(QObject):
         Thread(target=lambda: asyncio.run(_call())).start()
 
     @staticmethod
-    def set_eq_settings(settings: dict) -> None:
+    def _gui_ch_to_v3(cd: dict, overrides: list) -> dict:
+        """Convert one GUI channel dict to the V3 ChannelEqSettings format."""
+        bm = _MODE_TO_BAND_MODE.get(cd.get('mode', 'simple'), 'fixed10')
+        return {
+            'enabled':  cd.get('enabled', False),
+            'backend':  cd.get('backend', 'auto'),
+            'band_mode': bm,
+            'preset':   cd.get('preset_name') or 'Flat',
+            'app_overrides': overrides,
+        }
+
+    @staticmethod
+    def set_channel_eq_settings(channel: str, cd: dict, app_overrides: list) -> None:
+        """Send all settings for one channel as a single atomic D-Bus call."""
+        body = DbusWrapper._gui_ch_to_v3(cd, _gui_overrides_to_v3(app_overrides, channel))
         async def _call() -> None:
             try:
-                for ch in ('media', 'chat'):
-                    cd = settings.get(ch, {})
-                    bm = _MODE_TO_BAND_MODE.get(cd.get('mode', 'simple'), 'fixed10')
-                    preset = cd.get('preset_name') or 'Flat'
-                    backend = cd.get('backend', 'auto')
-                    for key, val in (
-                        ('enabled', cd.get('enabled', False)),
-                        ('band_mode', bm),
-                        ('preset', preset),
-                        ('backend', backend),
-                    ):
-                        await DbusWrapper._eq_call_raw('SetEqSetting', 'sss', [ch, key, json.dumps(val)])
-                    overrides_v3 = _gui_overrides_to_v3(settings.get('app_overrides', []), ch)
-                    await DbusWrapper._eq_call_raw(
-                        'SetEqSetting', 'sss', [ch, 'app_overrides', json.dumps(overrides_v3)])
+                await DbusWrapper._eq_call_raw(
+                    'SetEqChannelSettings', 'ss', [channel, json.dumps(body)])
             except Exception as e:
-                DbusWrapper.logger.warning(f'EQ set_eq_settings failed: {e}')
+                DbusWrapper.logger.warning(f'EQ set_channel_eq_settings ({channel}) failed: {e}')
         Thread(target=lambda: asyncio.run(_call())).start()
+
+    @staticmethod
+    def set_eq_settings(settings: dict) -> None:
+        """Send settings for both channels (used only by the explicit Apply button)."""
+        for ch in ('media', 'chat'):
+            DbusWrapper.set_channel_eq_settings(
+                ch, settings.get(ch, {}), settings.get('app_overrides', []))
 
     @staticmethod
     def save_eq_preset(preset: dict) -> None:

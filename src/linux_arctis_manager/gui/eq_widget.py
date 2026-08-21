@@ -875,10 +875,15 @@ class QEQWidget(QWidget):
         self._ladspa_available = True
         self._has_hw_eq = False
 
-        self._apply_timer = QTimer(self)
-        self._apply_timer.setSingleShot(True)
-        self._apply_timer.setInterval(400)
-        self._apply_timer.timeout.connect(self._apply)
+        self._apply_timer_media = QTimer(self)
+        self._apply_timer_media.setSingleShot(True)
+        self._apply_timer_media.setInterval(400)
+        self._apply_timer_media.timeout.connect(lambda: self._apply_channel('media'))
+
+        self._apply_timer_chat = QTimer(self)
+        self._apply_timer_chat.setSingleShot(True)
+        self._apply_timer_chat.setInterval(400)
+        self._apply_timer_chat.timeout.connect(lambda: self._apply_channel('chat'))
 
         self.sig_eq_settings.connect(self._on_eq_settings)
         self.sig_presets.connect(self._on_presets)
@@ -962,15 +967,15 @@ class QEQWidget(QWidget):
         outer.addWidget(scroll, 1)
 
         self._media_section = QChannelSection('media', content)
-        self._media_section.preset_saved.connect(self._on_preset_saved)
-        self._media_section.preset_deleted.connect(self._on_preset_deleted)
-        self._media_section.preset_selection_changed.connect(self._schedule_apply)
+        self._media_section.preset_saved.connect(lambda p: self._on_preset_saved(p, 'media'))
+        self._media_section.preset_deleted.connect(lambda n: self._on_preset_deleted(n, 'media'))
+        self._media_section.preset_selection_changed.connect(lambda: self._schedule_apply('media'))
         cl.addWidget(self._media_section)
 
         self._chat_section = QChannelSection('chat', content)
-        self._chat_section.preset_saved.connect(self._on_preset_saved)
-        self._chat_section.preset_deleted.connect(self._on_preset_deleted)
-        self._chat_section.preset_selection_changed.connect(self._schedule_apply)
+        self._chat_section.preset_saved.connect(lambda p: self._on_preset_saved(p, 'chat'))
+        self._chat_section.preset_deleted.connect(lambda n: self._on_preset_deleted(n, 'chat'))
+        self._chat_section.preset_selection_changed.connect(lambda: self._schedule_apply('chat'))
         cl.addWidget(self._chat_section)
 
         # App overrides
@@ -1148,27 +1153,22 @@ class QEQWidget(QWidget):
         self._chat_section.load_settings(
             self._pending_settings.get('chat', {}), self._presets)
 
-    def _on_preset_saved(self, preset: dict) -> None:
+    def _on_preset_saved(self, preset: dict, channel: str) -> None:
         is_new = preset['name'] not in self._presets
         DbusWrapper.save_eq_preset(preset)
-        # Update local cache immediately so sections don't reload stale bands.
+        # Update local cache so sections don't reload stale bands from daemon.
         self._presets[preset['name']] = {
             **self._presets.get(preset['name'], {}),
             'bands': preset['bands'],
             'mode': preset.get('mode', 'simple'),
         }
-        # Apply immediately so the new/updated preset takes effect in audio.
-        self._apply()
+        self._apply_channel(channel)
         if is_new:
-            # Only refresh the full preset list when a new preset is created;
-            # for band edits the local cache update above is sufficient and
-            # avoids triggering set_bands → band_changed → autosave loop.
             QTimer.singleShot(400, lambda: DbusWrapper.request_eq_presets(self.sig_presets))
 
-    def _on_preset_deleted(self, name: str) -> None:
+    def _on_preset_deleted(self, name: str, channel: str) -> None:
         DbusWrapper.delete_eq_preset(name)
-        # If the deleted preset was active, revert to flat.
-        self._apply()
+        self._apply_channel(channel)
         QTimer.singleShot(400, lambda: DbusWrapper.request_eq_presets(self.sig_presets))
 
     # ------------------------------------------------------------------
@@ -1212,14 +1212,26 @@ class QEQWidget(QWidget):
     # Apply
     # ------------------------------------------------------------------
 
-    def _schedule_apply(self) -> None:
-        if self._initial_load_done:
-            self._apply_timer.start()   # restarts the timer if already running
+    def _schedule_apply(self, channel: str) -> None:
+        if not self._initial_load_done:
+            return
+        if channel == 'media':
+            self._apply_timer_media.start()
+        else:
+            self._apply_timer_chat.start()
 
-    def _apply(self) -> None:
+    def _apply_channel(self, channel: str) -> None:
         if not self._initial_load_done or not self._ladspa_available:
             return
-        self._apply_timer.stop()        # cancel any pending debounce
+        section = self._media_section if channel == 'media' else self._chat_section
+        DbusWrapper.set_channel_eq_settings(channel, section.get_settings(), self._overrides)
+
+    def _apply(self) -> None:
+        """Apply both channels — used only by the explicit Apply button."""
+        if not self._initial_load_done or not self._ladspa_available:
+            return
+        self._apply_timer_media.stop()
+        self._apply_timer_chat.stop()
         DbusWrapper.set_eq_settings({
             'media': self._media_section.get_settings(),
             'chat':  self._chat_section.get_settings(),
