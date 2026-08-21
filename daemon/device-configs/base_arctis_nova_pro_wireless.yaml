@@ -70,7 +70,7 @@ structs:
   line_out_mode:
     - {name: report_id,     type: uint8, constant: 0x06}
     - {name: command,       type: uint8, constant: 0x43}
-    - {name: line_out_mode, type: uint8, range: [1, 2]}
+    - {name: line_out_mode, type: uint8, range: [1, 2], values_mapping: {"1": "chatmix", "2": "stream"}}
 
   stream_mix:
     - {name: report_id,   type: uint8, constant: 0x06}
@@ -134,7 +134,7 @@ structs:
   home_screen_type:
     - {name: report_id,       type: uint8, constant: 0x06}
     - {name: command,         type: uint8, constant: 0x89}
-    - {name: home_screen_type, type: uint8, range: [0, 1]}
+    - {name: home_screen_type, type: uint8, range: [0, 1], values_mapping: {"0": "detailed", "1": "simple"}}
 
   bluetooth_startup:
     - {name: report_id,       type: uint8, constant: 0x06}
