@@ -851,6 +851,8 @@ class QEQWidget(QWidget):
         super().__init__(parent)
         self._pending_settings: dict = {}
         self._presets: dict[str, dict] = {}
+        self._factory_presets: dict[int, str] = {}  # index → name (0-17)
+        self._active_hw_preset_idx: int | None = None
         self._overrides: list[dict] = []
         self._steam_games: list[dict] = []
         self._running_streams: list[str] = []
@@ -923,11 +925,7 @@ class QEQWidget(QWidget):
         self._hw_preset_combo = QComboBox()
         hw_load_row.addWidget(self._hw_preset_combo)
         self._hw_apply_btn = QPushButton(I18n.translate('ui', 'eq_hw_apply'))
-        self._hw_apply_btn.clicked.connect(
-            lambda: DbusWrapper.apply_hw_eq_preset(
-                self._hw_preset_combo.currentData(), self.sig_hw_apply
-            )
-        )
+        self._hw_apply_btn.clicked.connect(self._on_hw_apply_clicked)
         hw_load_row.addWidget(self._hw_apply_btn)
         hw_layout.addLayout(hw_load_row)
 
@@ -1049,17 +1047,76 @@ class QEQWidget(QWidget):
         # explicit refresh after navigating back to this page).
         self._apply_to_sections()
 
-    def _on_presets(self, presets: list) -> None:
-        self._presets = {p['name']: p for p in presets}
+    def on_hw_settings(self, settings: dict) -> None:
+        """Called when D-Bus settings arrive; populates factory presets in combo."""
+        mapping: dict = (
+            settings.get('settings_config', {})
+            .get('eq_preset', {})
+            .get('values_mapping', {})
+        )
+        # indices 0-17 are factory presets; 18 is "custom" (applied via software presets)
+        self._factory_presets = {
+            int(k): v for k, v in mapping.items() if int(k) < 18
+        }
+        self._active_hw_preset_idx = settings.get('device', {}).get('eq_preset')
+        self._rebuild_hw_combo()
+
+    def _rebuild_hw_combo(self) -> None:
+        """Rebuild _hw_preset_combo: factory presets, separator, software presets."""
         current = self._hw_preset_combo.currentData()
         self._hw_preset_combo.blockSignals(True)
         self._hw_preset_combo.clear()
-        for p in presets:
-            self._hw_preset_combo.addItem(p['name'], userData=p['name'])
-        idx = self._hw_preset_combo.findData(current)
-        if idx >= 0:
-            self._hw_preset_combo.setCurrentIndex(idx)
+
+        for idx in sorted(self._factory_presets):
+            name = self._factory_presets[idx]
+            label = I18n.translate('settings_values', name)
+            self._hw_preset_combo.addItem(label, userData=('factory', idx))
+
+        if self._factory_presets and self._presets:
+            sep_idx = self._hw_preset_combo.count()
+            self._hw_preset_combo.insertSeparator(sep_idx)
+
+        for name in self._presets:
+            self._hw_preset_combo.addItem(name, userData=('software', name))
+
+        # Restore previous selection, or select current active factory preset
+        restored = self._hw_preset_combo.findData(current)
+        if restored >= 0:
+            self._hw_preset_combo.setCurrentIndex(restored)
+        elif self._active_hw_preset_idx is not None:
+            active = self._hw_preset_combo.findData(
+                ('factory', self._active_hw_preset_idx)
+            )
+            if active >= 0:
+                self._hw_preset_combo.setCurrentIndex(active)
+
         self._hw_preset_combo.blockSignals(False)
+        self._update_hw_active_label()
+
+    def _update_hw_active_label(self) -> None:
+        if self._active_hw_preset_idx is not None:
+            name = self._factory_presets.get(self._active_hw_preset_idx, str(self._active_hw_preset_idx))
+            label = I18n.translate('settings_values', name)
+        else:
+            label = ''
+        self._hw_active_label.setText(label)
+
+    def _on_hw_apply_clicked(self) -> None:
+        data = self._hw_preset_combo.currentData()
+        if not isinstance(data, tuple):
+            return
+        kind, value = data
+        if kind == 'factory':
+            DbusWrapper.change_setting('eq_preset', value)
+            self._active_hw_preset_idx = value
+            self._update_hw_active_label()
+            self._hw_status_label.setText(I18n.translate('ui', 'eq_hw_status_ok'))
+        else:
+            DbusWrapper.apply_hw_eq_preset(value, self.sig_hw_apply)
+
+    def _on_presets(self, presets: list) -> None:
+        self._presets = {p['name']: p for p in presets}
+        self._rebuild_hw_combo()
         if not self._initial_load_done:
             # First time: both settings+presets now available — do full sync.
             self._initial_load_done = True
