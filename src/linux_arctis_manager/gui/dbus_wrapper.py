@@ -124,6 +124,7 @@ def _gui_preset_to_v3(p2: dict) -> dict:
 class DbusWrapper(QObject):
     sig_status = Signal(object)
     sig_settings = Signal(object)
+    sig_device_connected = Signal(object)
     sig_ai_progress = Signal(str)
     sig_ai_complete = Signal(bool, str)
     sig_download_progress = Signal(str)
@@ -187,7 +188,12 @@ class DbusWrapper(QObject):
             def callback(status: str) -> None:
                 self.sig_status.emit(json.loads(status) or {})
 
-            (await self.status_iface()).on_status_changed(callback) # type: ignore
+            def on_connected(pid: int, name: str, caps: list) -> None:
+                self.sig_device_connected.emit({'pid': pid, 'name': name, 'capabilities': caps})
+
+            iface = await self.status_iface()
+            iface.on_status_changed(callback)  # type: ignore
+            iface.on_device_connected(on_connected)  # type: ignore
 
             self._status_signal_loop = asyncio.get_running_loop()
             self._stop_status_signal_future = self._status_signal_loop.create_future()
@@ -446,6 +452,16 @@ class DbusWrapper(QObject):
     @staticmethod
     def delete_eq_preset(name: str) -> None:
         Thread(target=lambda: asyncio.run(DbusWrapper._call_eq_async('DeletePreset', 's', [name]))).start()
+
+    @staticmethod
+    def apply_hw_eq_preset(preset_name: str, qt_signal: SignalInstance) -> None:
+        async def _call() -> None:
+            try:
+                result = await DbusWrapper._eq_call_raw('ApplyHwPreset', 's', [preset_name])
+                qt_signal.emit({'ok': result == '', 'error': result or ''})
+            except Exception as e:
+                qt_signal.emit({'ok': False, 'error': str(e)})
+        Thread(target=lambda: asyncio.run(_call())).start()
 
     @staticmethod
     async def _eq_call_raw(member: str, signature: str, body: list) -> str | None:

@@ -224,6 +224,8 @@ impl EqInterface {
     /// Returns EQ capabilities of the connected device.
     /// JSON: `{"has_hw_eq": bool, "hw_band_mode": "fixed_10"|"parametric_10"|"fixed_5"|null}`.
     async fn get_eq_capabilities(&self) -> String {
+        use crate::eq::preset::BandMode;
+        use crate::eq::resample;
         let ladspa_available = crate::eq::ladspa::check_plugin_available().await;
         let state = self.state.lock().await;
         let (has_hw_eq, hw_band_mode): (bool, Option<&str>) = state
@@ -238,15 +240,74 @@ impl EqInterface {
                 }
             })
             .unwrap_or((false, None));
+        let hw_freqs: Vec<f32> = if has_hw_eq {
+            resample::hw_freqs_for_mode(BandMode::Fixed10).to_vec()
+        } else {
+            vec![]
+        };
         let fb = &self.focus_backend;
         serde_json::to_string(&serde_json::json!({
             "ladspa_available": ladspa_available,
             "has_hw_eq": has_hw_eq,
             "hw_band_mode": hw_band_mode,
+            "hw_freqs": hw_freqs,
             "hw_override_backend": crate::focus_monitor::backend_id(fb),
             "hw_override_unsupported_reason": crate::focus_monitor::unsupported_reason(fb),
         }))
-        .unwrap_or_else(|_| r#"{"ladspa_available":false,"has_hw_eq":false,"hw_band_mode":null,"hw_override_backend":"unsupported","hw_override_unsupported_reason":null}"#.to_string())
+        .unwrap_or_else(|_| r#"{"ladspa_available":false,"has_hw_eq":false,"hw_band_mode":null,"hw_freqs":[],"hw_override_backend":"unsupported","hw_override_unsupported_reason":null}"#.to_string())
+    }
+
+    /// Resample a named software EQ preset to the hardware custom EQ slot and activate it.
+    /// Returns an empty string on success, or an error message on failure.
+    async fn apply_hw_preset(&self, preset_name: String) -> zbus::fdo::Result<String> {
+        use crate::eq::resample;
+        use crate::state::DeviceCommand;
+
+        let preset = load_preset(&preset_path(&self.settings_base_dir, &preset_name))
+            .map_err(zbus::fdo::Error::Failed)?;
+
+        let cmd_tx = {
+            let state = self.state.lock().await;
+            let entry = state
+                .devices
+                .values()
+                .find(|e| {
+                    e.config
+                        .apis
+                        .as_ref()
+                        .map(|a| a.contains_key("custom_eq"))
+                        .unwrap_or(false)
+                })
+                .ok_or_else(|| {
+                    zbus::fdo::Error::Failed("no device with hardware EQ connected".into())
+                })?;
+            entry.cmd_tx.clone()
+        };
+
+        let gains = resample::resample(&preset, &resample::FIXED_10_HZ, (-10.0, 10.0));
+
+        let eq_values: HashMap<String, FieldValue> = (1..=10)
+            .map(|i| (format!("gain{i}"), FieldValue::F32(gains[i - 1])))
+            .collect();
+        cmd_tx
+            .send(DeviceCommand::WriteApi {
+                api_name: "custom_eq".into(),
+                values: eq_values,
+            })
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
+
+        let mut preset_values = HashMap::new();
+        preset_values.insert("eq_preset".to_string(), FieldValue::U8(18));
+        cmd_tx
+            .send(DeviceCommand::WriteApi {
+                api_name: "selected_eq_preset".into(),
+                values: preset_values,
+            })
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
+
+        Ok(String::new())
     }
 
     /// Returns the full EQ settings JSON (both channels).

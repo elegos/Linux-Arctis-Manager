@@ -845,6 +845,7 @@ class QEQWidget(QWidget):
     sig_steam_games      = Signal(object)
     sig_eq_capabilities  = Signal(object)
     sig_running_streams  = Signal(object)
+    sig_hw_apply         = Signal(object)
 
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
@@ -867,6 +868,7 @@ class QEQWidget(QWidget):
         self.sig_steam_games.connect(self._on_steam_games)
         self.sig_eq_capabilities.connect(self._on_eq_capabilities)
         self.sig_running_streams.connect(self._on_running_streams)
+        self.sig_hw_apply.connect(self._on_hw_apply_result)
 
         outer = QVBoxLayout()
         outer.setContentsMargins(0, 0, 0, 4)
@@ -901,6 +903,40 @@ class QEQWidget(QWidget):
 
         self._ladspa_frame.setVisible(False)
         outer.addWidget(self._ladspa_frame)
+
+        # Hardware EQ panel — visible only when device has a custom EQ slot.
+        hw_frame = QFrame()
+        hw_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        hw_layout = QVBoxLayout()
+        hw_layout.setContentsMargins(10, 8, 10, 8)
+        hw_layout.setSpacing(4)
+        hw_frame.setLayout(hw_layout)
+
+        hw_active_row = QHBoxLayout()
+        hw_active_row.addWidget(QLabel(I18n.translate('ui', 'eq_hw_active_preset')))
+        self._hw_active_label = QLabel()
+        hw_active_row.addWidget(self._hw_active_label)
+        hw_active_row.addStretch()
+        hw_layout.addLayout(hw_active_row)
+
+        hw_load_row = QHBoxLayout()
+        self._hw_preset_combo = QComboBox()
+        hw_load_row.addWidget(self._hw_preset_combo)
+        self._hw_apply_btn = QPushButton(I18n.translate('ui', 'eq_hw_apply'))
+        self._hw_apply_btn.clicked.connect(
+            lambda: DbusWrapper.apply_hw_eq_preset(
+                self._hw_preset_combo.currentData(), self.sig_hw_apply
+            )
+        )
+        hw_load_row.addWidget(self._hw_apply_btn)
+        hw_layout.addLayout(hw_load_row)
+
+        self._hw_status_label = QLabel(I18n.translate('ui', 'eq_hw_status_idle'))
+        hw_layout.addWidget(self._hw_status_label)
+
+        self._hw_eq_panel = hw_frame
+        self._hw_eq_panel.setVisible(False)
+        outer.addWidget(self._hw_eq_panel)
 
         # Scroll area (channel sections + overrides)
         scroll = QScrollArea()
@@ -983,6 +1019,7 @@ class QEQWidget(QWidget):
             ])
             self._ladspa_warn_label.setText(msg)
             logger.warning('LADSPA plugin %r not found — EQ controls disabled', plugin)
+        self._hw_eq_panel.setVisible(has_hw_eq)
         self._media_section.set_hw_eq_visible(has_hw_eq)
         self._chat_section.set_hw_eq_visible(has_hw_eq)
         if has_hw_eq:
@@ -997,6 +1034,13 @@ class QEQWidget(QWidget):
     def _retry_ladspa_check(self) -> None:
         DbusWrapper.request_eq_capabilities(self.sig_eq_capabilities)
 
+    def _on_hw_apply_result(self, result: dict) -> None:
+        if result.get('ok'):
+            self._hw_status_label.setText(I18n.translate('ui', 'eq_hw_status_ok'))
+        else:
+            msg = I18n.translate('ui', 'eq_hw_status_error').format(result.get('error', ''))
+            self._hw_status_label.setText(msg)
+
     def _on_eq_settings(self, settings: dict) -> None:
         self._pending_settings = settings
         self._overrides = settings.get('app_overrides', [])
@@ -1007,6 +1051,15 @@ class QEQWidget(QWidget):
 
     def _on_presets(self, presets: list) -> None:
         self._presets = {p['name']: p for p in presets}
+        current = self._hw_preset_combo.currentData()
+        self._hw_preset_combo.blockSignals(True)
+        self._hw_preset_combo.clear()
+        for p in presets:
+            self._hw_preset_combo.addItem(p['name'], userData=p['name'])
+        idx = self._hw_preset_combo.findData(current)
+        if idx >= 0:
+            self._hw_preset_combo.setCurrentIndex(idx)
+        self._hw_preset_combo.blockSignals(False)
         if not self._initial_load_done:
             # First time: both settings+presets now available — do full sync.
             self._initial_load_done = True

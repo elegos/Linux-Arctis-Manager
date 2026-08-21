@@ -74,6 +74,7 @@ class QMainApp(QBaseDesktopApp):
         self.dbus_wrapper.sig_status.connect(self.status_widget.update_status)
         self.dbus_wrapper.sig_settings.connect(self.general_settings_widget.update_settings)
         self.dbus_wrapper.sig_settings.connect(self.device_settings_widget.update_settings)
+        self.dbus_wrapper.sig_device_connected.connect(lambda _: self.eq_widget.refresh())
 
         self.sig_service_version.connect(self._on_service_version)
         self._sig_set_label.connect(self._version_label.setText)
