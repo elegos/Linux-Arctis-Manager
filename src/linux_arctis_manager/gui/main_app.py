@@ -72,6 +72,7 @@ class QMainApp(QBaseDesktopApp):
             self.main_panel_layout.addWidget(widget)
 
         self.dbus_wrapper.sig_status.connect(self.status_widget.update_status)
+        self.dbus_wrapper.sig_settings.connect(self.status_widget.update_settings_config)
         self.dbus_wrapper.sig_settings.connect(self.general_settings_widget.update_settings)
         self.dbus_wrapper.sig_settings.connect(self.device_settings_widget.update_settings)
         self.dbus_wrapper.sig_settings.connect(self.eq_widget.on_hw_settings)
