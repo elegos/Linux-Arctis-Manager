@@ -32,7 +32,7 @@ def set_hf_token(token: str) -> bool:
         _HF_TOKEN_FILE.chmod(0o600)
         return True
     except Exception as e:
-        logger.error('set_hf_token: %s', e)
+        logger.error('set_hf_token: %s', e)  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — logs the exception, not the token
         return False
 
 

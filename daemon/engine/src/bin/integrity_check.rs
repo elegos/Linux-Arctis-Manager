@@ -39,7 +39,7 @@ trait Settings {
 
 #[tokio::main]
 async fn main() {
-    let subcommand = std::env::args().nth(1).unwrap_or_default();
+    let subcommand = std::env::args().nth(1).unwrap_or_default(); // nosemgrep: rust.lang.security.args.args — CLI diagnostic tool, not a security boundary
     let code = match subcommand.as_str() {
         "settings-signal" => check_settings_signal().await,
         "list-options" => check_list_options().await,

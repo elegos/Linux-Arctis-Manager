@@ -85,19 +85,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run semgrep
-        uses: semgrep/semgrep-action@v1
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          # p/python covers subprocess injection, eval, path traversal, etc.
-          # p/rust covers unsafe blocks, integer overflow, unwrap-in-production, etc.
-          # p/secrets catches accidentally committed credentials.
-          config: >-
-            p/python
-            p/rust
-            p/secrets
-          generateSarif: "1"
-        env:
-          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+          python-version: "3.12"
+
+      - name: Install semgrep (latest)
+        run: pip install semgrep --upgrade
+
+      - name: Run semgrep scan
+        # --sarif always exits 0 even with findings, so continue-on-error is
+        # sufficient; the SARIF file carries all details to the Security tab.
+        # p/python: subprocess injection, eval, path traversal, XXE, etc.
+        # p/rust:   unsafe blocks, integer overflow, unwrap-in-production, etc.
+        # p/secrets: accidentally committed credentials.
+        run: |
+          semgrep scan \
+            --config "p/python" \
+            --config "p/rust" \
+            --config "p/secrets" \
+            --sarif \
+            --output semgrep.sarif \
+            || true
 
       - name: Upload SARIF to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v3

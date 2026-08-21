@@ -74,7 +74,7 @@ pub fn nearest_mbeq_index(freq: f32) -> usize {
         .min_by(|(_, &a), (_, &b)| {
             let da = (a.ln() - log_f).abs();
             let db = (b.ln() - log_f).abs();
-            da.partial_cmp(&db).unwrap()
+            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
         })
         .map(|(i, _)| i)
         .unwrap_or(0)
