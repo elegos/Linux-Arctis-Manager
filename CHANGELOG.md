@@ -148,3 +148,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Initialize device on awake after sleep
+- EQ app overrides now support factory (hardware) presets in addition to custom software presets; daemon `AppOverride` gains `hw_preset_idx: Option<u8>`, stream monitor and focus monitor write `selected_eq_preset` directly for hardware-preset overrides.
+- "Load to device" in EQ widget had no effect: PySide6 does not preserve Python tuples stored as `QComboBox` item `userData`; replaced with simple `int` (factory preset index) and `str` (software preset name).
+- `SetEqSetting` band_mode values sent as `fixed_10`/`parametric_10`/`fixed_5` (rejected by daemon); corrected to `fixed10`/`parametric10`/`fixed5` to match Rust `rename_all = "snake_case"` serialization.
+- `disable_channel_eq` created a new PipeWire direct loopback on every call, even when EQ was never active; with 5 sequential `SetEqSetting` calls per apply, up to 5 duplicate loopbacks accumulated on "Arctis Media". Fix: loopback restore is now guarded by `ladspa_id.is_some() || eq_lb_id.is_some()`.
+- `apply_channel_eq` leaked the old LADSPA module when a live gain update failed and a full reload was needed; old module is now unloaded before loading the replacement.
+- Autosave loop: modifying EQ bands triggered `_on_preset_saved` → `request_eq_presets` (400 ms) → `set_bands` → spurious `band_changed` → autosave restart every ~900 ms. Fix: for existing-preset autosaves the local `_presets` cache is updated directly; `request_eq_presets` is now called only when a new preset is created.

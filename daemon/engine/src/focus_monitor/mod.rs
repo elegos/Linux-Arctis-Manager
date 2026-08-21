@@ -19,10 +19,12 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tracing::info;
 
+use device_config::codec::FieldValue;
+
 use crate::audio::AudioSetup;
 use crate::eq::settings::{load_eq_settings, AppMatcher, ChannelEqSettings, EqBackend, EqSettings};
 use crate::eq_manager::{self as eq_manager, EqRuntime};
-use crate::state::{AppState, SignalEvent};
+use crate::state::{AppState, DeviceCommand, SignalEvent};
 
 pub use event::FocusEvent;
 
@@ -298,6 +300,23 @@ async fn process_channel_focus(
     else {
         return;
     };
+    if let Some(hw_idx) = ov.hw_preset_idx {
+        // Factory preset override: write selected_eq_preset directly.
+        if let Some(ctx) = hw_ctx {
+            let values = std::collections::HashMap::from([(
+                "eq_preset".to_string(),
+                FieldValue::U8(hw_idx),
+            )]);
+            let _ = ctx
+                .cmd_tx
+                .send(DeviceCommand::WriteApi {
+                    api_name: "selected_eq_preset".into(),
+                    values,
+                })
+                .await;
+        }
+        return;
+    }
     if let Some(new_preset) = stack.on_focus(pid, ov.preset.clone()) {
         let mut apply = ch.clone();
         apply.preset = new_preset;

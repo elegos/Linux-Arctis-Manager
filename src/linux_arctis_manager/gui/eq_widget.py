@@ -379,8 +379,8 @@ class QEQBandsView(QWidget):
 # ---------------------------------------------------------------------------
 
 class QAddOverrideDialog(QDialog):
-    def __init__(self, preset_names: list[str], steam_games: list[dict],
-                 running_streams: list[str],
+    def __init__(self, preset_names: list[str], factory_presets: dict[int, str],
+                 steam_games: list[dict], running_streams: list[str],
                  parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(I18n.translate('ui', 'eq_add_override'))
@@ -438,9 +438,14 @@ class QAddOverrideDialog(QDialog):
         layout.addRow(self._val_label, self._val_stack)
 
         self._preset_combo = QComboBox()
-        self._preset_combo.addItem(I18n.translate('ui', 'eq_flat'))
+        self._preset_combo.addItem(I18n.translate('ui', 'eq_flat'), 'flat')
+        for idx in sorted(factory_presets):
+            label = I18n.translate('settings_values', factory_presets[idx])
+            self._preset_combo.addItem(label, idx)
+        if factory_presets and preset_names:
+            self._preset_combo.insertSeparator(self._preset_combo.count())
         for name in preset_names:
-            self._preset_combo.addItem(name)
+            self._preset_combo.addItem(name, name)
         layout.addRow(I18n.translate('ui', 'eq_preset'), self._preset_combo)
 
         self._channel_combo = QComboBox()
@@ -470,8 +475,7 @@ class QAddOverrideDialog(QDialog):
     def get_override(self) -> dict:
         type_idx = self._type_combo.currentIndex()
         mt = ('stream', 'executable', 'steam')[type_idx]
-        flat_lbl = I18n.translate('ui', 'eq_flat')
-        preset_txt = self._preset_combo.currentText()
+        preset_data = self._preset_combo.currentData()
         gi = self._game_combo.currentIndex()
         if mt == 'stream':
             value = self._stream_combo.currentText().strip()
@@ -485,14 +489,25 @@ class QAddOverrideDialog(QDialog):
             value = ''
             steam_app_id = self._unique_games[gi]['app_id'] if 0 <= gi < len(self._unique_games) else None
             steam_game_name = self._unique_games[gi]['name'] if 0 <= gi < len(self._unique_games) else ''
-        return {
+
+        hw_preset_idx = None
+        preset_name = ''
+        if isinstance(preset_data, int):
+            hw_preset_idx = preset_data
+        elif isinstance(preset_data, str) and preset_data and preset_data != 'flat':
+            preset_name = preset_data
+
+        result = {
             'matcher_type': mt,
             'value': value,
             'steam_app_id': steam_app_id,
             'steam_game_name': steam_game_name,
-            'preset_name': '' if preset_txt == flat_lbl else preset_txt,
+            'preset_name': preset_name,
             'channel': 'chat' if self._channel_combo.currentIndex() == 1 else 'media',
         }
+        if hw_preset_idx is not None:
+            result['hw_preset_idx'] = hw_preset_idx
+        return result
 
 
 # ---------------------------------------------------------------------------
@@ -1070,23 +1085,21 @@ class QEQWidget(QWidget):
         for idx in sorted(self._factory_presets):
             name = self._factory_presets[idx]
             label = I18n.translate('settings_values', name)
-            self._hw_preset_combo.addItem(label, userData=('factory', idx))
+            self._hw_preset_combo.addItem(label, idx)
 
         if self._factory_presets and self._presets:
             sep_idx = self._hw_preset_combo.count()
             self._hw_preset_combo.insertSeparator(sep_idx)
 
         for name in self._presets:
-            self._hw_preset_combo.addItem(name, userData=('software', name))
+            self._hw_preset_combo.addItem(name, name)
 
         # Restore previous selection, or select current active factory preset
         restored = self._hw_preset_combo.findData(current)
         if restored >= 0:
             self._hw_preset_combo.setCurrentIndex(restored)
         elif self._active_hw_preset_idx is not None:
-            active = self._hw_preset_combo.findData(
-                ('factory', self._active_hw_preset_idx)
-            )
+            active = self._hw_preset_combo.findData(self._active_hw_preset_idx)
             if active >= 0:
                 self._hw_preset_combo.setCurrentIndex(active)
 
@@ -1103,16 +1116,12 @@ class QEQWidget(QWidget):
 
     def _on_hw_apply_clicked(self) -> None:
         data = self._hw_preset_combo.currentData()
-        if not isinstance(data, tuple):
-            return
-        kind, value = data
-        if kind == 'factory':
-            DbusWrapper.change_setting('eq_preset', value)
-            self._active_hw_preset_idx = value
+        if isinstance(data, int):
+            self._active_hw_preset_idx = data
             self._update_hw_active_label()
-            self._hw_status_label.setText(I18n.translate('ui', 'eq_hw_status_ok'))
-        else:
-            DbusWrapper.apply_hw_eq_preset(value, self.sig_hw_apply)
+            DbusWrapper.apply_factory_eq_preset(data, self.sig_hw_apply)
+        elif isinstance(data, str):
+            DbusWrapper.apply_hw_eq_preset(data, self.sig_hw_apply)
 
     def _on_presets(self, presets: list) -> None:
         self._presets = {p['name']: p for p in presets}
@@ -1140,10 +1149,21 @@ class QEQWidget(QWidget):
             self._pending_settings.get('chat', {}), self._presets)
 
     def _on_preset_saved(self, preset: dict) -> None:
+        is_new = preset['name'] not in self._presets
         DbusWrapper.save_eq_preset(preset)
+        # Update local cache immediately so sections don't reload stale bands.
+        self._presets[preset['name']] = {
+            **self._presets.get(preset['name'], {}),
+            'bands': preset['bands'],
+            'mode': preset.get('mode', 'simple'),
+        }
         # Apply immediately so the new/updated preset takes effect in audio.
         self._apply()
-        QTimer.singleShot(400, lambda: DbusWrapper.request_eq_presets(self.sig_presets))
+        if is_new:
+            # Only refresh the full preset list when a new preset is created;
+            # for band edits the local cache update above is sufficient and
+            # avoids triggering set_bands → band_changed → autosave loop.
+            QTimer.singleShot(400, lambda: DbusWrapper.request_eq_presets(self.sig_presets))
 
     def _on_preset_deleted(self, name: str) -> None:
         DbusWrapper.delete_eq_preset(name)
@@ -1165,14 +1185,19 @@ class QEQWidget(QWidget):
                 src = f"Exec: {o.get('value', '')}"
             else:
                 src = f"Stream: {o.get('value', '')}"
-            preset  = o.get('preset_name') or 'flat'
+            hw_idx = o.get('hw_preset_idx')
+            if hw_idx is not None:
+                hw_name = self._factory_presets.get(hw_idx, str(hw_idx))
+                preset = I18n.translate('settings_values', hw_name)
+            else:
+                preset = o.get('preset_name') or 'flat'
             channel = o.get('channel', 'media')
             self._overrides_list.addItem(f'{src}  →  {preset} ({channel})')
 
     def _add_override(self) -> None:
         DbusWrapper.request_running_streams(self.sig_running_streams)
-        dlg = QAddOverrideDialog(list(self._presets.keys()), self._steam_games,
-                                 self._running_streams, self)
+        dlg = QAddOverrideDialog(list(self._presets.keys()), self._factory_presets,
+                                 self._steam_games, self._running_streams, self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self._overrides.append(dlg.get_override())
             self._refresh_overrides_list()
