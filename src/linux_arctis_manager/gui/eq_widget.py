@@ -866,7 +866,8 @@ class QEQWidget(QWidget):
         super().__init__(parent)
         self._pending_settings: dict = {}
         self._presets: dict[str, dict] = {}
-        self._factory_presets: dict[int, str] = {}  # index → name (0-17)
+        self._hw_preset_mapping: dict[int, str] = {}  # full slot→name including custom
+        self._factory_presets: dict[int, str] = {}   # excludes the custom slot
         self._active_hw_preset_idx: int | None = None
         self._overrides: list[dict] = []
         self._steam_games: list[dict] = []
@@ -1074,10 +1075,9 @@ class QEQWidget(QWidget):
             .get('eq_preset', {})
             .get('values_mapping', {})
         )
-        # indices 0-17 are factory presets; 18 is "custom" (applied via software presets)
-        self._factory_presets = {
-            int(k): v for k, v in mapping.items() if int(k) < 18
-        }
+        # slot 4 is "custom" (written by software path); all others are factory presets
+        self._hw_preset_mapping = {int(k): v for k, v in mapping.items()}
+        self._factory_presets = {k: v for k, v in self._hw_preset_mapping.items() if v != 'custom'}
         self._active_hw_preset_idx = settings.get('device', {}).get('eq_preset')
         self._rebuild_hw_combo()
 
@@ -1113,7 +1113,7 @@ class QEQWidget(QWidget):
 
     def _update_hw_active_label(self) -> None:
         if self._active_hw_preset_idx is not None:
-            name = self._factory_presets.get(self._active_hw_preset_idx, str(self._active_hw_preset_idx))
+            name = self._hw_preset_mapping.get(self._active_hw_preset_idx, str(self._active_hw_preset_idx))
             label = I18n.translate('settings_values', name)
         else:
             label = ''
@@ -1187,7 +1187,7 @@ class QEQWidget(QWidget):
                 src = f"Stream: {o.get('value', '')}"
             hw_idx = o.get('hw_preset_idx')
             if hw_idx is not None:
-                hw_name = self._factory_presets.get(hw_idx, str(hw_idx))
+                hw_name = self._hw_preset_mapping.get(hw_idx, str(hw_idx))
                 preset = I18n.translate('settings_values', hw_name)
             else:
                 preset = o.get('preset_name') or 'flat'
