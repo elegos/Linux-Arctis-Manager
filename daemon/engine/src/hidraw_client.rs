@@ -55,16 +55,21 @@ fn recv_scm_rights(stream: &UnixStream) -> io::Result<(u8, Option<OwnedFd>)> {
         )
         .map_err(|e| io::Error::from_raw_os_error(e as i32))?;
 
-        msg.cmsgs().unwrap().find_map(|c| {
-            if let ControlMessageOwned::ScmRights(fds) = c {
-                fds.first().copied()
-            } else {
-                None
-            }
+        // cmsgs() only fails if the cmsg buffer is malformed — treat that as
+        // "no fd received" rather than panicking.
+        msg.cmsgs().ok().and_then(|mut iter| {
+            iter.find_map(|c| {
+                if let ControlMessageOwned::ScmRights(fds) = c {
+                    fds.first().copied()
+                } else {
+                    None
+                }
+            })
         })
     };
 
-    let owned = raw_fd.map(|fd| unsafe { OwnedFd::from_raw_fd(fd) });
+    // SAFETY: fd was received via SCM_RIGHTS which transfers ownership to us.
+    let owned = raw_fd.map(|fd| unsafe { OwnedFd::from_raw_fd(fd) }); // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
     Ok((data_buf[0], owned))
 }
 
