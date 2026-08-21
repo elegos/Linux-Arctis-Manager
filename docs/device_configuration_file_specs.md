@@ -17,6 +17,7 @@ device:
                                   #
                                   # !!! IF SET TO [0, x]: communication will happen on endpoint 0x00 (for devices like Arctis Nova 7), with the given {x} wIndex (which is the target interface).
                                   # You can find the wIndex within the USBHID messages in Wireshark, addressing Endpoint = 0x00, under Setup Data
+  command_report_id: 0x00 # OPTIONAL. HID output report ID for control transfers. Defaults to 0x00.
   listen_interface_indexes: [4] # USB interface number to listen for the status.
 
   device_init: # OPTIONAL, the list of commands to initialize the device, for example the GameDAC
@@ -97,6 +98,9 @@ min_label: slider_setting_min          # As found in the language ini file
 max_label: slider_setting_max          # As found in the language ini file
 default: 0x0a                          # The value set if none was before
 update_sequence: [0x06, 0x37, 'value'] # The setting's command update sequence
+update_sequence_mapping:                # OPTIONAL: select a full command per setting value
+  0: [0x01, 0x3c, 0x00, 0x01]
+  1: [0x01, 0x3c, 0x01, 0x01]
 values_mapping:                        # OPTIONAL: if the slider needs different representation of the values
   0: off                               # Labels as found in [settings_values]
   1: low

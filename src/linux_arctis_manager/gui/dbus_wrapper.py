@@ -445,4 +445,3 @@ class DbusWrapper(QObject):
             signature='ss',
             body=[name, json.dumps(value)],
         ))
-    
