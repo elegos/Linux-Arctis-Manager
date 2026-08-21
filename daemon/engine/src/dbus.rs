@@ -459,6 +459,62 @@ impl EqInterface {
         true
     }
 
+    /// Atomically replace all settings for one channel and apply once.
+    ///
+    /// `channel`: `"media"` or `"chat"`.
+    /// `json`: full `ChannelEqSettings` object (enabled, backend, band_mode, preset, app_overrides).
+    async fn set_eq_channel_settings(&self, channel: &str, json: &str) -> bool {
+        if channel != "media" && channel != "chat" {
+            return false;
+        }
+        let ch_settings: crate::eq::settings::ChannelEqSettings = match serde_json::from_str(json) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!("SetEqChannelSettings: invalid JSON: {e}");
+                return false;
+            }
+        };
+
+        let mut settings = load_eq_settings(&self.settings_base_dir);
+        if channel == "media" {
+            settings.media = ch_settings.clone();
+        } else {
+            settings.chat = ch_settings.clone();
+        }
+
+        if let Err(e) = save_eq_settings(&self.settings_base_dir, &settings) {
+            warn!("SetEqChannelSettings: failed to persist: {e}");
+        }
+
+        let hw_ctx = {
+            let st = self.state.lock().await;
+            eq_manager::build_hw_eq_context(&st)
+        };
+        if ch_settings.enabled {
+            eq_manager::apply_channel_eq(
+                &ch_settings,
+                channel,
+                &self.settings_base_dir,
+                &self.audio_shared,
+                &self.eq_runtime,
+                hw_ctx.as_ref(),
+            )
+            .await;
+        } else {
+            eq_manager::disable_channel_eq(
+                channel,
+                &self.audio_shared,
+                &self.eq_runtime,
+                hw_ctx.as_ref(),
+            )
+            .await;
+        }
+
+        let json = serde_json::to_string(&settings).unwrap_or_default();
+        let _ = self.signal_tx.send(SignalEvent::EQChanged { json });
+        true
+    }
+
     /// Returns a JSON array of preset summaries: `[{"name": "...", "band_mode": "..."}]`.
     async fn list_presets(&self) -> String {
         let presets = list_presets(&self.settings_base_dir);

@@ -145,6 +145,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.1.0] - 4 March 2026
 
+### Changed
+
+- EQ apply path: replaced 5–10 sequential `SetEqSetting` D-Bus calls with a single atomic `SetEqChannelSettings(channel, json)` call per channel. The daemon deserializes `ChannelEqSettings` directly and calls `apply_channel_eq`/`disable_channel_eq` exactly once. The GUI now tracks which channel changed and only sends that channel's data; the explicit "Apply" button still sends both channels.
+
 ### Fixed
 
 - Initialize device on awake after sleep
