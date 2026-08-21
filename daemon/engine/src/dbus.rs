@@ -1003,6 +1003,57 @@ pub(crate) fn build_write_values(
     values
 }
 
+/// Build the full `values` map for a `WriteApi` command from a partial set of
+/// already-parsed field values (used during persisted-settings re-apply).
+///
+/// Unlike `build_write_values`, there is no "changed field" — the caller
+/// supplies whatever subset it has.  Any non-constant field absent from
+/// `partial` is filled with its range minimum (or 0 for fields without a
+/// range), so the codec always receives a complete struct.
+pub(crate) fn build_write_values_with_defaults(
+    config: &DeviceConfig,
+    api_name: &str,
+    mut partial: HashMap<String, FieldValue>,
+) -> HashMap<String, FieldValue> {
+    let Some(structs) = config.structs.as_ref() else {
+        return partial;
+    };
+    let Some(struct_def) = structs.get(api_name) else {
+        return partial;
+    };
+
+    for fdef in outgoing_fields(struct_def, structs) {
+        if fdef.constant.is_some() || partial.contains_key(&fdef.name) {
+            continue;
+        }
+        let range_min_u64 = fdef
+            .range
+            .as_ref()
+            .and_then(|r| r.first())
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let range_min_f64 = fdef
+            .range
+            .as_ref()
+            .and_then(|r| r.first())
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let default_fv = match fdef.field_type {
+            FieldType::Uint8 => FieldValue::U8(range_min_u64 as u8),
+            FieldType::Uint16 => FieldValue::U16(range_min_u64 as u16),
+            FieldType::Uint32 => FieldValue::U32(range_min_u64 as u32),
+            FieldType::Float32 => FieldValue::F32(range_min_f64 as f32),
+            FieldType::ByteArray => continue,
+        };
+        warn!(
+            "build_write_values_with_defaults: field '{}' for api '{}' not in persisted map, using default {:?}",
+            fdef.name, api_name, default_fv
+        );
+        partial.insert(fdef.name.clone(), default_fv);
+    }
+    partial
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
