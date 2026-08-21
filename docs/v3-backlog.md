@@ -38,14 +38,14 @@ This keeps the checklist honest and makes blocked work immediately visible witho
   - [x] [E1-S4] Device init sequence executor
   - [x] [E1-S5] Async event loop
   - [x] [E1-S6] Structured logging and error handling
-- [ ] **[E2] Privileged HID helper (`lam-hidraw-helper`)**
+- [x] **[E2] Privileged HID helper (`lam-hidraw-helper`)**
   - [x] [E2-S1] Unix domain socket server
   - [x] [E2-S2] Peer credential validation
   - [x] [E2-S3] VID allowlist enforcement
   - [x] [E2-S4] File descriptor passing
   - [x] [E2-S5] Installation and `setcap` instructions
   - [x] [E2-S6] Test mock for `lam-hidraw-helper`
-- [ ] **[E3] YAML DSL interpreter**
+- [x] **[E3] YAML DSL interpreter**
   - [x] [E3-S1] Base file inheritance (`extends:`)
   - [x] [E3-S2] Struct serialization and deserialization
   - [x] [E3-S3] API execution
@@ -261,6 +261,7 @@ Makes the engine trivial to install, start, and keep running across reboots with
 
 - **[E5-S2] Helper installation target**
   Add a `make install-helper` target (or equivalent) that copies `lam-hidraw-helper` to `/usr/local/libexec/`, sets ownership and permissions, and runs `setcap`. Require `sudo` only for this step.
+  > Partial: `lam-hidraw-helper.service` (systemd user unit) exists (commit `0354a77`). Makefile install target and `setcap` step still missing.
 
 - **[E5-S3] AUR package update**
   Update the existing AUR `PKGBUILD` to build the Rust engine, install the helper with correct permissions, and install the systemd user unit. Remove the udev rule from the package since it is no longer required.
