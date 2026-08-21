@@ -122,27 +122,56 @@ pub async fn apply_channel_eq(
         if let Some(ctx) = hw_ctx {
             if preset.band_mode != ctx.native_band_mode {
                 warn!(
-                    "eq: preset band_mode {:?} != device native {:?} for {channel}",
+                    "eq: preset band_mode {:?} != device native {:?} for {channel}; \
+                     cannot use HW path",
                     preset.band_mode, ctx.native_band_mode
                 );
                 if matches!(ch_settings.backend, EqBackend::Hardware) {
                     return false; // hard failure for explicit hardware request
                 }
-                // Auto falls through to LADSPA.
+                info!("eq: {channel} auto-fallback to LADSPA (band_mode mismatch)");
             } else {
                 // Build gain fields: gain1..gainN clamped to device range ±10 dB.
-                let gains: HashMap<String, FieldValue> = preset
+                let n = ctx.num_bands as usize;
+                let raw_gains: Vec<f32> = preset
                     .bands
                     .iter()
-                    .enumerate()
-                    .take(ctx.num_bands as usize)
-                    .map(|(i, b)| {
-                        (
-                            format!("gain{}", i + 1),
-                            FieldValue::F32(b.gain.clamp(-10.0, 10.0)),
-                        )
-                    })
+                    .take(n)
+                    .map(|b| b.gain)
                     .collect();
+                let clamped_gains: Vec<f32> = raw_gains
+                    .iter()
+                    .map(|&g| g.clamp(-10.0, 10.0))
+                    .collect();
+
+                // Warn about any band that needed clamping.
+                for (i, (&raw, &clamped)) in
+                    raw_gains.iter().zip(clamped_gains.iter()).enumerate()
+                {
+                    if (raw - clamped).abs() > 1e-4 {
+                        warn!(
+                            "eq: {channel} band {} gain clamped: {raw:.2} → {clamped:.2} dB",
+                            i + 1
+                        );
+                    }
+                }
+
+                // Log the full gain vector being sent to the device.
+                let gains_str: Vec<String> =
+                    clamped_gains.iter().map(|g| format!("{g:.2}")).collect();
+                info!(
+                    "eq: HW EQ applying for {channel} (preset='{preset_name}', \
+                     backend={:?}, bands=[{}])",
+                    ch_settings.backend,
+                    gains_str.join(", ")
+                );
+
+                let gains: HashMap<String, FieldValue> = clamped_gains
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &g)| (format!("gain{}", i + 1), FieldValue::F32(g)))
+                    .collect();
+
                 if ctx
                     .cmd_tx
                     .send(DeviceCommand::WriteApi {
@@ -156,6 +185,10 @@ pub async fn apply_channel_eq(
                     return false;
                 }
                 if ctx.has_preset_select {
+                    info!(
+                        "eq: {channel} selecting custom slot {} on device",
+                        ctx.custom_slot
+                    );
                     let slot =
                         HashMap::from([("eq_preset".to_string(), FieldValue::U8(ctx.custom_slot))]);
                     let _ = ctx
@@ -176,6 +209,19 @@ pub async fn apply_channel_eq(
     }
 
     let gains = ladspa::gains_for_preset(&preset);
+    {
+        let gains_str: Vec<String> = gains
+            .iter()
+            .enumerate()
+            .map(|(i, g)| format!("band{}={g:.2}", i + 1))
+            .collect();
+        info!(
+            "eq: LADSPA applying for {channel} (preset='{preset_name}', \
+             backend={:?}, bands=[{}])",
+            ch_settings.backend,
+            gains_str.join(", ")
+        );
+    }
     let (eq_sink, source_sink) = if channel == "media" {
         (MEDIA_EQ_SINK, audio::MEDIA_SINK)
     } else {
