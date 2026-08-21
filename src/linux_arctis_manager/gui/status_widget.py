@@ -9,6 +9,7 @@ class QStatusWidget(QWidget):
 
     def __init__(self, parent: QWidget):
         super().__init__(parent)
+        self._settings_config: dict = {}
 
         outer = QVBoxLayout()
         outer.setContentsMargins(0, 0, 0, 0)
@@ -23,7 +24,10 @@ class QStatusWidget(QWidget):
         scroll_content.setLayout(self.main_layout)
         scroll.setWidget(scroll_content)
         outer.addWidget(scroll)
-    
+
+    def update_settings_config(self, settings: dict) -> None:
+        self._settings_config = settings.get('settings_config', {})
+
     def clean_layout(self):
         while self.main_layout.count():
             item = self.main_layout.takeAt(0)
@@ -67,6 +71,11 @@ class QStatusWidget(QWidget):
                     display = f"{val}%"
                 elif dtype == 'on_off':
                     display = I18n.translate('status_values', 'on' if val else 'off')
+                elif isinstance(val, (int, float)) and dtype in ('uint8', 'uint16', 'uint32'):
+                    cfg = self._settings_config.get(status, {})
+                    vm = cfg.get('values_mapping', {})
+                    label_key = vm.get(str(int(val)), str(int(val))) if vm else str(int(val))
+                    display = I18n.translate('status_values', label_key)
                 else:
                     display = I18n.translate('status_values', val)
                 label = QLabel(f"{I18n.translate('status', status)}: {display}")
