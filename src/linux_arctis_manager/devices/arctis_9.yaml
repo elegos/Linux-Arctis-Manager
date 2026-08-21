@@ -1,0 +1,102 @@
+device:
+  name: SteelSeries Arctis 9
+  vendor_id: 0x1038
+  product_ids:
+    - 0x12c2
+    - 0x12c4
+  command_padding:
+    length: 31
+    position: end
+    filler: 0x00
+
+  # Interface 0 only: EP 0x81 IN + control SET_REPORT (no OUT EP).
+  command_interface_index: [0, 0]
+  listen_interface_indexes: [0]
+
+  device_init:
+    - ['status.request']
+
+  status:
+    request: 0x20
+    response_mapping:
+      - starts_with: 0xaa
+        headset_battery_charge: 0x03
+        cable_charging: 0x04
+        mic_side_tone: 0x08
+        media_mix: 0x09
+        chat_mix: 0x0a
+    representation:
+      headset:
+        - headset_battery_charge
+        - cable_charging
+      microphone:
+        - mic_side_tone
+      mixer:
+        - media_mix
+        - chat_mix
+
+  settings:
+    microphone:
+      mic_side_tone:
+        # HC exponential curve: log2(level)*100 -> 0..128 -> 0xc0..0xfd. Slider 0..128.
+        type: slider
+        min: 0
+        max: 128
+        step: 1
+        default: 0
+        min_label: mic_muted
+        max_label: perc_100
+        value_transform: log2_sidetone
+        update_sequence: [0x06, 0x00, 'value']
+        post_update_sequence: [0x90, 0x00]
+    power_management:
+      inactive_time:
+        # Auto power-off after N minutes of inactivity.
+        # WARNING: 0 = IMMEDIATE shutdown (0 seconds), NOT "never". The Arctis 9
+        # has no known "never" sentinel in the documented protocol (HC caps at 255 min).
+        # min=1 to prevent accidental instant power-off. Max finite = 255 min (4h15m).
+        type: slider
+        min: 1
+        max: 90
+        step: 1
+        default: 30
+        min_label: perc_1
+        max_label: perc_100
+        value_multiplier: 60
+        update_sequence: [0x04, 0x00, 'value_hi', 'value_lo']
+        post_update_sequence: [0x90, 0x00]
+
+    # Verified working: notification sound on/off (beep on connect/disconnect)
+    notification_sound:
+      notification_sound:
+        type: toggle
+        values:
+          off: 0x00
+          on: 0x01
+          off_label: off
+          on_label: on
+        default: 0x01
+        update_sequence: [0x06, 0x51, 'value']
+        post_update_sequence: [0x90, 0x00]
+
+  status_parse:
+    headset_battery_charge:
+      type: percentage
+      perc_min: 0x64
+      perc_max: 0x9a
+    cable_charging:
+      type: on_off
+      on: 0x01
+      off: 0x00
+    mic_side_tone:
+      type: percentage
+      perc_min: 0xc0
+      perc_max: 0xfd
+    media_mix:
+      type: percentage
+      perc_min: 0x00
+      perc_max: 0x13
+    chat_mix:
+      type: percentage
+      perc_min: 0x00
+      perc_max: 0x13

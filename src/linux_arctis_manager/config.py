@@ -70,16 +70,41 @@ class ConfigSetting(JsonSerializable):
         return { **super().to_dict(), **self.get_kwargs() }
 
     def get_update_sequence(self, value: int) -> list[int]:
+        # Support multi-byte big-endian settings via value_hi/value_lo tokens and a
+        # value_multiplier (e.g. Arctis 9 inactive time = minutes*60 as 16-bit seconds).
+        multiplier = getattr(self, 'value_multiplier', 1) or 1
+        v = int(value) * multiplier
+        # value_transform: log2_sidetone reproduces HeadsetControl's Arctis 9
+        # exponential sidetone curve (slider 0..128 -> 0xc0..0xfd).
+        transform = getattr(self, 'value_transform', None)
+        if transform == 'log2_sidetone':
+            import math
+            num = int(value)
+            if num > 0:
+                num = int((math.log2(num) * 100) / 700 * 128) if num > 0 else 0
+                num = max(0x00, min(0x3d, num))   # 0..0x3d maps to 0xc0..0xfd
+                v = 0xc0 + num
+            else:
+                v = 0xc0  # off
         result = []
         for b in self.update_sequence:
             if isinstance(b, int):
                 result.append(b)
             elif b == 'value':
-                result.append(value)
+                result.append(v & 0xff)
+            elif b == 'value_hi':
+                result.append((v >> 8) & 0xff)
+            elif b == 'value_lo':
+                result.append(v & 0xff)
             else:
                 raise Exception(f"Invalid update sequence value: {b}")
 
         return result
+
+    def get_post_update_sequence(self) -> list[int]:
+        # Optional save-to-flash command sent after the main update
+        # (e.g. Arctis 9 uses [0x90, 0x00] to persist settings to onboard memory).
+        return list(getattr(self, 'post_update_sequence', []))
 
     def __getattribute__(self, name: str) -> Any:
         return super().__getattribute__(name)

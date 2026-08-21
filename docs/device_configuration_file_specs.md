@@ -137,6 +137,42 @@ options_mapping: { value: id, label: description } # Depends on options_source. 
 update_sequence: [0x06, 0x37, 'value']             # The setting's command update sequence
 ```
 
+## Multi-byte and transformed setting values
+
+Some legacy devices (e.g. the Arctis 9) encode settings as multi-byte big-endian
+values or apply a non-linear curve to the slider. The following optional fields on
+a `device.settings.[section].[setting]` extend `update_sequence` beyond a single
+`'value'` byte:
+
+```yaml
+# Multi-byte big-endian value with a unit multiplier
+inactive_time:
+  type: slider
+  min: 1
+  max: 90
+  step: 1
+  default: 30
+  value_multiplier: 60                # multiply the slider value before encoding (here: minutes -> seconds)
+  update_sequence: [0x04, 0x00, 'value_hi', 'value_lo']  # big-endian high/low bytes
+  post_update_sequence: [0x90, 0x00] # optional save-to-flash command sent after the main write
+```
+
+- `value_multiplier` (int, default 1): the slider value is multiplied by this before
+  any byte encoding. Useful when the device expects seconds but the UI is in minutes.
+- `'value_hi'` / `'value_lo'` tokens: emit the high or low byte of the (multiplied)
+  value, enabling 16-bit (and larger) big-endian payloads.
+- `value_transform` (string, optional): applies a named non-linear transform to the
+  slider value before encoding. Currently supported:
+  - `log2_sidetone`: reproduces HeadsetControl's Arctis 9 exponential sidetone curve
+    (slider 0..128 -> device bytes 0xc0..0xfd; 0 = off). Needed because the Arctis 9
+    maps sidetone exponentially, so a linear slider feels wrong at the low end.
+- `post_update_sequence` (list, optional): a second HID command sent immediately
+  after the main `update_sequence`. The Arctis 9 requires `[0x90, 0x00]` to persist
+  settings to onboard memory; without it, changes are lost on power-cycle.
+
+These fields are all optional and default to no-op / single-byte behavior, so
+existing device configs are unaffected.
+
 ## YAML's device.status_parse.[status_name] types
 
 Linux Arctis Manager supports out of the box the following status types. Additional types need to be implemented in the code.
