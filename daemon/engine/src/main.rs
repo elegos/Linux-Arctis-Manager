@@ -695,7 +695,9 @@ async fn run_main_loop(
     // and useless device_init timeouts.
     let existing = filter_to_command_interfaces(&existing, &configs);
 
-    let mut tasks: HashMap<PathBuf, JoinHandle<()>> = HashMap::new();
+    // (pid, interface_num, task_handle) — interface_num lets us identify and
+    // abort wrong-interface fallback tasks when the correct one arrives later.
+    let mut tasks: HashMap<PathBuf, (u16, Option<u8>, JoinHandle<()>)> = HashMap::new();
 
     for dev in existing {
         let iface_s = dev
@@ -722,8 +724,9 @@ async fn run_main_loop(
             let state = Arc::clone(&app_state);
             let stx = signal_tx.clone();
             let aud = Arc::clone(&audio_shared);
+            let (pid, iface_num) = (dev.pid, dev.interface_num);
             let handle = tokio::spawn(run_device(dev, cfg, sock, state, stx, aud));
-            tasks.insert(path, handle);
+            tasks.insert(path, (pid, iface_num, handle));
         } else {
             info!(
                 "no config for PID={:#06x} iface={}, skipping",
@@ -755,6 +758,57 @@ async fn run_main_loop(
                             .interface_num
                             .map_or_else(|| "?".to_string(), |i| i.to_string());
                         if let Some(cfg) = find_config(&configs, dev.pid, dev.interface_num) {
+                            let cmd_iface = cfg
+                                .device
+                                .as_ref()
+                                .and_then(|d| d.hid.as_ref())
+                                .and_then(|h| h.command_interface.as_ref())
+                                .map(|ci| ci.interface);
+
+                            let is_correct_iface = cmd_iface
+                                .is_none_or(|cmd| dev.interface_num == Some(cmd));
+
+                            if is_correct_iface {
+                                // Abort any fallback (wrong-interface) task that was
+                                // waiting for this PID's correct interface to appear.
+                                let fallbacks: Vec<PathBuf> = tasks
+                                    .iter()
+                                    .filter(|(_, (pid, iface, _))| {
+                                        *pid == dev.pid
+                                            && cmd_iface
+                                                .is_some_and(|cmd| *iface != Some(cmd))
+                                    })
+                                    .map(|(k, _)| k.clone())
+                                    .collect();
+                                for k in fallbacks {
+                                    if let Some((_, fi, handle)) = tasks.remove(&k) {
+                                        info!(
+                                            "aborting fallback task for {:?} iface={:?} \
+                                             (correct iface={} now present)",
+                                            k,
+                                            fi,
+                                            cmd_iface.unwrap_or(0)
+                                        );
+                                        handle.abort();
+                                    }
+                                }
+                            } else {
+                                // Fallback match: skip if the correct interface is already running.
+                                let cmd_running = cmd_iface.is_some_and(|cmd| {
+                                    tasks.values().any(|(_, iface, _)| *iface == Some(cmd))
+                                });
+                                if cmd_running {
+                                    info!(
+                                        "hotplug add: skipping {} iface={} \
+                                         (cmd iface={} already running)",
+                                        dev.hidraw_path.display(),
+                                        iface_s,
+                                        cmd_iface.unwrap_or(0)
+                                    );
+                                    continue;
+                                }
+                            }
+
                             let name = cfg
                                 .device
                                 .as_ref()
@@ -775,8 +829,9 @@ async fn run_main_loop(
                             let state = Arc::clone(&app_state);
                             let stx = signal_tx.clone();
                             let aud = Arc::clone(&audio_shared);
+                            let (pid, iface_num) = (dev.pid, dev.interface_num);
                             let handle = tokio::spawn(run_device(dev, cfg, sock, state, stx, aud));
-                            tasks.insert(path, handle);
+                            tasks.insert(path, (pid, iface_num, handle));
                         } else {
                             info!(
                                 "no config for PID={:#06x} iface={}, skipping",
@@ -789,7 +844,7 @@ async fn run_main_loop(
                             "hotplug remove: {} (PID={:#06x})",
                             dev.hidraw_path.display(), dev.pid
                         );
-                        if let Some(handle) = tasks.remove(&dev.hidraw_path) {
+                        if let Some((_, _, handle)) = tasks.remove(&dev.hidraw_path) {
                             handle.abort();
                         }
                         // The aborted task may not have reached its own teardown;
