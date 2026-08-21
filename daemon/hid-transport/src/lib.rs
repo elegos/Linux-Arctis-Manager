@@ -71,7 +71,8 @@ impl HidTransport {
         let flags = nix::fcntl::OFlag::from_bits_truncate(flags) | nix::fcntl::OFlag::O_NONBLOCK;
         nix::fcntl::fcntl(&fd, nix::fcntl::FcntlArg::F_SETFL(flags))
             .map_err(|e| io::Error::from_raw_os_error(e as i32))?;
-        let std_file = unsafe { std::fs::File::from_raw_fd(fd.into_raw_fd()) };
+        // SAFETY: fd.into_raw_fd() consumes the OwnedFd, transferring ownership to File.
+        let std_file = unsafe { std::fs::File::from_raw_fd(fd.into_raw_fd()) }; // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
         Ok(Self {
             inner: AsyncFd::new(std_file)?,
         })
@@ -118,7 +119,8 @@ impl HidTransport {
     /// `data[0]` must be the HID report ID.
     pub fn write_feature(&self, data: &[u8]) -> io::Result<()> {
         let mut buf = data.to_vec();
-        unsafe { hid_set_feature(self.inner.as_raw_fd(), &mut buf) }
+        // SAFETY: ioctl on a valid hidraw fd with a correctly-sized buffer.
+        unsafe { hid_set_feature(self.inner.as_raw_fd(), &mut buf) } // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
             .map(|_| ())
             .map_err(|e| io::Error::from_raw_os_error(e as i32))
     }
@@ -127,7 +129,8 @@ impl HidTransport {
     /// `buf[0]` must be set to the desired HID report ID before calling.
     /// Returns the number of bytes filled (including the report ID byte).
     pub fn read_feature(&self, buf: &mut [u8]) -> io::Result<usize> {
-        unsafe { hid_get_feature(self.inner.as_raw_fd(), buf) }
+        // SAFETY: ioctl on a valid hidraw fd with a correctly-sized buffer.
+        unsafe { hid_get_feature(self.inner.as_raw_fd(), buf) } // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
             .map(|n| n as usize)
             .map_err(|e| io::Error::from_raw_os_error(e as i32))
     }

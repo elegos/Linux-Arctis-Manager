@@ -11,7 +11,7 @@ ICON_PATH = Path(__file__).parent / 'images' / 'steelseries_logo.svg'
 def get_icon_pixmap(icon_path: Path = ICON_PATH, color: QPalette.ColorRole = QPalette.ColorRole.Text) -> QPixmap:
     brush_color = QApplication.palette().color(color)
 
-    xml_tree = ET.parse(icon_path.absolute().as_posix())
+    xml_tree = ET.parse(icon_path.absolute().as_posix())  # nosemgrep: python.lang.security.use-defused-xml-parse.use-defused-xml-parse — input is a bundled local SVG asset, not user-supplied
     xml_root = xml_tree.getroot()
 
     for path in xml_root.findall('.//{http://www.w3.org/2000/svg}path'):
