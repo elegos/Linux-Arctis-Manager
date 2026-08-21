@@ -126,8 +126,8 @@ mod tests {
             redirect_audio_on_disconnect_device: Some("alsa_output.pci-test".to_owned()),
         };
         let j = g.to_json();
-        assert_eq!(j["redirect_audio_on_connect"], true);
-        assert_eq!(j["redirect_audio_on_disconnect"], false);
+        assert!(j["redirect_audio_on_connect"].as_bool() == Some(true));
+        assert!(j["redirect_audio_on_disconnect"].as_bool() == Some(false));
         assert_eq!(
             j["redirect_audio_on_disconnect_device"],
             "alsa_output.pci-test"
@@ -222,8 +222,8 @@ mod tests {
         };
         original.save_to_file(&path).unwrap();
         let loaded = GeneralSettings::load_from_file(&path);
-        assert_eq!(loaded.redirect_audio_on_connect, true);
-        assert_eq!(loaded.redirect_audio_on_disconnect, true);
+        assert!(loaded.redirect_audio_on_connect);
+        assert!(loaded.redirect_audio_on_disconnect);
         assert_eq!(
             loaded.redirect_audio_on_disconnect_device.as_deref(),
             Some("alsa_output.test")

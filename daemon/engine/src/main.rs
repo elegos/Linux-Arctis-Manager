@@ -348,17 +348,31 @@ async fn run_device(
                 overrides.len(),
                 info.pid
             );
+            // Group persisted fields by their API struct so that multi-field
+            // structs (e.g. stream_mix: stream_main + stream_aux + stream_mic)
+            // are sent as a single WriteApi call.  Sending them one-by-one
+            // causes codec "missing value" errors because the codec requires
+            // every non-constant field to be present.
+            let mut api_groups: HashMap<String, HashMap<String, device_config::codec::FieldValue>> =
+                HashMap::new();
             for (field, json_val) in &overrides {
                 let raw = serde_json::to_string(json_val).unwrap_or_default();
                 if let Some(api_name) = dbus::find_api_for_field(&config, field) {
                     if let Some(fv) = dbus::parse_setting_value(&config, &api_name, field, &raw) {
-                        let mut values = HashMap::new();
-                        values.insert(field.clone(), fv);
-                        let _ = cmd_tx
-                            .send(DeviceCommand::WriteApi { api_name, values })
-                            .await;
+                        api_groups
+                            .entry(api_name)
+                            .or_default()
+                            .insert(field.clone(), fv);
                     }
                 }
+            }
+            for (api_name, partial) in api_groups {
+                // Fill any sibling fields not in the persisted map with their
+                // range minimum (or 0) so the codec receives a complete struct.
+                let values = dbus::build_write_values_with_defaults(&config, &api_name, partial);
+                let _ = cmd_tx
+                    .send(DeviceCommand::WriteApi { api_name, values })
+                    .await;
             }
         }
 
