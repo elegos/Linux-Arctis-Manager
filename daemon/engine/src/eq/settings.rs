@@ -43,8 +43,14 @@ pub enum AppMatcher {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AppOverride {
     pub matcher: AppMatcher,
-    /// Name of the preset to activate (must exist in `eq_presets/`).
+    /// Name of a software preset to activate (must exist in `eq_presets/`).
+    /// Empty when `hw_preset_idx` is set.
+    #[serde(default)]
     pub preset: String,
+    /// Index of a factory hardware EQ preset (0–17). When set, the device's
+    /// `selected_eq_preset` is written directly instead of loading a software preset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hw_preset_idx: Option<u8>,
     /// Backend override for this app rule; `None` inherits the channel default.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backend: Option<EqBackend>,
@@ -179,10 +185,41 @@ mod tests {
     }
 
     #[test]
+    fn app_override_hw_preset_idx_skipped_when_none() {
+        let o = AppOverride {
+            matcher: AppMatcher::Stream {
+                name: "Spotify".into(),
+            },
+            preset: String::new(),
+            hw_preset_idx: None,
+            backend: None,
+        };
+        let yaml = serde_yaml::to_string(&o).unwrap();
+        assert!(
+            !yaml.contains("hw_preset_idx"),
+            "hw_preset_idx should be omitted: {yaml}"
+        );
+    }
+
+    #[test]
+    fn app_override_hw_preset_idx_roundtrip() {
+        let o = AppOverride {
+            matcher: AppMatcher::SteamGame { app_id: 730 },
+            preset: String::new(),
+            hw_preset_idx: Some(5),
+            backend: None,
+        };
+        let yaml = serde_yaml::to_string(&o).unwrap();
+        let back: AppOverride = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(back.hw_preset_idx, Some(5));
+    }
+
+    #[test]
     fn app_override_backend_optional_skipped_when_none() {
         let o = AppOverride {
             matcher: AppMatcher::SteamGame { app_id: 570 },
             preset: "Gaming".into(),
+            hw_preset_idx: None,
             backend: None,
         };
         let yaml = serde_yaml::to_string(&o).unwrap();
@@ -205,11 +242,13 @@ mod tests {
                         name: "Firefox".into(),
                     },
                     preset: "Flat".into(),
+                    hw_preset_idx: None,
                     backend: Some(EqBackend::Hardware),
                 },
                 AppOverride {
                     matcher: AppMatcher::SteamGame { app_id: 440 },
                     preset: "Gaming".into(),
+                    hw_preset_idx: None,
                     backend: None,
                 },
             ],

@@ -24,18 +24,18 @@ from linux_arctis_manager.constants import (DBUS_BUS_NAME,
 
 
 # ── V3 EQ translation ─────────────────────────────────────────────────────────
-# V3 daemon uses band_mode ('fixed_10'/'parametric_10'/'fixed_5') and 'preset'.
+# V3 daemon uses band_mode ('fixed10'/'parametric10'/'fixed5') and 'preset'.
 # The GUI uses mode ('simple'/'advanced') and 'preset_name'.
 # All translation lives here so eq_widget.py stays unchanged.
 
-_MODE_TO_BAND_MODE: dict[str, str] = {'simple': 'fixed_10', 'advanced': 'parametric_10'}
+_MODE_TO_BAND_MODE: dict[str, str] = {'simple': 'fixed10', 'advanced': 'parametric10'}
 _BAND_MODE_TO_MODE: dict[str, str] = {
-    'fixed_10': 'simple', 'fixed_5': 'simple', 'parametric_10': 'advanced',
+    'fixed10': 'simple', 'fixed5': 'simple', 'parametric10': 'advanced',
 }
 # Fixed display frequencies per band_mode (the daemon stores only gain, no freq).
 _BAND_MODE_FREQS: dict[str, list[int]] = {
-    'fixed_10': [50, 100, 220, 440, 880, 1750, 3500, 5000, 10000, 20000],
-    'fixed_5':  [50, 440, 1750, 5000, 20000],
+    'fixed10': [50, 100, 220, 440, 880, 1750, 3500, 5000, 10000, 20000],
+    'fixed5':  [50, 440, 1750, 5000, 20000],
 }
 
 
@@ -44,7 +44,7 @@ def _v3_settings_to_gui(s3: dict) -> dict:
     result: dict = {'app_overrides': []}
     for ch in ('media', 'chat'):
         cd = s3.get(ch, {})
-        bm = cd.get('band_mode', 'fixed_10')
+        bm = cd.get('band_mode', 'fixed10')
         p = cd.get('preset', 'Flat')
         result[ch] = {
             'enabled': cd.get('enabled', False),
@@ -94,14 +94,14 @@ def _gui_overrides_to_v3(overrides: list, channel: str) -> list:
 
 def _v3_preset_to_gui(p3: dict) -> dict:
     """Translate a V3 EqPreset to the GUI's V2 format."""
-    bm = p3.get('band_mode', 'fixed_10')
+    bm = p3.get('band_mode', 'fixed10')
     bands_v3 = p3.get('bands', [])
-    if bm == 'parametric_10':
+    if bm == 'parametric10':
         mode = 'advanced'
         bands = [{'frequency': b.get('frequency', 1000), 'gain': b.get('gain', 0.0)}
                  for b in bands_v3]
     else:
-        freqs = _BAND_MODE_FREQS.get(bm, _BAND_MODE_FREQS['fixed_10'])
+        freqs = _BAND_MODE_FREQS.get(bm, _BAND_MODE_FREQS['fixed10'])
         mode = 'simple'
         bands = [{'frequency': f, 'gain': b.get('gain', 0.0)}
                  for f, b in zip(freqs, bands_v3)]
@@ -111,9 +111,9 @@ def _v3_preset_to_gui(p3: dict) -> dict:
 def _gui_preset_to_v3(p2: dict) -> dict:
     """Translate a GUI V2 preset to V3 format for SavePreset."""
     mode = p2.get('mode', 'simple')
-    bm = _MODE_TO_BAND_MODE.get(mode, 'fixed_10')
+    bm = _MODE_TO_BAND_MODE.get(mode, 'fixed10')
     bands_v2 = p2.get('bands', [])
-    if bm == 'parametric_10':
+    if bm == 'parametric10':
         bands = [{'gain': b['gain'], 'frequency': b['frequency'], 'filter_type': 'peaking'}
                  for b in bands_v2]
     else:
@@ -426,7 +426,7 @@ class DbusWrapper(QObject):
             try:
                 for ch in ('media', 'chat'):
                     cd = settings.get(ch, {})
-                    bm = _MODE_TO_BAND_MODE.get(cd.get('mode', 'simple'), 'fixed_10')
+                    bm = _MODE_TO_BAND_MODE.get(cd.get('mode', 'simple'), 'fixed10')
                     preset = cd.get('preset_name') or 'Flat'
                     backend = cd.get('backend', 'auto')
                     for key, val in (
@@ -452,6 +452,29 @@ class DbusWrapper(QObject):
     @staticmethod
     def delete_eq_preset(name: str) -> None:
         Thread(target=lambda: asyncio.run(DbusWrapper._call_eq_async('DeletePreset', 's', [name]))).start()
+
+    @staticmethod
+    def apply_factory_eq_preset(preset_idx: int, qt_signal: SignalInstance) -> None:
+        async def _call() -> None:
+            try:
+                dbus_bus = await MessageBus().connect()
+                reply = await dbus_bus.call(Message(
+                    destination=DBUS_BUS_NAME,
+                    path=DBUS_SETTINGS_OBJECT_PATH,
+                    interface=DBUS_SETTINGS_INTERFACE_NAME,
+                    member='SetSetting',
+                    message_type=MessageType.METHOD_CALL,
+                    signature='ss',
+                    body=['eq_preset', json.dumps(preset_idx)],
+                ))
+                ok = (reply is not None
+                      and reply.message_type != MessageType.ERROR
+                      and bool(reply.body)
+                      and reply.body[0])
+                qt_signal.emit({'ok': bool(ok), 'error': '' if ok else 'SetSetting returned false'})
+            except Exception as e:
+                qt_signal.emit({'ok': False, 'error': str(e)})
+        Thread(target=lambda: asyncio.run(_call())).start()
 
     @staticmethod
     def apply_hw_eq_preset(preset_name: str, qt_signal: SignalInstance) -> None:

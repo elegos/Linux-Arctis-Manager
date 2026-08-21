@@ -6,8 +6,8 @@
 // override preset is applied via `eq_manager`; when the matching client
 // disappears the channel default is restored.
 //
-// Only handles the LADSPA (software) path.  Hardware-backend app overrides
-// require the foreground-window monitor (not yet implemented).
+// Handles the LADSPA (software) path and factory-preset hardware overrides.
+// Software-preset overrides on hardware-backend channels are driven by focus_monitor.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -17,10 +17,12 @@ use tokio::io::{AsyncBufReadExt as _, BufReader};
 use tokio::sync::{broadcast, Mutex};
 use tracing::{info, warn};
 
+use device_config::codec::FieldValue;
+
 use crate::audio::AudioSetup;
 use crate::eq::settings::{load_eq_settings, AppMatcher, ChannelEqSettings, EqBackend, EqSettings};
 use crate::eq_manager::{self as eq_manager, EqRuntime};
-use crate::state::{AppState, SignalEvent};
+use crate::state::{AppState, DeviceCommand, SignalEvent};
 
 // ── Client snapshot ───────────────────────────────────────────────────────────
 
@@ -108,8 +110,15 @@ async fn check_and_apply(
     };
 
     for (channel, ch_settings) in [("media", &settings.media), ("chat", &settings.chat)] {
-        // Hardware-backend channels are driven by focus_monitor, not stream presence.
-        if matches!(ch_settings.backend, EqBackend::Hardware) {
+        // Hardware-backend channels: skip unless there are factory-preset overrides.
+        // Software-preset overrides on hardware channels are handled by focus_monitor.
+        let is_hw_backend = matches!(ch_settings.backend, EqBackend::Hardware);
+        if is_hw_backend
+            && ch_settings
+                .app_overrides
+                .iter()
+                .all(|o| o.hw_preset_idx.is_none())
+        {
             continue;
         }
         if ch_settings.app_overrides.is_empty() {
@@ -117,50 +126,81 @@ async fn check_and_apply(
         }
 
         // First override whose matcher matches any live client wins.
-        let matched_preset = ch_settings.app_overrides.iter().find_map(|ov| {
-            clients
-                .iter()
-                .any(|c| matches(c, &ov.matcher))
-                .then_some(ov.preset.clone())
+        let matched_ov = ch_settings
+            .app_overrides
+            .iter()
+            .find(|ov| clients.iter().any(|c| matches(c, &ov.matcher)));
+
+        // Derive a tracking key: "hw:{idx}" for factory presets, preset name for software.
+        let matched_key: Option<String> = matched_ov.map(|ov| {
+            if let Some(idx) = ov.hw_preset_idx {
+                format!("hw:{idx}")
+            } else {
+                ov.preset.clone()
+            }
         });
 
         let currently = active.get(channel).and_then(|v| v.as_deref());
 
-        match (matched_preset.as_deref(), currently) {
+        match (matched_key.as_deref(), currently) {
             // Override unchanged — nothing to do.
-            (Some(p), Some(c)) if p == c => {}
+            (Some(k), Some(c)) if k == c => {}
             (None, None) => {}
 
             // New or changed override.
-            (Some(preset), _) => {
-                info!("stream monitor: {channel} → override preset '{preset}'");
-                let mut ovr = ch_settings.clone();
-                ovr.preset = preset.to_owned();
-                ovr.enabled = true;
-                eq_manager::apply_channel_eq(
-                    &ovr,
-                    channel,
-                    base_dir,
-                    audio_shared,
-                    eq_rt,
-                    hw_ctx.as_ref(),
-                )
-                .await;
-                active.insert(channel.to_string(), Some(preset.to_owned()));
+            (Some(key), _) => {
+                info!("stream monitor: {channel} → override '{key}'");
+                let ov = matched_ov.unwrap();
+                if let Some(idx) = ov.hw_preset_idx {
+                    // Factory preset override: write selected_eq_preset directly.
+                    if let Some(ctx) = &hw_ctx {
+                        let values = std::collections::HashMap::from([(
+                            "eq_preset".to_string(),
+                            FieldValue::U8(idx),
+                        )]);
+                        let _ = ctx
+                            .cmd_tx
+                            .send(DeviceCommand::WriteApi {
+                                api_name: "selected_eq_preset".into(),
+                                values,
+                            })
+                            .await;
+                    }
+                } else if !is_hw_backend {
+                    // Software preset override: apply via LADSPA path.
+                    let mut ovr = ch_settings.clone();
+                    ovr.preset = ov.preset.clone();
+                    ovr.enabled = true;
+                    eq_manager::apply_channel_eq(
+                        &ovr,
+                        channel,
+                        base_dir,
+                        audio_shared,
+                        eq_rt,
+                        hw_ctx.as_ref(),
+                    )
+                    .await;
+                }
+                active.insert(channel.to_string(), Some(key.to_owned()));
             }
 
             // Override lifted — restore channel default.
-            (None, Some(_)) => {
+            (None, Some(prev)) => {
                 info!("stream monitor: {channel} → restoring default");
-                restore_channel(
-                    ch_settings,
-                    channel,
-                    base_dir,
-                    audio_shared,
-                    eq_rt,
-                    hw_ctx.as_ref(),
-                )
-                .await;
+                // For both factory and software overrides, restore via the normal path.
+                if !prev.starts_with("hw:") && is_hw_backend {
+                    // Software override on hw-backend — focus_monitor owns this, skip.
+                } else {
+                    restore_channel(
+                        ch_settings,
+                        channel,
+                        base_dir,
+                        audio_shared,
+                        eq_rt,
+                        hw_ctx.as_ref(),
+                    )
+                    .await;
+                }
                 active.insert(channel.to_string(), None);
             }
         }
