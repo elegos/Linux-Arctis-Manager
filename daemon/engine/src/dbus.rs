@@ -334,7 +334,7 @@ impl EqInterface {
                     .entry("eq_preset".to_string())
                     .or_insert_with(|| serde_json::json!({"value": null, "type": null}));
                 if let Some(v) = slot.get_mut("value") {
-                    *v = serde_json::json!(18u8);
+                    *v = serde_json::json!(4u8);
                 }
             }
         }
@@ -345,6 +345,45 @@ impl EqInterface {
         let _ = self.signal_tx.send(SE::SettingsChanged { json });
 
         Ok(String::new())
+    }
+
+    /// Persists `eq_preset = slot` to device settings on disk, updates in-memory
+    /// status, and emits `SettingsChanged` so the GUI updates the active-preset label.
+    async fn persist_eq_preset_slot(&self, slot: u8) {
+        let (vid, pid) = {
+            let s = self.state.lock().await;
+            s.devices
+                .values()
+                .next()
+                .map(|e| (e.vid, e.pid))
+                .unwrap_or((0, 0))
+        };
+        if vid != 0 || pid != 0 {
+            let file_path =
+                device_persistence::settings_file_path(&self.settings_base_dir, vid, pid);
+            let mut overrides = device_persistence::load_device_settings(&file_path);
+            overrides.insert("eq_preset".to_string(), serde_json::json!(slot));
+            if let Err(e) = device_persistence::save_device_settings(&file_path, &overrides) {
+                warn!("eq: failed to persist eq_preset slot {slot}: {e}");
+            }
+        }
+        {
+            let mut s = self.state.lock().await;
+            if let Some(entry) = s.devices.values_mut().next() {
+                let field = entry
+                    .status
+                    .entry("eq_preset".to_string())
+                    .or_insert_with(|| serde_json::json!({"value": null, "type": null}));
+                if let Some(v) = field.get_mut("value") {
+                    *v = serde_json::json!(slot);
+                }
+            }
+        }
+        let json = {
+            let s = self.state.lock().await;
+            build_settings_json(&s)
+        };
+        let _ = self.signal_tx.send(SE::SettingsChanged { json });
     }
 
     /// Returns the full EQ settings JSON (both channels).
@@ -435,7 +474,7 @@ impl EqInterface {
             eq_manager::build_hw_eq_context(&st)
         };
         if ch_settings.enabled {
-            eq_manager::apply_channel_eq(
+            let outcome = eq_manager::apply_channel_eq(
                 &ch_settings,
                 channel,
                 &self.settings_base_dir,
@@ -444,6 +483,9 @@ impl EqInterface {
                 hw_ctx.as_ref(),
             )
             .await;
+            if let eq_manager::EqApplyOutcome::HwSlot(slot) = outcome {
+                self.persist_eq_preset_slot(slot).await;
+            }
         } else {
             eq_manager::disable_channel_eq(
                 channel,
@@ -491,7 +533,7 @@ impl EqInterface {
             eq_manager::build_hw_eq_context(&st)
         };
         if ch_settings.enabled {
-            eq_manager::apply_channel_eq(
+            let outcome = eq_manager::apply_channel_eq(
                 &ch_settings,
                 channel,
                 &self.settings_base_dir,
@@ -500,6 +542,9 @@ impl EqInterface {
                 hw_ctx.as_ref(),
             )
             .await;
+            if let eq_manager::EqApplyOutcome::HwSlot(slot) = outcome {
+                self.persist_eq_preset_slot(slot).await;
+            }
         } else {
             eq_manager::disable_channel_eq(
                 channel,
