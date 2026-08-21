@@ -74,6 +74,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Voice Changer panel is now labelled "Voice Changer (Preview)" — usable, but not yet considered production quality.
 - The noise-cancellation chain now runs as a single native PipeWire filter-chain graph in a dedicated process, exposing exactly one recording device (`Arctis Manager NC Mic`) instead of one source per LADSPA stage plus a null sink and its monitor. Settings changes are pushed live to the running graph (disabled stages are neutralized/bypassed via their controls), so the microphone device never disappears from running apps when tweaking NC parameters. The previous per-plugin PulseAudio module chain is kept as an automatic fallback when PipeWire native tools are unavailable.
 - Device detection now uses the USB iProduct string (e.g. `Arctis Nova Pro Wireless`) as the primary identifier, scoped to the SteelSeries vendor ID. Product IDs remain as a tiebreaker when multiple configurations share the same product name (e.g. Nova 7 Wireless discrete vs. percentage battery variants), and as the sole matching method for configurations that do not declare a `product_string`. This allows firmware updates that change the product ID to still be recognised automatically; unknown PIDs that match by name log a warning suggesting udev rules may need updating.
+- EQ apply path: replaced 5–10 sequential `SetEqSetting` D-Bus calls with a single atomic `SetEqChannelSettings(channel, json)` call per channel. The daemon deserializes `ChannelEqSettings` directly and calls `apply_channel_eq`/`disable_channel_eq` exactly once. The GUI now tracks which channel changed and only sends that channel's data; the explicit "Apply" button still sends both channels.
+
+### Fixed (v3)
+
+- EQ app overrides now support factory (hardware) presets in addition to custom software presets; daemon `AppOverride` gains `hw_preset_idx: Option<u8>`, stream monitor and focus monitor write `selected_eq_preset` directly for hardware-preset overrides.
+- "Load to device" in EQ widget had no effect: PySide6 does not preserve Python tuples stored as `QComboBox` item `userData`; replaced with simple `int` (factory preset index) and `str` (software preset name).
+- `SetEqSetting` band_mode values sent as `fixed_10`/`parametric_10`/`fixed_5` (rejected by daemon); corrected to `fixed10`/`parametric10`/`fixed5` to match Rust `rename_all = "snake_case"` serialization.
+- `disable_channel_eq` created a new PipeWire direct loopback on every call, even when EQ was never active; with 5 sequential `SetEqSetting` calls per apply, up to 5 duplicate loopbacks accumulated on "Arctis Media". Fix: loopback restore is now guarded by `ladspa_id.is_some() || eq_lb_id.is_some()`.
+- `apply_channel_eq` leaked the old LADSPA module when a live gain update failed and a full reload was needed; old module is now unloaded before loading the replacement.
+- Autosave loop: modifying EQ bands triggered `_on_preset_saved` → `request_eq_presets` (400 ms) → `set_bands` → spurious `band_changed` → autosave restart every ~900 ms. Fix: for existing-preset autosaves the local `_presets` cache is updated directly; `request_eq_presets` is now called only when a new preset is created.
 
 ## [2.4.1]
 
@@ -145,16 +155,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.1.0] - 4 March 2026
 
-### Changed
-
-- EQ apply path: replaced 5–10 sequential `SetEqSetting` D-Bus calls with a single atomic `SetEqChannelSettings(channel, json)` call per channel. The daemon deserializes `ChannelEqSettings` directly and calls `apply_channel_eq`/`disable_channel_eq` exactly once. The GUI now tracks which channel changed and only sends that channel's data; the explicit "Apply" button still sends both channels.
-
 ### Fixed
 
 - Initialize device on awake after sleep
-- EQ app overrides now support factory (hardware) presets in addition to custom software presets; daemon `AppOverride` gains `hw_preset_idx: Option<u8>`, stream monitor and focus monitor write `selected_eq_preset` directly for hardware-preset overrides.
-- "Load to device" in EQ widget had no effect: PySide6 does not preserve Python tuples stored as `QComboBox` item `userData`; replaced with simple `int` (factory preset index) and `str` (software preset name).
-- `SetEqSetting` band_mode values sent as `fixed_10`/`parametric_10`/`fixed_5` (rejected by daemon); corrected to `fixed10`/`parametric10`/`fixed5` to match Rust `rename_all = "snake_case"` serialization.
-- `disable_channel_eq` created a new PipeWire direct loopback on every call, even when EQ was never active; with 5 sequential `SetEqSetting` calls per apply, up to 5 duplicate loopbacks accumulated on "Arctis Media". Fix: loopback restore is now guarded by `ladspa_id.is_some() || eq_lb_id.is_some()`.
-- `apply_channel_eq` leaked the old LADSPA module when a live gain update failed and a full reload was needed; old module is now unloaded before loading the replacement.
-- Autosave loop: modifying EQ bands triggered `_on_preset_saved` → `request_eq_presets` (400 ms) → `set_bands` → spurious `band_changed` → autosave restart every ~900 ms. Fix: for existing-preset autosaves the local `_presets` cache is updated directly; `request_eq_presets` is now called only when a new preset is created.
