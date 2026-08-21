@@ -105,21 +105,21 @@ structs:
         "1":  bass_boost
         "2":  focus
         "3":  smiley
-        "4":  apex_legends
-        "5":  baldurs_gate_3
-        "6":  cod_mwii
-        "7":  cod_warzone_2
-        "8":  destiny_2
-        "9":  diablo_iv
-        "10": fortnite
-        "11": fps_footsteps
-        "12": gta_v
-        "13": minecraft
-        "14": overwatch_2
-        "15": pubg
-        "16": rainbow_six_siege
-        "17": rocket_league
-        "18": custom
+        "4":  custom
+        "5":  apex_legends
+        "6":  baldurs_gate_3
+        "7":  cod_mwii
+        "8":  cod_warzone_2
+        "9":  destiny_2
+        "10": diablo_iv
+        "11": fortnite
+        "12": fps_footsteps
+        "13": gta_v
+        "14": minecraft
+        "15": overwatch_2
+        "16": pubg
+        "17": rainbow_six_siege
+        "18": rocket_league
 
   dim_timer:
     - {name: report_id, type: uint8, constant: 0x06}

@@ -298,7 +298,7 @@ impl EqInterface {
             .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
 
         let mut preset_values = HashMap::new();
-        preset_values.insert("eq_preset".to_string(), FieldValue::U8(18));
+        preset_values.insert("eq_preset".to_string(), FieldValue::U8(4));
         cmd_tx
             .send(DeviceCommand::WriteApi {
                 api_name: "selected_eq_preset".into(),
@@ -307,8 +307,8 @@ impl EqInterface {
             .await
             .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
 
-        // Persist eq_preset=18 and emit SettingsChanged so the Device tab
-        // QComboBox reflects the custom slot without requiring a tab re-visit.
+        // Persist eq_preset=4 (custom slot) and emit SettingsChanged so the Device
+        // tab QComboBox reflects the custom slot without requiring a tab re-visit.
         let (vid, pid) = {
             let s = self.state.lock().await;
             s.devices
@@ -321,7 +321,7 @@ impl EqInterface {
             let file_path =
                 device_persistence::settings_file_path(&self.settings_base_dir, vid, pid);
             let mut overrides = device_persistence::load_device_settings(&file_path);
-            overrides.insert("eq_preset".to_string(), serde_json::json!(18u8));
+            overrides.insert("eq_preset".to_string(), serde_json::json!(4u8));
             if let Err(e) = device_persistence::save_device_settings(&file_path, &overrides) {
                 warn!("apply_hw_preset: failed to persist eq_preset: {e}");
             }

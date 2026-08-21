@@ -49,7 +49,7 @@ pub fn build_hw_eq_context(state: &AppState) -> Option<HwEqContext> {
         cmd_tx: entry.cmd_tx.clone(),
         native_band_mode: BandMode::Fixed10,
         num_bands: 10,
-        custom_slot: 18,
+        custom_slot: 4,
         has_preset_select: apis.contains_key("selected_eq_preset"),
     })
 }
