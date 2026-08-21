@@ -365,7 +365,7 @@ class DbusWrapper(QObject):
     def request_eq_capabilities(qt_signal: SignalInstance) -> None:
         async def _call() -> None:
             try:
-                caps_v3 = await DbusWrapper._eq_call_json('GetEQCapabilities', '', [])
+                caps_v3 = await DbusWrapper._eq_call_json('GetEqCapabilities', '', [])
                 qt_signal.emit({
                     'ladspa_available': caps_v3.get('ladspa_available', True),
                     'ladspa_plugin': 'mbeq_1197',
@@ -382,7 +382,7 @@ class DbusWrapper(QObject):
     def request_eq_settings(qt_signal: SignalInstance) -> None:
         async def _call() -> None:
             try:
-                s3 = await DbusWrapper._eq_call_json('GetEQSettings', '', [])
+                s3 = await DbusWrapper._eq_call_json('GetEqSettings', '', [])
                 qt_signal.emit(_v3_settings_to_gui(s3))
             except Exception as e:
                 DbusWrapper.logger.warning(f'EQ GetEQSettings failed: {e}')
@@ -435,10 +435,10 @@ class DbusWrapper(QObject):
                         ('preset', preset),
                         ('backend', backend),
                     ):
-                        await DbusWrapper._eq_call_raw('SetEQSetting', 'sss', [ch, key, json.dumps(val)])
+                        await DbusWrapper._eq_call_raw('SetEqSetting', 'sss', [ch, key, json.dumps(val)])
                     overrides_v3 = _gui_overrides_to_v3(settings.get('app_overrides', []), ch)
                     await DbusWrapper._eq_call_raw(
-                        'SetEQSetting', 'sss', [ch, 'app_overrides', json.dumps(overrides_v3)])
+                        'SetEqSetting', 'sss', [ch, 'app_overrides', json.dumps(overrides_v3)])
             except Exception as e:
                 DbusWrapper.logger.warning(f'EQ set_eq_settings failed: {e}')
         Thread(target=lambda: asyncio.run(_call())).start()
