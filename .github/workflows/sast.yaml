@@ -16,7 +16,11 @@ jobs:
     continue-on-error: true
     permissions:
       contents: read
-      security-events: write   # required for SARIF upload
+      security-events: write
+
+    defaults:
+      run:
+        working-directory: daemon
 
     steps:
       - uses: actions/checkout@v4
@@ -29,11 +33,23 @@ jobs:
         with:
           workspaces: daemon
 
+      - name: Install cargo-audit (latest)
+        run: cargo install cargo-audit --locked
+
       - name: Run cargo audit
-        uses: rustsec/audit-check@v2
+        # Non-zero exit when vulnerabilities are found; || true keeps the step green
+        # so the SARIF upload always runs.
+        run: cargo audit --json > audit.json || true
+
+      - name: Convert audit JSON to SARIF
+        run: python3 ../.github/scripts/audit_to_sarif.py < audit.json > audit.sarif
+
+      - name: Upload SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          working-directory: daemon
+          sarif_file: daemon/audit.sarif
+          category: cargo-audit
 
   # ── bandit: Python security lint ──────────────────────────────────────────
   bandit:
@@ -67,7 +83,7 @@ jobs:
             || true
 
       - name: Upload SARIF to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: bandit.sarif
@@ -109,7 +125,7 @@ jobs:
             || true
 
       - name: Upload SARIF to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: semgrep.sarif
