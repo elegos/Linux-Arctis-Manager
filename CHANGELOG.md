@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - v3: `SetSetting` now calls `build_write_values` before sending `WriteApi`: for multi-field structs (e.g. `stream_mix` with `stream_main`/`stream_aux`/`stream_mic`), sibling non-constant fields are read from `entry.status` and included in the write map, preventing codec "missing value" errors when only one field is changed.
 - v3: `sweep_loopbacks_for_source` always unloads all existing loopbacks for `Arctis_Media.monitor` and `Arctis_Chat.monitor` at daemon startup and creates exactly one new loopback each, preventing accumulation when PipeWire does not preserve module args across client connections (the previous `pactl list modules short` args-based check was unreliable). The null-sink is still reused when present (checked via `pactl list sinks`).
 - v3: EQ app overrides support factory (hardware) presets in addition to software presets: `AppOverride` carries `hw_preset_idx: Option<u8>`; stream monitor and focus monitor write `selected_eq_preset` directly for hardware-preset overrides.
+- v3: `apply_channel_eq` logs the full gain vector sent to the device or LADSPA pipeline on every EQ apply — including per-band values, any gain clamping warnings (HW path: ±10 dB), and an explicit note when `Auto` falls back from hardware to LADSPA due to band-mode mismatch.
 
 ### Added
 
