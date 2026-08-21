@@ -182,6 +182,30 @@ pub async fn apply_channel_eq(
                     .map(|(i, &g)| (format!("gain{}", i + 1), FieldValue::F32(g)))
                     .collect();
 
+                // Select the custom slot BEFORE writing gains: switching presets
+                // reloads from flash, which would overwrite our gains if written first.
+                // With the slot pre-selected, the 0x33 gain write lands in RAM and
+                // takes effect immediately.
+                if ctx.has_preset_select {
+                    info!(
+                        "eq: {channel} selecting custom slot {} on device",
+                        ctx.custom_slot
+                    );
+                    let slot =
+                        HashMap::from([("eq_preset".to_string(), FieldValue::U8(ctx.custom_slot))]);
+                    if ctx
+                        .cmd_tx
+                        .send(DeviceCommand::WriteApi {
+                            api_name: "selected_eq_preset".to_string(),
+                            values: slot,
+                        })
+                        .await
+                        .is_err()
+                    {
+                        warn!("eq: HW preset select failed for {channel}");
+                        return EqApplyOutcome::Failed;
+                    }
+                }
                 if ctx
                     .cmd_tx
                     .send(DeviceCommand::WriteApi {
@@ -193,21 +217,6 @@ pub async fn apply_channel_eq(
                 {
                     warn!("eq: HW EQ write failed for {channel}");
                     return EqApplyOutcome::Failed;
-                }
-                if ctx.has_preset_select {
-                    info!(
-                        "eq: {channel} selecting custom slot {} on device",
-                        ctx.custom_slot
-                    );
-                    let slot =
-                        HashMap::from([("eq_preset".to_string(), FieldValue::U8(ctx.custom_slot))]);
-                    let _ = ctx
-                        .cmd_tx
-                        .send(DeviceCommand::WriteApi {
-                            api_name: "selected_eq_preset".to_string(),
-                            values: slot,
-                        })
-                        .await;
                 }
                 info!("eq: HW EQ applied for {channel} (preset='{preset_name}')");
                 return EqApplyOutcome::HwSlot(ctx.custom_slot);
@@ -267,16 +276,10 @@ pub async fn apply_channel_eq(
         }
     };
 
+    // pw-cli set-param returns Ok but gains don't update in practice; always
+    // tear down and reload to guarantee the new values take effect.
     if let Some(id) = existing_ladspa_id {
-        // Already loaded: push gains live.
-        if let Err(e) = ladspa::update_gains_live(eq_sink, &gains).await {
-            warn!("eq: live update failed for {channel} ({e}); reloading");
-            let _ = ladspa::unload_eq_module(id).await;
-            // Fall through to full reload path.
-        } else {
-            info!("eq: live gains updated for {channel}");
-            return EqApplyOutcome::Ladspa;
-        }
+        let _ = ladspa::unload_eq_module(id).await;
     }
 
     // Load LADSPA sink.
