@@ -84,6 +84,18 @@ impl EqRuntime {
 
 // ── Apply / tear-down ─────────────────────────────────────────────────────────
 
+/// Outcome of [`apply_channel_eq`]: distinguishes the path taken so callers can
+/// react differently (e.g. persist the hardware preset slot on success).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EqApplyOutcome {
+    /// EQ was applied via device hardware; the value is the custom preset slot.
+    HwSlot(u8),
+    /// EQ was applied via LADSPA software pipeline.
+    Ladspa,
+    /// Apply failed.
+    Failed,
+}
+
 /// Apply (or update) the EQ on a single channel.
 ///
 /// If LADSPA is not yet loaded for this channel:
@@ -93,8 +105,6 @@ impl EqRuntime {
 ///   4. Update `AudioSetup` loopback ID and `EqRuntime` state.
 ///
 /// If LADSPA is already loaded, push new gains live (no reload).
-///
-/// Returns `true` on success.
 pub async fn apply_channel_eq(
     ch_settings: &ChannelEqSettings,
     channel: &str, // "media" or "chat"
@@ -102,7 +112,7 @@ pub async fn apply_channel_eq(
     audio_shared: &Arc<Mutex<Option<AudioSetup>>>,
     eq_rt: &Arc<Mutex<EqRuntime>>,
     hw_ctx: Option<&HwEqContext>,
-) -> bool {
+) -> EqApplyOutcome {
     let preset_name = &ch_settings.preset;
 
     // Load the preset.
@@ -111,7 +121,7 @@ pub async fn apply_channel_eq(
         Ok(p) => p,
         Err(e) => {
             warn!("eq: cannot load preset '{preset_name}': {e}");
-            return false;
+            return EqApplyOutcome::Failed;
         }
     };
 
@@ -127,7 +137,7 @@ pub async fn apply_channel_eq(
                     preset.band_mode, ctx.native_band_mode
                 );
                 if matches!(ch_settings.backend, EqBackend::Hardware) {
-                    return false; // hard failure for explicit hardware request
+                    return EqApplyOutcome::Failed; // hard failure for explicit hardware request
                 }
                 info!("eq: {channel} auto-fallback to LADSPA (band_mode mismatch)");
             } else {
@@ -182,7 +192,7 @@ pub async fn apply_channel_eq(
                     .is_err()
                 {
                     warn!("eq: HW EQ write failed for {channel}");
-                    return false;
+                    return EqApplyOutcome::Failed;
                 }
                 if ctx.has_preset_select {
                     info!(
@@ -200,11 +210,11 @@ pub async fn apply_channel_eq(
                         .await;
                 }
                 info!("eq: HW EQ applied for {channel} (preset='{preset_name}')");
-                return true;
+                return EqApplyOutcome::HwSlot(ctx.custom_slot);
             }
         } else if matches!(ch_settings.backend, EqBackend::Hardware) {
             warn!("eq: hardware backend requested but no HW EQ context for {channel}");
-            return false;
+            return EqApplyOutcome::Failed;
         }
     }
 
@@ -234,7 +244,7 @@ pub async fn apply_channel_eq(
         match guard.as_ref() {
             None => {
                 warn!("eq: no audio setup; cannot apply EQ for {channel}");
-                return false;
+                return EqApplyOutcome::Failed;
             }
             Some(s) => {
                 let lb = if channel == "media" {
@@ -265,7 +275,7 @@ pub async fn apply_channel_eq(
             // Fall through to full reload path.
         } else {
             info!("eq: live gains updated for {channel}");
-            return true;
+            return EqApplyOutcome::Ladspa;
         }
     }
 
@@ -274,7 +284,7 @@ pub async fn apply_channel_eq(
         Ok(id) => id,
         Err(e) => {
             warn!("eq: failed to load LADSPA sink for {channel}: {e}");
-            return false;
+            return EqApplyOutcome::Failed;
         }
     };
 
@@ -303,7 +313,7 @@ pub async fn apply_channel_eq(
                     }
                 }
             }
-            return false;
+            return EqApplyOutcome::Failed;
         }
     };
 
@@ -331,7 +341,7 @@ pub async fn apply_channel_eq(
     }
 
     info!("eq: LADSPA EQ enabled for {channel} (ladspa={ladspa_id}, loopback={new_lb_id})");
-    true
+    EqApplyOutcome::Ladspa
 }
 
 /// Disable EQ on a channel: reset hardware EQ to flat (preset 0) if active,
