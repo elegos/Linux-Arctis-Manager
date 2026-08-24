@@ -125,6 +125,7 @@ class DbusWrapper(QObject):
     sig_status = Signal(object)
     sig_settings = Signal(object)
     sig_device_connected = Signal(object)
+    sig_device_disconnected = Signal()
     sig_ai_progress = Signal(str)
     sig_ai_complete = Signal(bool, str)
     sig_download_progress = Signal(str)
@@ -191,9 +192,13 @@ class DbusWrapper(QObject):
             def on_connected(pid: int, name: str, caps: list) -> None:
                 self.sig_device_connected.emit({'pid': pid, 'name': name, 'capabilities': caps})
 
+            def on_disconnected(pid: int) -> None:
+                self.sig_device_disconnected.emit()
+
             iface = await self.status_iface()
             iface.on_status_changed(callback)  # type: ignore
             iface.on_device_connected(on_connected)  # type: ignore
+            iface.on_device_disconnected(on_disconnected)  # type: ignore
 
             self._status_signal_loop = asyncio.get_running_loop()
             self._stop_status_signal_future = self._status_signal_loop.create_future()

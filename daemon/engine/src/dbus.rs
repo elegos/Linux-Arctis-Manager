@@ -856,6 +856,18 @@ pub async fn start_dbus_service(
                     name,
                     capabilities,
                 } => {
+                    // Push a SettingsChanged so the Device settings panel populates
+                    // (device entry is already in state; status may be empty yet,
+                    //  but the schema is available from config.apis).
+                    let settings_json = {
+                        let s = state.lock().await;
+                        build_settings_json(&s)
+                    };
+                    if let Err(e) =
+                        SettingsInterface::settings_changed(&settings_emitter, &settings_json).await
+                    {
+                        error!("SettingsChanged (on connect) signal failed: {e}");
+                    }
                     if let Err(e) =
                         StatusInterface::device_connected(&status_emitter, pid, &name, capabilities)
                             .await
@@ -864,6 +876,27 @@ pub async fn start_dbus_service(
                     }
                 }
                 SignalEvent::DeviceDisconnected { pid } => {
+                    // Device was removed from state before this event was sent, so
+                    // build_status_json returns "{}" and build_settings_json returns
+                    // general-only settings — both clear the GUI automatically.
+                    let status_json = {
+                        let s = state.lock().await;
+                        build_status_json(&s)
+                    };
+                    if let Err(e) =
+                        StatusInterface::status_changed(&status_emitter, &status_json).await
+                    {
+                        error!("StatusChanged (on disconnect) signal failed: {e}");
+                    }
+                    let settings_json = {
+                        let s = state.lock().await;
+                        build_settings_json(&s)
+                    };
+                    if let Err(e) =
+                        SettingsInterface::settings_changed(&settings_emitter, &settings_json).await
+                    {
+                        error!("SettingsChanged (on disconnect) signal failed: {e}");
+                    }
                     if let Err(e) = StatusInterface::device_disconnected(&status_emitter, pid).await
                     {
                         error!("DeviceDisconnected signal failed: {e}");
@@ -916,7 +949,7 @@ fn build_status_json(state: &AppState) -> String {
     serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
 }
 
-fn build_settings_json(state: &AppState) -> String {
+pub(crate) fn build_settings_json(state: &AppState) -> String {
     // Start with the general section, always present regardless of device connection.
     let general_json = state.general_settings.to_json();
     let general_config = GeneralSettings::settings_config_json();

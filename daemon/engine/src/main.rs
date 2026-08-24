@@ -302,6 +302,14 @@ async fn run_device(
         }
         let _ = signal_tx.send(SignalEvent::StatusChanged);
 
+        // Push a SettingsChanged so the Device settings panel shows real current
+        // values (status is now populated, so build_settings_json has actuals).
+        {
+            let s = app_state.lock().await;
+            let json = dbus::build_settings_json(&s);
+            let _ = signal_tx.send(SignalEvent::SettingsChanged { json });
+        }
+
         // Create virtual audio sinks and apply the initial chatmix balance.
         // Must run before redirect so Arctis_Media exists when set_default_sink
         // is called.
