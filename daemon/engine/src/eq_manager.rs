@@ -153,8 +153,7 @@ pub async fn apply_channel_eq(
                 && ctx.has_preset_select
             {
                 info!("eq: {channel} flat preset → selecting factory slot 0");
-                let slot =
-                    HashMap::from([("eq_preset".to_string(), FieldValue::U8(0))]);
+                let slot = HashMap::from([("eq_preset".to_string(), FieldValue::U8(0))]);
                 let _ = ctx
                     .cmd_tx
                     .send(DeviceCommand::WriteApi {
@@ -178,20 +177,12 @@ pub async fn apply_channel_eq(
             } else {
                 // Build gain fields: gain1..gainN clamped to device range ±10 dB.
                 let n = ctx.num_bands as usize;
-                let raw_gains: Vec<f32> = preset
-                    .bands
-                    .iter()
-                    .take(n)
-                    .map(|b| b.gain)
-                    .collect();
-                let clamped_gains: Vec<f32> = raw_gains
-                    .iter()
-                    .map(|&g| g.clamp(-10.0, 10.0))
-                    .collect();
+                let raw_gains: Vec<f32> = preset.bands.iter().take(n).map(|b| b.gain).collect();
+                let clamped_gains: Vec<f32> =
+                    raw_gains.iter().map(|&g| g.clamp(-10.0, 10.0)).collect();
 
                 // Warn about any band that needed clamping.
-                for (i, (&raw, &clamped)) in
-                    raw_gains.iter().zip(clamped_gains.iter()).enumerate()
+                for (i, (&raw, &clamped)) in raw_gains.iter().zip(clamped_gains.iter()).enumerate()
                 {
                     if (raw - clamped).abs() > 1e-4 {
                         warn!(

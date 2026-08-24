@@ -44,9 +44,7 @@ pub async fn run(tx: mpsc::Sender<FocusEvent>) {
                 let wid_str = line.split("# ").nth(1).unwrap_or("?").trim();
                 if let Some(wid) = parse_window_id(&line) {
                     let (pid, class) = window_info(wid).await;
-                    info!(
-                        "focus/x11: active window wid={wid_str} pid={pid:?} class={class:?}"
-                    );
+                    info!("focus/x11: active window wid={wid_str} pid={pid:?} class={class:?}");
                     if let Some(p) = pid {
                         wid_pid.insert(wid, p);
                     }

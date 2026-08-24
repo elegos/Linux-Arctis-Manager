@@ -66,7 +66,6 @@ pub fn detect() -> FocusBackend {
     ))
 }
 
-
 pub fn backend_id(b: &FocusBackend) -> &'static str {
     match b {
         FocusBackend::Hyprland => "hyprland",
@@ -472,8 +471,28 @@ async fn on_wayland_native_focused(
     eq_rt: &Arc<Mutex<EqRuntime>>,
     hw_ctx: Option<&eq_manager::HwEqContext>,
 ) {
-    process_channel_wayland_native(xwayland_pids, &settings.media, "media", media_stack, base_dir, audio, eq_rt, hw_ctx).await;
-    process_channel_wayland_native(xwayland_pids, &settings.chat, "chat", chat_stack, base_dir, audio, eq_rt, hw_ctx).await;
+    process_channel_wayland_native(
+        xwayland_pids,
+        &settings.media,
+        "media",
+        media_stack,
+        base_dir,
+        audio,
+        eq_rt,
+        hw_ctx,
+    )
+    .await;
+    process_channel_wayland_native(
+        xwayland_pids,
+        &settings.chat,
+        "chat",
+        chat_stack,
+        base_dir,
+        audio,
+        eq_rt,
+        hw_ctx,
+    )
+    .await;
 }
 
 #[allow(clippy::too_many_arguments)]

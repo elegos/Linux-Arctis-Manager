@@ -176,6 +176,11 @@ impl DeviceSession {
         tx: mpsc::Sender<EmitEvent>,
         mut cmd_rx: mpsc::Receiver<DeviceCommand>,
     ) -> Result<(), EngineError> {
+        use tokio::time::MissedTickBehavior;
+        let mut periodic = tokio::time::interval(Duration::from_secs(10));
+        periodic.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        periodic.tick().await; // skip first immediate tick — device_init already ran sync_all
+
         loop {
             tokio::select! {
                 read_result = self.transport.read_interrupt(Duration::from_millis(5000)) => {
@@ -204,8 +209,15 @@ impl DeviceSession {
                             }
                         }
                         for effect in dr.side_effects {
-                            if let Err(e) = self.dispatch_call_by_name(&effect.call, None).await {
-                                warn!("side effect '{}' failed: {e}", effect.call);
+                            match self.dispatch_call_by_name(&effect.call, None).await {
+                                Ok(side_events) => {
+                                    for ev in side_events {
+                                        if tx.send(ev).await.is_err() {
+                                            return Ok(());
+                                        }
+                                    }
+                                }
+                                Err(e) => warn!("side effect '{}' failed: {e}", effect.call),
                             }
                         }
                     }
@@ -218,6 +230,18 @@ impl DeviceSession {
                             }
                         }
                         None => return Ok(()), // all senders dropped
+                    }
+                }
+                _ = periodic.tick() => {
+                    match self.run_sync_read().await {
+                        Ok(events) => {
+                            for ev in events {
+                                if tx.send(ev).await.is_err() {
+                                    return Ok(());
+                                }
+                            }
+                        }
+                        Err(e) => warn!("periodic sync_read failed: {e}"),
                     }
                 }
             }
@@ -1077,6 +1101,109 @@ apis:
             "save_to_flash (0x06 0x09) must be sent during shutdown"
         );
 
+        let _ = tokio::time::timeout(Duration::from_millis(500), task).await;
+    }
+
+    // ── E1-S8: side-effect events forwarded through channel ──────────────────
+
+    #[tokio::test]
+    async fn side_effect_sync_all_events_forwarded_to_channel() {
+        use device_config::sync_dispatcher::EventValue;
+
+        let (engine_fd, peer_fd) = make_pair();
+        let session = DeviceSession::new(
+            cfg(r#"
+structs:
+  status_settings:
+    outgoing:
+      - {name: report_id,    type: uint8, constant: 0x00}
+      - {name: command,      type: uint8, constant: 0xB0}
+    incoming:
+      - {name: report_id,    type: uint8, constant: 0x00}
+      - {name: command,      type: uint8, constant: 0xB0}
+      - {name: status_field, type: uint8}
+apis:
+  status_settings:
+    read: {transport: HID_IO, chunk_size: 8}
+sync_events:
+  0x10:
+    emit: trigger_event
+    fields: []
+    side_effects:
+      - call: sync_all
+sync_read:
+  - struct: status_settings
+    maps:
+      - {emit: status_field_changed, field: status_field}
+"#),
+            engine_fd,
+        )
+        .expect("from_fd");
+
+        let (event_tx, mut event_rx) = mpsc::channel(8);
+        let (_cmd_tx, cmd_rx) = mpsc::channel::<DeviceCommand>(8);
+
+        let task = tokio::spawn(async move {
+            let mut s = session;
+            s.run_event_loop_with_commands(event_tx, cmd_rx).await
+        });
+
+        let mut peer = HidTransport::from_fd(peer_fd).expect("from_fd");
+
+        // Send trigger event 0x10 — has sync_all as side effect.
+        let mut trigger = vec![0u8; 8];
+        trigger[1] = 0x10;
+        peer.write_interrupt(&trigger).await.unwrap();
+
+        // Engine runs sync_all: sends a read request for status_settings.
+        let _req = tokio::time::timeout(
+            Duration::from_millis(500),
+            peer.read_interrupt(Duration::from_millis(500)),
+        )
+        .await
+        .expect("engine should send sync_read request")
+        .expect("read ok");
+
+        // Serve the sync_read response with status_field = 99.
+        let mut resp = vec![0u8; 8];
+        resp[0] = 0x00; // report_id
+        resp[1] = 0xB0; // command
+        resp[2] = 99; // status_field
+        peer.write_interrupt(&resp).await.unwrap();
+
+        // Expect trigger_event first, then status_field_changed from sync_all.
+        let ev1 = tokio::time::timeout(Duration::from_millis(500), event_rx.recv())
+            .await
+            .expect("timed out waiting for trigger_event")
+            .expect("channel closed");
+        let ev2 = tokio::time::timeout(Duration::from_millis(500), event_rx.recv())
+            .await
+            .expect("timed out waiting for status_field_changed — side effect events not forwarded")
+            .expect("channel closed");
+
+        let signals = [ev1.signal.as_str(), ev2.signal.as_str()];
+        assert!(
+            signals.contains(&"trigger_event"),
+            "trigger_event missing: {signals:?}"
+        );
+        assert!(
+            signals.contains(&"status_field_changed"),
+            "status_field_changed missing — side effect events are being discarded: {signals:?}"
+        );
+
+        let sync_ev = if ev1.signal == "status_field_changed" {
+            &ev1
+        } else {
+            &ev2
+        };
+        assert_eq!(
+            sync_ev.fields.get("status_field"),
+            Some(&EventValue::Field(FieldValue::U8(99))),
+            "status_field value mismatch"
+        );
+
+        drop(event_rx);
+        drop(peer);
         let _ = tokio::time::timeout(Duration::from_millis(500), task).await;
     }
 }

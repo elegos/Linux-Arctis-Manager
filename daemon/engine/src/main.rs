@@ -401,7 +401,7 @@ async fn run_device(
         let audio_for_task = Arc::clone(&audio_shared);
         tokio::spawn(async move {
             while let Some(ev) = event_rx.recv().await {
-                info!(signal = %ev.signal, fields = ?ev.fields, "sync event");
+                debug!(signal = %ev.signal, fields = ?ev.fields, "sync event");
                 let mut chatmix_changed = false;
                 let mut radio_status: Option<String> = None;
                 {
@@ -537,12 +537,26 @@ fn chatmix_from_events(events: &[EmitEvent]) -> (Option<u8>, Option<u8>) {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    // Accept --log-level=<level> or --log-level <level>; falls back to RUST_LOG, then "info".
+    let log_level = std::env::args()
+        .collect::<Vec<_>>()
+        .windows(2)
+        .find_map(|w| {
+            if w[0] == "--log-level" {
+                Some(w[1].clone())
+            } else {
+                w[0].strip_prefix("--log-level=").map(str::to_owned)
+            }
+        });
+
+    let filter = if let Some(ref level) = log_level {
+        tracing_subscriber::EnvFilter::new(level)
+    } else {
+        tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
+    };
+
+    tracing_subscriber::fmt().with_env_filter(filter).init();
 
     info!("lam-daemon {}", env!("LAM_VERSION"));
 
