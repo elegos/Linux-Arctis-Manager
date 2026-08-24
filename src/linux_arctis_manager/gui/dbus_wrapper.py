@@ -65,11 +65,15 @@ def _v3_settings_to_gui(s3: dict) -> dict:
                 gname = ''
             else:
                 continue
-            result['app_overrides'].append({
+            ov_entry: dict = {
                 'matcher_type': mt, 'value': val,
                 'steam_app_id': app_id, 'steam_game_name': gname,
                 'preset_name': ov.get('preset', ''), 'channel': ch,
-            })
+            }
+            hw_idx = ov.get('hw_preset_idx')
+            if hw_idx is not None:
+                ov_entry['hw_preset_idx'] = hw_idx
+            result['app_overrides'].append(ov_entry)
     return result
 
 
@@ -88,7 +92,11 @@ def _gui_overrides_to_v3(overrides: list, channel: str) -> list:
             matcher = {'type': 'steam_game', 'app_id': ov.get('steam_app_id')}
         else:
             continue
-        result.append({'matcher': matcher, 'preset': ov.get('preset_name', '')})
+        entry: dict = {'matcher': matcher, 'preset': ov.get('preset_name', '')}
+        hw_idx = ov.get('hw_preset_idx')
+        if hw_idx is not None:
+            entry['hw_preset_idx'] = hw_idx
+        result.append(entry)
     return result
 
 

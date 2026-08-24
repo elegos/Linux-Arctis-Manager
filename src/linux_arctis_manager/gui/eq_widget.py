@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import configparser
 import math
 import logging
 import os
+from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import (QColor, QFont, QLinearGradient, QPainter,
@@ -37,6 +39,70 @@ def _fmt_freq(hz: int) -> str:
         v = hz / 1000
         return f'{v:g}k'
     return str(hz)
+
+
+def _load_desktop_apps() -> list[tuple[str, str]]:
+    """Return (display_name, exec_basename) pairs from .desktop files, sorted by name.
+
+    Covers native, Snap, and Flatpak applications.
+    """
+    search_dirs = [
+        Path('/usr/share/applications'),
+        Path('/usr/local/share/applications'),
+        Path.home() / '.local/share/applications',
+        Path('/var/lib/snapd/desktop/applications'),
+        Path('/var/lib/flatpak/exports/share/applications'),
+        Path.home() / '.local/share/flatpak/exports/share/applications',
+    ]
+    apps: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for d in search_dirs:
+        if not d.is_dir():
+            continue
+        for path in sorted(d.glob('*.desktop')):
+            try:
+                cp = configparser.RawConfigParser(strict=False)
+                cp.read(path, encoding='utf-8')
+                if not cp.has_section('Desktop Entry'):
+                    continue
+                de = cp['Desktop Entry']
+                if de.get('Type', '') != 'Application':
+                    continue
+                if de.get('NoDisplay', 'false').lower() == 'true':
+                    continue
+                name = de.get('Name', '').strip()
+                if not name:
+                    continue
+                exec_val = de.get('TryExec', '') or de.get('Exec', '')
+                exec_cmd = exec_val.split()[0] if exec_val else ''
+                exec_base = os.path.basename(exec_cmd)
+                exec_raw = de.get('Exec', '')
+                # Skip Steam game launchers — handled by the Steam game matcher
+                if 'steam://rungameid' in exec_raw:
+                    continue
+                # Flatpak wrapper: extract basename from the app ID in the Exec line
+                if exec_base == 'flatpak':
+                    parts = exec_raw.split()
+                    app_id = next(
+                        (p for p in reversed(parts)
+                         if not p.startswith('-') and '.' in p and not p.startswith('%')),
+                        '',
+                    )
+                    exec_base = app_id.split('.')[-1].lower() if app_id else ''
+                # Skip generic shell/interpreter wrappers and AppImage entries with hash names
+                _WRAPPERS = {'sh', 'bash', 'dash', 'env', 'xdg-open',
+                             'python', 'python3', 'python2', 'ruby', 'perl',
+                             'java', 'mono', 'wine', 'wine64'}
+                if exec_base in _WRAPPERS or not exec_base or len(exec_base) > 80:
+                    continue
+                entry = (name, exec_base)
+                if entry not in seen:
+                    seen.add(entry)
+                    apps.append(entry)
+            except Exception:
+                continue
+    apps.sort(key=lambda x: x[0].lower())
+    return apps
 
 
 # ---------------------------------------------------------------------------
@@ -380,7 +446,7 @@ class QEQBandsView(QWidget):
 
 class QAddOverrideDialog(QDialog):
     def __init__(self, preset_names: list[str], factory_presets: dict[int, str],
-                 steam_games: list[dict], running_streams: list[str],
+                 steam_games: list[dict],
                  parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(I18n.translate('ui', 'eq_add_override'))
@@ -398,37 +464,37 @@ class QAddOverrideDialog(QDialog):
 
         self._type_combo = QComboBox()
         self._type_combo.addItems([
-            I18n.translate('ui', 'eq_match_stream'),
             I18n.translate('ui', 'eq_match_executable'),
             I18n.translate('ui', 'eq_match_steam'),
         ])
         self._type_combo.currentIndexChanged.connect(self._on_type_changed)
         layout.addRow(I18n.translate('ui', 'eq_match_by'), self._type_combo)
 
-        # Stacked value widget (page 0 = stream combo, page 1 = exec + browse, page 2 = steam).
-        self._val_label = QLabel(I18n.translate('ui', 'eq_match_stream'))
+        # Stacked value widget (page 0 = app picker, page 1 = steam).
+        self._val_label = QLabel(I18n.translate('ui', 'eq_match_executable'))
         self._val_stack = QStackedWidget()
 
-        # Page 0: select-only combo of running application names.
-        self._stream_combo = QComboBox()
-        self._stream_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        for name in running_streams:
-            self._stream_combo.addItem(name)
-        self._val_stack.addWidget(self._stream_combo)
-
-        # Page 1: line edit + Browse button for executables.
+        # Page 0: searchable combo from installed .desktop apps + Browse fallback.
         exec_widget = QWidget()
         exec_row = QHBoxLayout()
         exec_row.setContentsMargins(0, 0, 0, 0)
         exec_widget.setLayout(exec_row)
-        self._exec_input = QLineEdit()
+        self._exec_combo = QComboBox()
+        self._exec_combo.setEditable(True)
+        self._exec_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self._exec_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        completer = self._exec_combo.completer()
+        completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        for app_name, exec_base in _load_desktop_apps():
+            self._exec_combo.addItem(app_name, exec_base)
         browse_btn = QPushButton(I18n.translate('ui', 'eq_browse'))
         browse_btn.clicked.connect(self._browse_executable)
-        exec_row.addWidget(self._exec_input)
+        exec_row.addWidget(self._exec_combo)
         exec_row.addWidget(browse_btn)
         self._val_stack.addWidget(exec_widget)
 
-        # Page 2: steam game combo.
+        # Page 1: steam game combo.
         self._game_combo = QComboBox()
         self._game_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         for g in self._unique_games:
@@ -460,7 +526,6 @@ class QAddOverrideDialog(QDialog):
 
     def _on_type_changed(self, idx: int) -> None:
         labels = [
-            I18n.translate('ui', 'eq_match_stream'),
             I18n.translate('ui', 'eq_match_executable'),
             I18n.translate('ui', 'eq_match_steam'),
         ]
@@ -469,26 +534,19 @@ class QAddOverrideDialog(QDialog):
 
     def _browse_executable(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, I18n.translate('ui', 'eq_match_executable'))
-        if path:
-            self._exec_input.setText(os.path.basename(path))
+        if not path:
+            return
+        base = os.path.basename(path)
+        for i in range(self._exec_combo.count()):
+            if self._exec_combo.itemData(i) == base:
+                self._exec_combo.setCurrentIndex(i)
+                return
+        self._exec_combo.insertItem(0, base, base)
+        self._exec_combo.setCurrentIndex(0)
 
     def get_override(self) -> dict:
         type_idx = self._type_combo.currentIndex()
-        mt = ('stream', 'executable', 'steam')[type_idx]
         preset_data = self._preset_combo.currentData()
-        gi = self._game_combo.currentIndex()
-        if mt == 'stream':
-            value = self._stream_combo.currentText().strip()
-            steam_app_id = None
-            steam_game_name = ''
-        elif mt == 'executable':
-            value = os.path.basename(self._exec_input.text().strip())
-            steam_app_id = None
-            steam_game_name = ''
-        else:
-            value = ''
-            steam_app_id = self._unique_games[gi]['app_id'] if 0 <= gi < len(self._unique_games) else None
-            steam_game_name = self._unique_games[gi]['name'] if 0 <= gi < len(self._unique_games) else ''
 
         hw_preset_idx = None
         preset_name = ''
@@ -497,14 +555,31 @@ class QAddOverrideDialog(QDialog):
         elif isinstance(preset_data, str) and preset_data and preset_data != 'flat':
             preset_name = preset_data
 
-        result = {
-            'matcher_type': mt,
-            'value': value,
-            'steam_app_id': steam_app_id,
-            'steam_game_name': steam_game_name,
-            'preset_name': preset_name,
-            'channel': 'chat' if self._channel_combo.currentIndex() == 1 else 'media',
-        }
+        if type_idx == 0:  # executable
+            combo_idx = self._exec_combo.currentIndex()
+            if combo_idx >= 0:
+                value = self._exec_combo.itemData(combo_idx) or os.path.basename(self._exec_combo.currentText())
+            else:
+                value = os.path.basename(self._exec_combo.currentText().strip())
+            result = {
+                'matcher_type': 'executable',
+                'value': value,
+                'steam_app_id': None,
+                'steam_game_name': '',
+                'preset_name': preset_name,
+                'channel': 'chat' if self._channel_combo.currentIndex() == 1 else 'media',
+            }
+        else:  # steam
+            gi = self._game_combo.currentIndex()
+            result = {
+                'matcher_type': 'steam',
+                'value': '',
+                'steam_app_id': self._unique_games[gi]['app_id'] if 0 <= gi < len(self._unique_games) else None,
+                'steam_game_name': self._unique_games[gi]['name'] if 0 <= gi < len(self._unique_games) else '',
+                'preset_name': preset_name,
+                'channel': 'chat' if self._channel_combo.currentIndex() == 1 else 'media',
+            }
+
         if hw_preset_idx is not None:
             result['hw_preset_idx'] = hw_preset_idx
         return result
@@ -859,7 +934,6 @@ class QEQWidget(QWidget):
     sig_presets          = Signal(object)
     sig_steam_games      = Signal(object)
     sig_eq_capabilities  = Signal(object)
-    sig_running_streams  = Signal(object)
     sig_hw_apply         = Signal(object)
 
     def __init__(self, parent: QWidget) -> None:
@@ -871,7 +945,6 @@ class QEQWidget(QWidget):
         self._active_hw_preset_idx: int | None = None
         self._overrides: list[dict] = []
         self._steam_games: list[dict] = []
-        self._running_streams: list[str] = []
         self._initial_load_done = False   # prevents preset-list refresh from resetting the combo
         self._ladspa_available = True
         self._has_hw_eq = False
@@ -890,7 +963,6 @@ class QEQWidget(QWidget):
         self.sig_presets.connect(self._on_presets)
         self.sig_steam_games.connect(self._on_steam_games)
         self.sig_eq_capabilities.connect(self._on_eq_capabilities)
-        self.sig_running_streams.connect(self._on_running_streams)
         self.sig_hw_apply.connect(self._on_hw_apply_result)
 
         outer = QVBoxLayout()
@@ -984,6 +1056,22 @@ class QEQWidget(QWidget):
         ov = QVBoxLayout()
         ov.setAlignment(Qt.AlignmentFlag.AlignTop)
         ov_box.setLayout(ov)
+
+        # Warning banner — shown when the focus-tracking backend is unsupported
+        self._hw_override_warn_frame = QFrame()
+        self._hw_override_warn_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self._hw_override_warn_frame.setStyleSheet(
+            'QFrame { background-color: #fff3cd; border: 1px solid #ffc107; border-radius: 4px; }'
+        )
+        ow_layout = QHBoxLayout()
+        ow_layout.setContentsMargins(8, 6, 8, 6)
+        self._hw_override_warn_frame.setLayout(ow_layout)
+        self._hw_override_warn_label = QLabel()
+        self._hw_override_warn_label.setWordWrap(True)
+        ow_layout.addWidget(self._hw_override_warn_label)
+        self._hw_override_warn_frame.setVisible(False)
+        ov.addWidget(self._hw_override_warn_frame)
+
         self._overrides_list = QListWidget()
         self._overrides_list.setMaximumHeight(140)
         ov.addWidget(self._overrides_list)
@@ -1014,7 +1102,6 @@ class QEQWidget(QWidget):
         DbusWrapper.request_eq_settings(self.sig_eq_settings)
         DbusWrapper.request_eq_presets(self.sig_presets)
         DbusWrapper.request_steam_games(self.sig_steam_games)
-        DbusWrapper.request_running_streams(self.sig_running_streams)
 
     # ------------------------------------------------------------------
     # Data handlers
@@ -1046,6 +1133,13 @@ class QEQWidget(QWidget):
             reason = caps.get('hw_override_unsupported_reason') if backend == 'unsupported' else None
             self._media_section.set_hw_override_note(reason)
             self._chat_section.set_hw_override_note(reason)
+            if reason:
+                self._hw_override_warn_label.setText(
+                    I18n.translate('ui', 'eq_hw_override_warn') + '\n' + reason
+                )
+            self._hw_override_warn_frame.setVisible(bool(reason))
+        else:
+            self._hw_override_warn_frame.setVisible(False)
         self._media_section.setEnabled(available)
         self._chat_section.setEnabled(available)
         self._apply_btn.setEnabled(available)
@@ -1144,9 +1238,6 @@ class QEQWidget(QWidget):
     def _on_steam_games(self, games: list) -> None:
         self._steam_games = games
 
-    def _on_running_streams(self, streams: list) -> None:
-        self._running_streams = streams
-
     def _apply_to_sections(self) -> None:
         self._media_section.load_settings(
             self._pending_settings.get('media', {}), self._presets)
@@ -1195,9 +1286,8 @@ class QEQWidget(QWidget):
             self._overrides_list.addItem(f'{src}  →  {preset} ({channel})')
 
     def _add_override(self) -> None:
-        DbusWrapper.request_running_streams(self.sig_running_streams)
         dlg = QAddOverrideDialog(list(self._presets.keys()), self._factory_presets,
-                                 self._steam_games, self._running_streams, self)
+                                 self._steam_games, self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self._overrides.append(dlg.get_override())
             self._refresh_overrides_list()
