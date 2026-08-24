@@ -1,7 +1,7 @@
 // Focus monitor: applies hardware-backend EQ app overrides based on window focus.
 //
-// Only channels with `backend = Hardware` are handled here; LADSPA and Auto
-// channels remain under stream_monitor.
+// Channels with `backend = Hardware` or `backend = Auto` are handled here when
+// executable/steam matchers match; LADSPA channels are excluded.
 //
 // Backend implementations all satisfy the same contract:
 //   `pub async fn run(tx: mpsc::Sender<FocusEvent>)`
@@ -61,9 +61,11 @@ pub fn detect() -> FocusBackend {
     }
     FocusBackend::Unsupported(format!(
         "No supported focus-tracking method found (desktop: \"{de}\"). \
-         Hyprland, Sway, or an X11/XWayland session is required for hardware EQ app overrides."
+         Hyprland, Sway, KDE Plasma, or an X11/XWayland session is required \
+         for hardware EQ app overrides."
     ))
 }
+
 
 pub fn backend_id(b: &FocusBackend) -> &'static str {
     match b {
@@ -151,10 +153,10 @@ fn matches_focus(pid: Option<u32>, class: Option<&str>, matcher: &AppMatcher) ->
                 .and_then(|n| n.to_str())
                 .unwrap_or("");
             if let Some(p) = pid {
-                if let Ok(exe) = std::fs::read_link(format!("/proc/{p}/exe")) {
-                    if exe.file_name().and_then(|n| n.to_str()) == Some(base) {
-                        return true;
-                    }
+                // Walk up the process tree (up to 5 levels) so that child processes
+                // (e.g. steamwebhelper) match against their parent (steam).
+                if exe_chain_matches(p, base) {
+                    return true;
                 }
             }
             class.is_some_and(|c| c.eq_ignore_ascii_case(base))
@@ -163,6 +165,35 @@ fn matches_focus(pid: Option<u32>, class: Option<&str>, matcher: &AppMatcher) ->
             pid.and_then(steam_app_id_for_pid).as_deref() == Some(&app_id.to_string())
         }
     }
+}
+
+/// Walk /proc/{pid}/exe and up the parent chain (PPid from /proc/{pid}/status)
+/// returning true if any ancestor's exe basename matches `target`.
+fn exe_chain_matches(pid: u32, target: &str) -> bool {
+    let mut cur = pid;
+    for _ in 0..5 {
+        if let Ok(exe) = std::fs::read_link(format!("/proc/{cur}/exe")) {
+            if exe.file_name().and_then(|n| n.to_str()) == Some(target) {
+                return true;
+            }
+        }
+        // Read PPid from /proc/{cur}/status
+        let status = match std::fs::read_to_string(format!("/proc/{cur}/status")) {
+            Ok(s) => s,
+            Err(_) => break,
+        };
+        let ppid = status
+            .lines()
+            .find(|l| l.starts_with("PPid:"))
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(0);
+        if ppid <= 1 {
+            break;
+        }
+        cur = ppid;
+    }
+    false
 }
 
 fn steam_app_id_for_pid(pid: u32) -> Option<String> {
@@ -210,12 +241,25 @@ pub async fn run(
                 let hw_ctx = { let st = app_state.lock().await; eq_manager::build_hw_eq_context(&st) };
                 match ev {
                     FocusEvent::Focused { pid, class } => {
+                        tracing::info!(
+                            "focus monitor: focused pid={pid:?} class={class:?}"
+                        );
                         on_focused(pid, class.as_deref(), &eq_settings,
                             &mut media_stack, &mut chat_stack,
                             &settings_base_dir, &audio_shared, &eq_rt, hw_ctx.as_ref()).await;
                     }
                     FocusEvent::Closed { pid } => {
+                        tracing::info!("focus monitor: closed pid={pid}");
                         on_closed(pid, &eq_settings,
+                            &mut media_stack, &mut chat_stack,
+                            &settings_base_dir, &audio_shared, &eq_rt, hw_ctx.as_ref()).await;
+                    }
+                    FocusEvent::WaylandNativeFocused { xwayland_pids } => {
+                        tracing::info!(
+                            "focus monitor: Wayland-native window focused ({} XWayland pids excluded)",
+                            xwayland_pids.len()
+                        );
+                        on_wayland_native_focused(&xwayland_pids, &eq_settings,
                             &mut media_stack, &mut chat_stack,
                             &settings_base_dir, &audio_shared, &eq_rt, hw_ctx.as_ref()).await;
                     }
@@ -290,8 +334,8 @@ async fn process_channel_focus(
     eq_rt: &Arc<Mutex<EqRuntime>>,
     hw_ctx: Option<&eq_manager::HwEqContext>,
 ) {
-    if !matches!(ch.backend, EqBackend::Hardware) {
-        return;
+    if matches!(ch.backend, EqBackend::Ladspa) {
+        return; // focus monitor only drives HW and Auto paths
     }
     let Some(ov) = ch
         .app_overrides
@@ -371,8 +415,8 @@ async fn process_channel_close(
     eq_rt: &Arc<Mutex<EqRuntime>>,
     hw_ctx: Option<&eq_manager::HwEqContext>,
 ) {
-    if !matches!(ch.backend, EqBackend::Hardware) {
-        return;
+    if matches!(ch.backend, EqBackend::Ladspa) {
+        return; // focus monitor only drives HW and Auto paths
     }
     let Some(action) = stack.on_close(pid) else {
         return;
@@ -391,5 +435,95 @@ async fn process_channel_close(
                 eq_manager::disable_channel_eq(channel, audio, eq_rt, hw_ctx).await;
             }
         }
+    }
+}
+
+// ── Wayland-native window fallback (x11 synthetic window + /proc scan) ────────
+
+/// Scan /proc for a running process whose exe basename matches `name` and whose
+/// PID is not in `excluded` (the known XWayland process list).
+fn find_proc_by_exe(name: &str, excluded: &[u32]) -> Option<u32> {
+    let dir = std::fs::read_dir("/proc").ok()?;
+    for entry in dir.flatten() {
+        let fname = entry.file_name();
+        let Some(pid) = fname.to_str().and_then(|s| s.parse::<u32>().ok()) else {
+            continue;
+        };
+        if excluded.contains(&pid) {
+            continue;
+        }
+        if let Ok(exe) = std::fs::read_link(format!("/proc/{pid}/exe")) {
+            if exe.file_name().and_then(|n| n.to_str()) == Some(name) {
+                return Some(pid);
+            }
+        }
+    }
+    None
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn on_wayland_native_focused(
+    xwayland_pids: &[u32],
+    settings: &EqSettings,
+    media_stack: &mut ChannelStack,
+    chat_stack: &mut ChannelStack,
+    base_dir: &Path,
+    audio: &Arc<Mutex<Option<AudioSetup>>>,
+    eq_rt: &Arc<Mutex<EqRuntime>>,
+    hw_ctx: Option<&eq_manager::HwEqContext>,
+) {
+    process_channel_wayland_native(xwayland_pids, &settings.media, "media", media_stack, base_dir, audio, eq_rt, hw_ctx).await;
+    process_channel_wayland_native(xwayland_pids, &settings.chat, "chat", chat_stack, base_dir, audio, eq_rt, hw_ctx).await;
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn process_channel_wayland_native(
+    xwayland_pids: &[u32],
+    ch: &ChannelEqSettings,
+    channel: &str,
+    stack: &mut ChannelStack,
+    base_dir: &Path,
+    audio: &Arc<Mutex<Option<AudioSetup>>>,
+    eq_rt: &Arc<Mutex<EqRuntime>>,
+    hw_ctx: Option<&eq_manager::HwEqContext>,
+) {
+    if matches!(ch.backend, EqBackend::Ladspa) {
+        return;
+    }
+    for ov in &ch.app_overrides {
+        let AppMatcher::Executable { path } = &ov.matcher else {
+            continue; // SteamGame overrides are always XWayland
+        };
+        let base = Path::new(path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+        let Some(pid) = find_proc_by_exe(base, xwayland_pids) else {
+            continue;
+        };
+        tracing::info!("focus/x11: Wayland-native match exe={base} pid={pid}");
+        if let Some(hw_idx) = ov.hw_preset_idx {
+            if let Some(ctx) = hw_ctx {
+                let values = std::collections::HashMap::from([(
+                    "eq_preset".to_string(),
+                    FieldValue::U8(hw_idx),
+                )]);
+                let _ = ctx
+                    .cmd_tx
+                    .send(DeviceCommand::WriteApi {
+                        api_name: "selected_eq_preset".into(),
+                        values,
+                    })
+                    .await;
+            }
+            return;
+        }
+        if let Some(new_preset) = stack.on_focus(Some(pid), ov.preset.clone()) {
+            let mut apply = ch.clone();
+            apply.preset = new_preset;
+            apply.enabled = true;
+            eq_manager::apply_channel_eq(&apply, channel, base_dir, audio, eq_rt, hw_ctx).await;
+        }
+        return; // first match wins
     }
 }

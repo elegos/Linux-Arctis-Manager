@@ -9,4 +9,8 @@ pub enum FocusEvent {
     },
     /// A window was closed.
     Closed { pid: u32 },
+    /// A synthetic X11 window gained focus — a Wayland-native app (no XWayland mapping).
+    /// `xwayland_pids` lists PIDs that own real X11 windows; the focused process is not
+    /// among them.  The receiver must scan /proc to find the matching override.
+    WaylandNativeFocused { xwayland_pids: Vec<u32> },
 }
