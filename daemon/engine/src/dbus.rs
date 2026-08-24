@@ -631,6 +631,22 @@ impl EqInterface {
 
 // ── EQ helpers ────────────────────────────────────────────────────────────────
 
+fn is_system_stream(name: &str) -> bool {
+    name.starts_with("pipewire")
+        || name.starts_with("PulseAudio")
+        || name.starts_with("WirePlumber")
+        || matches!(
+            name,
+            "uresourced"
+                | "kwin_wayland"
+                | "KWin"
+                | "libcanberra"
+                | "xdg-desktop-portal"
+                | "pactl"
+                | "pulseaudio"
+        )
+}
+
 async fn running_streams_json() -> String {
     let out = tokio::process::Command::new("pactl")
         .args(["-f", "json", "list", "clients"])
@@ -652,8 +668,7 @@ async fn running_streams_json() -> String {
         .iter()
         .filter_map(|c| {
             let name = c["properties"]["application.name"].as_str()?.to_owned();
-            // Skip PipeWire/PulseAudio internal clients.
-            if name.starts_with("pipewire") || name.starts_with("PulseAudio") {
+            if is_system_stream(&name) {
                 return None;
             }
             let pid = c["properties"]["application.process.id"]
