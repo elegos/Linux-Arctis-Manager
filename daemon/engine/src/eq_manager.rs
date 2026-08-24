@@ -11,7 +11,7 @@ use device_config::codec::FieldValue;
 
 use crate::audio::{self, AudioSetup};
 use crate::eq::ladspa;
-use crate::eq::preset::{load_preset, preset_path, BandMode};
+use crate::eq::preset::{load_preset, preset_path, BandMode, EqBand, EqPreset};
 use crate::eq::settings::{ChannelEqSettings, EqBackend};
 use crate::state::{AppState, DeviceCommand};
 
@@ -35,6 +35,18 @@ pub struct HwEqContext {
     pub custom_slot: u8,
     /// Whether `selected_eq_preset` API is available to commit the custom slot.
     pub has_preset_select: bool,
+}
+
+/// Synthesise a flat (all-zero) Fixed10 preset used when `preset_name` is empty or "Flat".
+/// Fixed10 is chosen because it is compatible with the HW path on all current devices and
+/// with the LADSPA mbeq_1197 pipeline; devices that use Parametric10 natively will
+/// auto-fall-back to LADSPA via the existing band-mode mismatch check.
+fn flat_preset() -> EqPreset {
+    EqPreset {
+        name: "Flat".to_string(),
+        band_mode: BandMode::Fixed10,
+        bands: vec![EqBand::gain_only(0.0); 10],
+    }
 }
 
 /// Build a `HwEqContext` from the first connected device, or `None` if the
@@ -115,13 +127,18 @@ pub async fn apply_channel_eq(
 ) -> EqApplyOutcome {
     let preset_name = &ch_settings.preset;
 
-    // Load the preset.
-    let preset_file = preset_path(base_dir, preset_name);
-    let preset = match load_preset(&preset_file) {
-        Ok(p) => p,
-        Err(e) => {
-            warn!("eq: cannot load preset '{preset_name}': {e}");
-            return EqApplyOutcome::Failed;
+    // Empty string or the special name "Flat" means no-effect EQ: synthesise flat gains
+    // rather than trying to load a file (which would fail with a misleading error).
+    let preset = if preset_name.is_empty() || preset_name.eq_ignore_ascii_case("flat") {
+        flat_preset()
+    } else {
+        let preset_file = preset_path(base_dir, preset_name);
+        match load_preset(&preset_file) {
+            Ok(p) => p,
+            Err(e) => {
+                warn!("eq: cannot load preset '{preset_name}': {e}");
+                return EqApplyOutcome::Failed;
+            }
         }
     };
 
@@ -130,6 +147,24 @@ pub async fn apply_channel_eq(
     let want_hw = !matches!(ch_settings.backend, EqBackend::Ladspa);
     if want_hw {
         if let Some(ctx) = hw_ctx {
+            // Flat/empty preset in HW mode: select factory slot 0 (same as disable_channel_eq),
+            // no custom slot write needed.
+            if (preset_name.is_empty() || preset_name.eq_ignore_ascii_case("flat"))
+                && ctx.has_preset_select
+            {
+                info!("eq: {channel} flat preset → selecting factory slot 0");
+                let slot =
+                    HashMap::from([("eq_preset".to_string(), FieldValue::U8(0))]);
+                let _ = ctx
+                    .cmd_tx
+                    .send(DeviceCommand::WriteApi {
+                        api_name: "selected_eq_preset".to_string(),
+                        values: slot,
+                    })
+                    .await;
+                return EqApplyOutcome::HwSlot(0);
+            }
+
             if preset.band_mode != ctx.native_band_mode {
                 warn!(
                     "eq: preset band_mode {:?} != device native {:?} for {channel}; \
