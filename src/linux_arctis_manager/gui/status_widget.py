@@ -64,7 +64,14 @@ class QStatusWidget(QWidget):
             category_label.setFont(category_font)
             self.main_layout.addWidget(category_label)
 
+            skip_fields: set[str] = set()
+            transparency_mode = status_obj.get('transparency_mode', {}).get('value', '')
+            if transparency_mode != 'transparent':
+                skip_fields.add('transparent_level')
+
             for status, status_o in status_obj.items():
+                if status in skip_fields:
+                    continue
                 val = status_o['value']
                 dtype = status_o.get('type')
                 if dtype == 'percentage':
