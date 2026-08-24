@@ -1291,12 +1291,14 @@ class QEQWidget(QWidget):
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self._overrides.append(dlg.get_override())
             self._refresh_overrides_list()
+            self._apply()
 
     def _remove_override(self) -> None:
         idx = self._overrides_list.currentRow()
         if 0 <= idx < len(self._overrides):
             del self._overrides[idx]
             self._refresh_overrides_list()
+            self._apply()
 
     # ------------------------------------------------------------------
     # Apply
