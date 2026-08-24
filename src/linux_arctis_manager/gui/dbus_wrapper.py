@@ -183,6 +183,12 @@ class DbusWrapper(QObject):
         self.request_status()
         self.request_settings()
 
+        from PySide6.QtCore import QTimer
+        self._refresh_timer = QTimer()
+        self._refresh_timer.setInterval(5000)
+        self._refresh_timer.timeout.connect(self.request_status)
+        self._refresh_timer.start()
+
         status_signal_thread = Thread(target=lambda: asyncio.run(self._register_status_dbus_signal()))
         status_signal_thread.start()
 
@@ -193,26 +199,52 @@ class DbusWrapper(QObject):
         vc_signal_thread.start()
     
     async def _register_status_dbus_signal(self):
-        try:
-            def callback(status: str) -> None:
-                self.sig_status.emit(json.loads(status) or {})
+        while not self._stopping:
+            bus = None
+            try:
+                def callback(status: str) -> None:
+                    self.sig_status.emit(json.loads(status) or {})
 
-            def on_connected(pid: int, name: str, caps: list) -> None:
-                self.sig_device_connected.emit({'pid': pid, 'name': name, 'capabilities': caps})
+                def on_connected(pid: int, name: str, caps: list) -> None:
+                    self.sig_device_connected.emit({'pid': pid, 'name': name, 'capabilities': caps})
 
-            def on_disconnected(pid: int) -> None:
-                self.sig_device_disconnected.emit()
+                def on_disconnected(pid: int) -> None:
+                    self.sig_device_disconnected.emit()
 
-            iface = await self.status_iface()
-            iface.on_status_changed(callback)  # type: ignore
-            iface.on_device_connected(on_connected)  # type: ignore
-            iface.on_device_disconnected(on_disconnected)  # type: ignore
+                bus = await MessageBus().connect()
+                introspection = await bus.introspect(DBUS_BUS_NAME, DBUS_STATUS_OBJECT_PATH)
+                obj = bus.get_proxy_object(DBUS_BUS_NAME, DBUS_STATUS_OBJECT_PATH, introspection)
+                iface = obj.get_interface(DBUS_STATUS_INTERFACE_NAME)
 
-            self._status_signal_loop = asyncio.get_running_loop()
-            self._stop_status_signal_future = self._status_signal_loop.create_future()
-            await self._stop_status_signal_future
-        except Exception as e:
-            self.logger.warning('status signal registration failed: %s', e)
+                iface.on_status_changed(callback)  # type: ignore
+                iface.on_device_connected(on_connected)  # type: ignore
+                iface.on_device_disconnected(on_disconnected)  # type: ignore
+
+                self._status_signal_loop = asyncio.get_running_loop()
+                self._stop_status_signal_future = self._status_signal_loop.create_future()
+
+                # Fetch fresh status after (re)connecting to the daemon.
+                self.request_status()
+
+                disconnect_task = asyncio.create_task(bus.wait_for_disconnect())
+                done, _ = await asyncio.wait(
+                    [self._stop_status_signal_future, disconnect_task],
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+
+                if self._stop_status_signal_future in done:
+                    disconnect_task.cancel()
+                    return  # Normal stop via stop()
+                # Bus disconnected — fall through to retry
+                self.logger.warning('status signal: bus disconnected, reconnecting')
+
+            except Exception as e:
+                if self._stopping:
+                    return
+                self.logger.warning('status signal registration failed, retrying: %s', e)
+
+            if not self._stopping:
+                await asyncio.sleep(5)
 
     async def _register_settings_dbus_signal(self):
         try:
@@ -285,6 +317,8 @@ class DbusWrapper(QObject):
     def stop(self):
         self.logger.info("Stopping D-Bus wrapper...")
         self._stopping = True
+        if hasattr(self, '_refresh_timer'):
+            self._refresh_timer.stop()
         if self._status_signal_loop and self._stop_status_signal_future:
             self._status_signal_loop.call_soon_threadsafe(self._stop_status_signal_future.set_result, None)
         if self._settings_signal_loop and self._stop_settings_signal_future:
@@ -298,8 +332,11 @@ class DbusWrapper(QObject):
 
     async def _request_status_async(self):
         try:
-            iface = await self.status_iface()
-            result = await iface.call_get_status() # type: ignore
+            bus = await MessageBus().connect()
+            introspection = await bus.introspect(DBUS_BUS_NAME, DBUS_STATUS_OBJECT_PATH)
+            obj = bus.get_proxy_object(DBUS_BUS_NAME, DBUS_STATUS_OBJECT_PATH, introspection)
+            iface = obj.get_interface(DBUS_STATUS_INTERFACE_NAME)
+            result = await iface.call_get_status()  # type: ignore
             self.sig_status.emit(json.loads(result) or {})
         except Exception as e:
             self.logger.warning('request_status failed: %s', e)

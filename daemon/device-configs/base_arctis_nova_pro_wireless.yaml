@@ -32,6 +32,31 @@ transforms:
     default: UNKNOWN
     values: {0: SPEED, 1: RANGE}
 
+  transparency_mode_to_label:
+    type: case_int_to_str
+    default: off
+    values: {0: off, 1: transparent, 2: anc}
+
+  transparent_level_to_percent:
+    type: case_int_to_int
+    default: 0
+    values: {1: 10, 2: 20, 3: 30, 4: 40, 5: 50, 6: 60, 7: 70, 8: 80, 9: 90, 10: 100}
+
+  mic_vol_to_percent:
+    type: case_int_to_int
+    default: 0
+    values: {0: 0, 1: 10, 2: 20, 3: 30, 4: 40, 5: 50, 6: 60, 7: 70, 8: 80, 9: 90, 10: 100}
+
+  bt_connection_mode_to_label:
+    type: case_int_to_str
+    default: unknown
+    values: {1: bt_power_off, 2: bt_pairing_mode, 4: bt_link_mode}
+
+  bt_connection_status_to_label:
+    type: case_int_to_str
+    default: bt_link_lost
+    values: {1: bt_link_ready, 2: bt_link_lost, 4: bt_link_busy, 8: bt_link_error}
+
   bt_call_default_to_label:
     type: case_int_to_str
     default: UNKNOWN
@@ -333,7 +358,7 @@ sync_events:
   0x37:
     emit: mic_volume_changed
     fields:
-      - {name: mic_volume, byte: 2, display_type: percentage}
+      - {name: mic_volume, byte: 2, transform: mic_vol_to_percent, display_type: percentage}
 
   0x39:
     emit: sidetone_changed
@@ -400,7 +425,9 @@ sync_events:
   0xBF:
     emit: muted_mic_brightness_changed
     fields:
-      - {name: muted_mic_brightness, byte: 2, display_type: percentage}
+      - {name: muted_mic_brightness, byte: 2, transform: mic_vol_to_percent, display_type: percentage}
+    side_effects:
+      - call: sync_all
 
   0xC1:
     emit: power_inactivity_timer_changed
@@ -417,9 +444,11 @@ sync_read:
     maps:
       - {emit: high_gain_changed,    field: device_gain,   transform: gain_from_device, display_type: on_off}
       - {emit: eq_preset_changed,    field: eq_preset}
-      - {emit: mic_volume_changed,   field: mic_volume,    display_type: percentage}
+      - {emit: mic_volume_changed,   field: mic_volume,    transform: mic_vol_to_percent, display_type: percentage}
       - {emit: sidetone_changed,     field: sidetone,      display_type: percentage}
       - {emit: line_out_mode_changed, field: line_out_mode}
+      - {emit: volume_changed,       field: volume}
+      - {emit: surround_changed,     field: surround,      display_type: on_off}
       - emit: stream_mix_changed
         fields: [stream_main, stream_aux, stream_mic]
       - emit: chatmix_changed
@@ -427,18 +456,25 @@ sync_read:
 
   - struct: ux_settings
     maps:
-      - {emit: dim_timer_changed,        field: dim_timer,        transform: timer_enum_to_minutes}
-      - {emit: oled_brightness_changed,  field: oled_brightness,  display_type: percentage}
-      - {emit: home_screen_type_changed, field: home_screen_type}
+      - {emit: dim_timer_changed,            field: dim_timer,            transform: timer_enum_to_minutes}
+      - {emit: oled_brightness_changed,      field: oled_brightness,      display_type: percentage}
+      - {emit: idle_brightness_changed,      field: idle_brightness,      transform: transparent_level_to_percent, display_type: percentage}
+      - {emit: home_screen_type_changed,     field: home_screen_type}
+      - {emit: home_screen_mic_mute_changed, field: home_screen_mic_mute, display_type: on_off}
 
   - struct: wireless_settings
     maps:
       - {emit: bluetooth_startup_changed,       field: bt_power_default,         display_type: on_off}
       - {emit: bt_call_default_changed,          field: bt_call_default}
-      - {emit: muted_mic_brightness_changed,     field: muted_mic_brightness,     display_type: percentage}
+      - {emit: muted_mic_brightness_changed,     field: muted_mic_brightness,     transform: mic_vol_to_percent, display_type: percentage}
       - {emit: power_inactivity_timer_changed,   field: power_inactivity_timer,   transform: timer_enum_to_minutes}
       - {emit: wireless_mode_changed,            field: wireless_mode}
       - {emit: wireless_connection_changed,      field: radio_connection_status,  transform: radio_connection_to_label}
+      - {emit: bt_connection_mode_changed,       field: bt_connection_mode,       transform: bt_connection_mode_to_label}
+      - {emit: bt_connection_status_changed,     field: bt_connection_status,     transform: bt_connection_status_to_label}
+      - {emit: mic_muted_changed,                field: mic_muted,                display_type: on_off}
+      - {emit: transparency_mode_changed,        field: transparency_mode,        transform: transparency_mode_to_label}
+      - {emit: transparent_level_changed,        field: transparent_level,        transform: transparent_level_to_percent, display_type: percentage}
       - emit: battery_changed
         fields: [headset_batt_level, charger_batt_level]
         transform: battery_level_to_percent
@@ -465,6 +501,10 @@ representation:
     - device_gain
     - volume
     - surround
+    - idle_brightness
+    - home_screen_mic_mute
+    - transparency_mode
+    - transparent_level
   mic:
     - mic_volume
     - sidetone
@@ -479,5 +519,3 @@ representation:
     - radio_connection_status
     - wireless_mode
     - power_inactivity_timer
-    - transparent_level
-    - transparency_mode
