@@ -9,12 +9,13 @@ use std::collections::HashMap;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::BufReader;
 use tokio::sync::mpsc;
-use tracing::warn;
+use tracing::{info, warn};
 
 use super::event::FocusEvent;
 
 pub async fn run(tx: mpsc::Sender<FocusEvent>) {
     loop {
+        info!("focus/x11: starting xprop");
         let mut child = match tokio::process::Command::new("xprop")
             .args(["-spy", "-root", "_NET_ACTIVE_WINDOW", "_NET_CLIENT_LIST"])
             .stdout(std::process::Stdio::piped())
@@ -40,15 +41,37 @@ pub async fn run(tx: mpsc::Sender<FocusEvent>) {
             };
 
             if line.starts_with("_NET_ACTIVE_WINDOW") {
+                let wid_str = line.split("# ").nth(1).unwrap_or("?").trim();
                 if let Some(wid) = parse_window_id(&line) {
                     let (pid, class) = window_info(wid).await;
+                    info!(
+                        "focus/x11: active window wid={wid_str} pid={pid:?} class={class:?}"
+                    );
                     if let Some(p) = pid {
                         wid_pid.insert(wid, p);
                     }
-                    if tx.send(FocusEvent::Focused { pid, class }).await.is_err() {
+                    if pid.is_none() && class.is_none() {
+                        // xprop returned no properties → Wayland-native app behind a
+                        // synthetic XWayland window.  Scan /proc excluding known XWayland pids.
+                        let xwayland_pids: Vec<u32> = wid_pid.values().copied().collect();
+                        info!(
+                            "focus/x11: synthetic window (Wayland-native app), {} XWayland pids known",
+                            xwayland_pids.len()
+                        );
+                        if tx
+                            .send(FocusEvent::WaylandNativeFocused { xwayland_pids })
+                            .await
+                            .is_err()
+                        {
+                            let _ = child.kill().await;
+                            return;
+                        }
+                    } else if tx.send(FocusEvent::Focused { pid, class }).await.is_err() {
                         let _ = child.kill().await;
                         return;
                     }
+                } else {
+                    info!("focus/x11: active window cleared (wid=0): {wid_str}");
                 }
             } else if line.starts_with("_NET_CLIENT_LIST") {
                 let current = parse_window_list(&line);
@@ -96,7 +119,13 @@ fn parse_window_list(line: &str) -> Vec<u64> {
 
 async fn window_info(wid: u64) -> (Option<u32>, Option<String>) {
     let Ok(out) = tokio::process::Command::new("xprop")
-        .args(["-id", &format!("0x{wid:x}"), "_NET_WM_PID", "WM_CLASS"])
+        .args([
+            "-id",
+            &format!("0x{wid:x}"),
+            "_NET_WM_PID",
+            "WM_CLASS",
+            "_KDE_NET_WM_DESKTOP_FILE",
+        ])
         .output()
         .await
     else {
@@ -104,15 +133,29 @@ async fn window_info(wid: u64) -> (Option<u32>, Option<String>) {
     };
     let text = String::from_utf8_lossy(&out.stdout);
     let mut pid: Option<u32> = None;
-    let mut class: Option<String> = None;
+    let mut wm_instance: Option<String> = None; // first WM_CLASS component
+    let mut wm_class: Option<String> = None; // second WM_CLASS component (app name)
+    let mut desktop_file: Option<String> = None;
     for line in text.lines() {
         if line.starts_with("_NET_WM_PID") {
             // _NET_WM_PID(CARDINAL) = 12345
             pid = line.split('=').nth(1).and_then(|s| s.trim().parse().ok());
         } else if line.starts_with("WM_CLASS") {
-            // WM_CLASS(STRING) = "instance", "Class"  — use instance name (first)
-            class = line.split('"').nth(1).map(|s| s.to_string());
+            // WM_CLASS(STRING) = "steamwebhelper", "Steam"
+            //                     ^instance          ^class (app name)
+            let mut parts = line.split('"').skip(1);
+            wm_instance = parts.next().map(|s| s.to_string());
+            parts.next(); // skip inter-quote separator
+            wm_class = parts.next().map(|s| s.to_string());
+        } else if line.starts_with("_KDE_NET_WM_DESKTOP_FILE") {
+            // _KDE_NET_WM_DESKTOP_FILE(UTF8_STRING) = "firefox"
+            // Set by KWin for Wayland-native windows that have no WM_CLASS.
+            desktop_file = line.split('"').nth(1).map(|s| s.to_string());
         }
     }
+    // Prefer WM_CLASS class (2nd) > instance (1st) > KDE desktop file name.
+    // The class component ("Steam", "firefox") matches user-visible app names;
+    // the instance ("steamwebhelper") is an internal process name that often differs.
+    let class = wm_class.or(wm_instance).or(desktop_file);
     (pid, class)
 }
