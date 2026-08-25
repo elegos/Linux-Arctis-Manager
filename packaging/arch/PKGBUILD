@@ -1,0 +1,26 @@
+# Maintainer: Giacomo Furlan <g.furlan@accenture.com>
+pkgname=linux-arctis-manager
+pkgver=3.0.0alpha1
+pkgrel=1
+pkgdesc="SteelSeries Arctis manager for Linux — replaces SteelSeries GG with a native daemon and Qt6 GUI"
+arch=('x86_64')
+url="https://github.com/elegos/Linux-Arctis-Manager"
+license=('MIT')
+depends=('python' 'libcap')
+makedepends=('rust' 'cargo' 'uv' 'python')
+provides=('linux-arctis-manager')
+conflicts=('linux-arctis-manager-git')
+install=lam.install
+# Update tag and sha256sum for each release.
+source=("$pkgname-$pkgver.tar.gz::https://github.com/elegos/Linux-Arctis-Manager/archive/refs/tags/v${pkgver}.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    cd "Linux-Arctis-Manager-${pkgver}"
+    make build PREFIX=/usr
+}
+
+package() {
+    cd "Linux-Arctis-Manager-${pkgver}"
+    make install PREFIX=/usr DESTDIR="$pkgdir"
+}

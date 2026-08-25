@@ -1,0 +1,25 @@
+Source: linux-arctis-manager
+Section: utils
+Priority: optional
+Maintainer: Giacomo Furlan <g.furlan@accenture.com>
+Build-Depends: debhelper-compat (= 13),
+               cargo,
+               rustc,
+               uv,
+               python3,
+               python3-venv,
+               libcap2-bin
+Standards-Version: 4.7.0
+Homepage: https://github.com/elegos/Linux-Arctis-Manager
+Rules-Requires-Root: no
+
+Package: linux-arctis-manager
+Architecture: amd64
+Depends: ${misc:Depends},
+         python3,
+         libcap2-bin
+Description: SteelSeries Arctis manager for Linux
+ Replaces the SteelSeries GG software to manage SteelSeries Arctis headsets
+ on Linux. Provides a user-space daemon written in Rust and a Qt6 GUI written
+ in Python for controlling equalizer settings, sidetone, ANC, LED profiles,
+ and more.
