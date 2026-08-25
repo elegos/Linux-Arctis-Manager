@@ -1,0 +1,27 @@
+#!/bin/sh
+set -e
+
+_apply_caps() {
+    chown root:root /usr/libexec/lam-hidraw-helper
+    setcap cap_dac_override+eip /usr/libexec/lam-hidraw-helper
+}
+
+case "$1" in
+    configure)
+        _apply_caps
+        echo "CAP_DAC_OVERRIDE applied to lam-hidraw-helper."
+        echo "Enable the user services with:"
+        echo "  systemctl --user daemon-reload"
+        echo "  systemctl --user enable --now lam-hidraw-helper.service lam-daemon.service"
+        ;;
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+    *)
+        echo "postinst called with unknown argument: $1" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0
