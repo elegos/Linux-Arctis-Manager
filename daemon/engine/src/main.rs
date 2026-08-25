@@ -9,6 +9,9 @@ mod focus_monitor;
 mod general_settings;
 mod hidraw_client;
 mod hotplug;
+mod mic_router;
+mod nc_config;
+mod nc_manager;
 mod state;
 mod stream_monitor;
 
@@ -596,6 +599,12 @@ async fn main() {
     // cleared on disconnect.  Shared with the EQ D-Bus interface for routing.
     let audio_shared: Arc<Mutex<Option<audio::AudioSetup>>> = Arc::new(Mutex::new(None));
 
+    // NC and mic-router shared state.
+    let nc_runtime: Arc<Mutex<nc_manager::NcRuntime>> =
+        Arc::new(Mutex::new(nc_manager::NcRuntime::new()));
+    let mic_router: Arc<Mutex<mic_router::MicRouterState>> =
+        Arc::new(Mutex::new(mic_router::MicRouterState::new()));
+
     // Start D-Bus service.  On failure, continue without it (headless / test env).
     let _dbus_conn = match dbus::start_dbus_service(
         Arc::clone(&app_state),
@@ -603,6 +612,8 @@ async fn main() {
         signal_tx.clone(),
         user_settings_base_dir(),
         Arc::clone(&audio_shared),
+        Arc::clone(&nc_runtime),
+        Arc::clone(&mic_router),
     )
     .await
     {
@@ -616,7 +627,7 @@ async fn main() {
         }
     };
 
-    run_main_loop(configs, helper_sock, app_state, signal_tx, audio_shared).await;
+    run_main_loop(configs, helper_sock, app_state, signal_tx, audio_shared, nc_runtime, mic_router).await;
 }
 
 /// Keep only devices that are useful to start a task for.
@@ -703,6 +714,8 @@ async fn run_main_loop(
     app_state: Arc<Mutex<AppState>>,
     signal_tx: broadcast::Sender<SignalEvent>,
     audio_shared: Arc<Mutex<Option<audio::AudioSetup>>>,
+    nc_runtime: Arc<Mutex<nc_manager::NcRuntime>>,
+    mic_router: Arc<Mutex<mic_router::MicRouterState>>,
 ) {
     let existing = match hotplug::scan_existing(&[]) {
         Ok(devs) => devs,
@@ -812,6 +825,12 @@ async fn run_main_loop(
                                             cmd_iface.unwrap_or(0)
                                         );
                                         handle.abort();
+                                        // Remove the placeholder DeviceEntry that the
+                                        // fallback task registered before being aborted,
+                                        // otherwise build_status_json may pick it up and
+                                        // return "{}" even though the correct interface is
+                                        // already running.
+                                        app_state.lock().await.devices.remove(&k);
                                     }
                                 }
                             } else {
@@ -875,6 +894,8 @@ async fn run_main_loop(
                             info!("dongle removed: removing virtual audio sinks");
                             audio::teardown_sinks(setup).await;
                         }
+                        mic_router::teardown(&mut *mic_router.lock().await).await;
+                        nc_manager::teardown_nc(&mut *nc_runtime.lock().await).await;
                         cleanup_device(&app_state, &dev.hidraw_path, dev.pid, &signal_tx).await;
                     }
                 }
@@ -898,4 +919,6 @@ async fn run_main_loop(
         info!("daemon exit: removing virtual audio sinks");
         audio::teardown_sinks(setup).await;
     }
+    mic_router::teardown(&mut *mic_router.lock().await).await;
+    nc_manager::teardown_nc(&mut *nc_runtime.lock().await).await;
 }
