@@ -1,0 +1,16 @@
+#!/usr/bin/make -f
+export DH_VERBOSE = 1
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	make build PREFIX=/usr
+
+override_dh_auto_install:
+	make install DESTDIR=$(CURDIR)/debian/linux-arctis-manager PREFIX=/usr
+
+override_dh_fixperms-arch:
+	dh_fixperms
+	chown root:root $(CURDIR)/debian/linux-arctis-manager/usr/libexec/lam-hidraw-helper
+	setcap cap_dac_override+eip $(CURDIR)/debian/linux-arctis-manager/usr/libexec/lam-hidraw-helper
