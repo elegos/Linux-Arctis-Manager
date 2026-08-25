@@ -7,9 +7,11 @@ DATADIR    ?= $(PREFIX)/share
 SYSTEMD_USER_DIR ?= $(PREFIX)/lib/systemd/user
 
 # Derived paths
-DEVICE_CONFIGS_DIR := $(DATADIR)/linux-arctis-manager/devices
-LAM_DATADIR        := $(DATADIR)/linux-arctis-manager
-VENVDIR            := $(LIBDIR)/linux-arctis-manager/venv
+DEVICE_CONFIGS_DIR  := $(DATADIR)/linux-arctis-manager/devices
+LAM_DATADIR         := $(DATADIR)/linux-arctis-manager
+VENVDIR             := $(LIBDIR)/linux-arctis-manager/venv
+DESKTOP_DIR         := $(DATADIR)/applications
+DESKTOP_FILES       := $(wildcard src/linux_arctis_manager/desktop/*.desktop)
 
 # ── Build tools ────────────────────────────────────────────────────────────────
 CARGO            ?= cargo
@@ -117,7 +119,7 @@ $(GUI_WRAPPER_OUT): $(GUI_WRAPPER_IN) Makefile
 # ── Install Python venv + GUI wrapper ─────────────────────────────────────────
 install-python: generate-gui-wrapper
 	install -dm755 $(DESTDIR)$(dir $(VENVDIR))
-	$(UV) venv --python python3 $(DESTDIR)$(VENVDIR)
+	$(UV) venv --python python3 --clear $(DESTDIR)$(VENVDIR)
 	$(UV) export --frozen --no-dev --no-emit-project \
 		| $(UV) pip install \
 			--python $(DESTDIR)$(VENVDIR)/bin/python \
@@ -143,6 +145,9 @@ install: build generate-services install-python
 	# Systemd user service units
 	install -Dm644 $(SERVICE_HELPER_OUT) $(DESTDIR)$(SYSTEMD_USER_DIR)/lam-hidraw-helper.service
 	install -Dm644 $(SERVICE_DAEMON_OUT)  $(DESTDIR)$(SYSTEMD_USER_DIR)/lam-daemon.service
+	# Desktop entries
+	install -dm755 $(DESTDIR)$(DESKTOP_DIR)
+	install -Dm644 $(DESKTOP_FILES) -t $(DESTDIR)$(DESKTOP_DIR)/
 ifndef DESTDIR
 	# Apply DAC capability to the installed helper binary.
 	# Must run after the final copy; packaging tools handle this in post-install hooks.
@@ -162,6 +167,7 @@ uninstall:
 	rm -f $(DESTDIR)$(LIBEXECDIR)/lam-hidraw-helper
 	rm -f $(DESTDIR)$(SYSTEMD_USER_DIR)/lam-hidraw-helper.service
 	rm -f $(DESTDIR)$(SYSTEMD_USER_DIR)/lam-daemon.service
+	rm -f $(addprefix $(DESTDIR)$(DESKTOP_DIR)/,$(notdir $(DESKTOP_FILES)))
 	rm -rf $(DESTDIR)$(DEVICE_CONFIGS_DIR)
 	rm -rf $(DESTDIR)$(LIBDIR)/linux-arctis-manager
 	-systemctl --user daemon-reload 2>/dev/null

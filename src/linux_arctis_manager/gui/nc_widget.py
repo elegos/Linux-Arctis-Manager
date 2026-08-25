@@ -331,6 +331,7 @@ class QNCWidget(QWidget):
                 all_sources = [
                     s for s in pulse.source_list()
                     if not s.name.endswith('.monitor')
+                    and not s.name.startswith('Arctis_')
                 ]
             self._sig_sources_loaded.emit({
                 'sources': [{'id': s.name, 'name': s.description} for s in all_sources],

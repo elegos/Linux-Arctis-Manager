@@ -335,6 +335,39 @@ pub async fn teardown_sinks(setup: AudioSetup) {
     info!("audio: virtual sinks removed");
 }
 
+/// Find the physical Arctis microphone source (not a virtual/monitor source).
+/// Retries a few times because the audio device may appear slightly after HID.
+pub async fn find_physical_source() -> Option<String> {
+    for attempt in 0..5u8 {
+        if attempt > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+        if let Some(name) = try_find_physical_source().await {
+            return Some(name);
+        }
+    }
+    None
+}
+
+async fn try_find_physical_source() -> Option<String> {
+    let json = pactl(&["-f", "json", "list", "sources"]).await.ok()?;
+    let sources: serde_json::Value = serde_json::from_str(&json).ok()?;
+    for src in sources.as_array()? {
+        let name = src["name"].as_str().unwrap_or("");
+        // Skip monitor sources (they end in .monitor) and our virtual sources.
+        if name.ends_with(".monitor") || name.starts_with("Arctis_") {
+            continue;
+        }
+        let vid = src["properties"]["device.vendor.id"]
+            .as_str()
+            .unwrap_or("");
+        if vid == STEELSERIES_VID {
+            return Some(name.to_owned());
+        }
+    }
+    None
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
