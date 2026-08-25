@@ -54,9 +54,25 @@ class MicRouter:
             self._pulse = pulsectl.Pulse('arctis-mic-router')
         return self._pulse
 
+    def _find_existing(self, pulse) -> int | None:
+        """Return the module index of an existing Arctis_Manager_Mic source, or None."""
+        try:
+            for src in pulse.source_list():
+                if src.name == ARCTIS_MIC_NAME:
+                    return src.owner_module
+        except Exception as e:
+            logger.warning('MicRouter: could not list sources: %s', e)
+        return None
+
     def _load(self, master: str) -> bool:
         try:
             pulse = self._pulse_conn()
+            existing = self._find_existing(pulse)
+            if existing is not None:
+                self._module = existing
+                self._current_master = master
+                logger.info('MicRouter: reusing existing %s (module %d)', ARCTIS_MIC_NAME, existing)
+                return True
             # Inner quotes must be escaped as \" so the PA modargs parser treats
             # the whole source_properties value as one token.
             # node.virtual=false overrides PipeWire's automatic node.virtual=true

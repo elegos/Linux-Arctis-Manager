@@ -65,6 +65,9 @@ pub enum SignalEvent {
     DeviceDisconnected {
         pid: u16,
     },
+    NCChanged {
+        json: String,
+    },
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

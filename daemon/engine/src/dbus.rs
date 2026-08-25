@@ -29,6 +29,7 @@ const STATUS_PATH: &str = "/name/giacomofurlan/ArctisManager/Next/Status";
 const SETTINGS_PATH: &str = "/name/giacomofurlan/ArctisManager/Next/Settings";
 const CONFIG_PATH: &str = "/name/giacomofurlan/ArctisManager/Next/Config";
 const EQ_PATH: &str = "/name/giacomofurlan/ArctisManager/Next/EQ";
+const NC_PATH: &str = "/name/giacomofurlan/ArctisManager/Next/NC";
 
 // ── Status interface ──────────────────────────────────────────────────────────
 
@@ -102,7 +103,7 @@ impl SettingsInterface {
         // Device settings require a connected device and a matching API.
         let (api_name, field_value) = {
             let state = self.state.lock().await;
-            let Some(entry) = state.devices.values().next() else {
+            let Some(entry) = state.devices.values().find(|e| !e.status.is_empty()) else {
                 return false;
             };
             let Some(api) = find_api_for_field(&entry.config, setting) else {
@@ -121,7 +122,7 @@ impl SettingsInterface {
 
         let sent = {
             let state = self.state.lock().await;
-            let Some(entry) = state.devices.values().next() else {
+            let Some(entry) = state.devices.values().find(|e| !e.status.is_empty()) else {
                 return false;
             };
             // For multi-field structs, populate sibling fields from current status.
@@ -146,7 +147,7 @@ impl SettingsInterface {
             // Persist the written value: load existing overrides, update, save.
             let (vid, pid) = {
                 let s = self.state.lock().await;
-                if let Some(entry) = s.devices.values().next() {
+                if let Some(entry) = s.devices.values().find(|e| !e.status.is_empty()) {
                     (entry.vid, entry.pid)
                 } else {
                     (0, 0)
@@ -749,6 +750,100 @@ impl ConfigInterface {
     }
 }
 
+// ── NC interface ──────────────────────────────────────────────────────────────
+
+use crate::mic_router::MicRouterState;
+use crate::nc_config::NcConfig;
+use crate::nc_manager::NcRuntime;
+
+fn nc_config_path(base: &std::path::Path) -> std::path::PathBuf {
+    base.join("nc_config.json")
+}
+
+fn load_nc_config(base: &std::path::Path) -> NcConfig {
+    std::fs::read_to_string(nc_config_path(base))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn save_nc_config(base: &std::path::Path, cfg: &NcConfig) -> bool {
+    let path = nc_config_path(base);
+    let Ok(json) = serde_json::to_string_pretty(cfg) else {
+        return false;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::write(&path, json).is_ok()
+}
+
+struct NcInterface {
+    settings_base_dir: std::path::PathBuf,
+    signal_tx: broadcast::Sender<SignalEvent>,
+    nc_runtime: Arc<Mutex<NcRuntime>>,
+    mic_router: Arc<Mutex<MicRouterState>>,
+}
+
+#[interface(name = "name.giacomofurlan.ArctisManager.Next.NC")]
+impl NcInterface {
+    #[zbus(name = "GetNCCapabilities")]
+    async fn get_nc_capabilities(&self) -> String {
+        let rnnoise = crate::nc_manager::rnnoise_plugin().is_some();
+        let swh = crate::nc_manager::swh_available();
+        serde_json::json!({
+            "rnnoise_available": rnnoise,
+            "swh_available": swh,
+        })
+        .to_string()
+    }
+
+    #[zbus(name = "GetNCSettings")]
+    async fn get_nc_settings(&self) -> String {
+        let cfg = load_nc_config(&self.settings_base_dir);
+        serde_json::to_string(&cfg).unwrap_or_else(|_| "{}".to_string())
+    }
+
+    #[zbus(name = "SetNCSettings")]
+    async fn set_nc_settings(&self, json: &str) -> bool {
+        let cfg: NcConfig = match serde_json::from_str(json) {
+            Ok(c) => c,
+            Err(e) => {
+                warn!("SetNcSettings: invalid JSON: {e}");
+                return false;
+            }
+        };
+
+        if !save_nc_config(&self.settings_base_dir, &cfg) {
+            warn!("SetNcSettings: failed to persist config");
+        }
+
+        let output_source = {
+            let mut rt = self.nc_runtime.lock().await;
+            crate::nc_manager::apply_nc(&cfg, &mut rt).await
+        };
+
+        {
+            let mut mr = self.mic_router.lock().await;
+            match output_source {
+                Some(src) => {
+                    crate::mic_router::update(&mut mr, src).await;
+                }
+                None => {
+                    crate::mic_router::teardown(&mut mr).await;
+                }
+            }
+        }
+
+        let out_json = serde_json::to_string(&cfg).unwrap_or_else(|_| "{}".to_string());
+        let _ = self.signal_tx.send(SE::NCChanged { json: out_json });
+        true
+    }
+
+    #[zbus(signal)]
+    async fn nc_changed(emitter: &SignalEmitter<'_>, config_json: &str) -> zbus::Result<()>;
+}
+
 // ── Service startup ───────────────────────────────────────────────────────────
 
 /// Register all interfaces on the session bus and spawn a background task that
@@ -761,6 +856,8 @@ pub async fn start_dbus_service(
     signal_tx: broadcast::Sender<SignalEvent>,
     settings_base_dir: std::path::PathBuf,
     audio_shared: Arc<Mutex<Option<AudioSetup>>>,
+    nc_runtime: Arc<Mutex<NcRuntime>>,
+    mic_router: Arc<Mutex<MicRouterState>>,
 ) -> zbus::Result<zbus::Connection> {
     let eq_runtime = EqRuntime::new();
     let focus_backend = crate::focus_monitor::detect();
@@ -805,10 +902,19 @@ pub async fn start_dbus_service(
             EqInterface {
                 state: Arc::clone(&state),
                 signal_tx: signal_tx.clone(),
-                settings_base_dir,
+                settings_base_dir: settings_base_dir.clone(),
                 eq_runtime: Arc::clone(&eq_runtime),
                 audio_shared,
                 focus_backend: focus_backend.clone(),
+            },
+        )?
+        .serve_at(
+            NC_PATH,
+            NcInterface {
+                settings_base_dir,
+                signal_tx: signal_tx.clone(),
+                nc_runtime,
+                mic_router,
             },
         )?
         .build()
@@ -817,6 +923,7 @@ pub async fn start_dbus_service(
     let status_emitter = SignalEmitter::new(&conn, STATUS_PATH)?.into_owned();
     let settings_emitter = SignalEmitter::new(&conn, SETTINGS_PATH)?.into_owned();
     let eq_emitter = SignalEmitter::new(&conn, EQ_PATH)?.into_owned();
+    let nc_emitter = SignalEmitter::new(&conn, NC_PATH)?.into_owned();
 
     tokio::spawn(crate::stream_monitor::run(
         monitor_base,
@@ -864,6 +971,11 @@ pub async fn start_dbus_service(
                 SignalEvent::EQChanged { json } => {
                     if let Err(e) = EqInterface::eq_changed(&eq_emitter, &json).await {
                         error!("EQChanged signal failed: {e}");
+                    }
+                }
+                SignalEvent::NCChanged { json } => {
+                    if let Err(e) = NcInterface::nc_changed(&nc_emitter, &json).await {
+                        error!("NCChanged signal failed: {e}");
                     }
                 }
                 SignalEvent::DeviceConnected {
@@ -927,13 +1039,11 @@ pub async fn start_dbus_service(
 // ── JSON helpers ──────────────────────────────────────────────────────────────
 
 fn build_status_json(state: &AppState) -> String {
-    let Some(entry) = state.devices.values().next() else {
+    // Skip entries whose status map is empty: they are placeholder DeviceEntries
+    // registered by a task that was aborted before device_init completed.
+    let Some(entry) = state.devices.values().find(|e| !e.status.is_empty()) else {
         return "{}".to_string();
     };
-
-    if entry.status.is_empty() {
-        return "{}".to_string();
-    }
 
     if let Some(representation) = &entry.config.representation {
         let mut result: Map<String, JsonValue> = Map::new();

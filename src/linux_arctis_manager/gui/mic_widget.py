@@ -141,6 +141,10 @@ class QMicWidget(QWidget):
             return
         self._preview_restart_tries += 1
         source, sink = self._pick_preview_endpoints()
+        # With UI-state source selection, source already matches what VC/NC
+        # expects, so these conditions are normally False.  Kept as a safety
+        # net in case the chain is mid-rebuild and pactl returns an error —
+        # _preview.start() will fail and the retry loop below handles it.
         vc_on = self.vc_widget._enable_check.isChecked()
         waiting = vc_on and source != 'Arctis_VC_Sink.monitor' \
             and self._preview_restart_tries < 10
@@ -158,28 +162,34 @@ class QMicWidget(QWidget):
         self._preview_btn.setChecked(False)
         self._preview_btn.blockSignals(False)
 
+    def _nc_preset_active(self) -> bool:
+        """True when the NC preset is not Off (value 0)."""
+        return any(
+            btn.isChecked() and btn.property('value') != 0
+            for btn in self.nc_widget._preset_group.buttons
+        )
+
     def _pick_preview_endpoints(self) -> tuple[str, str]:
         """Return (source, sink) for the sidetone loopback.
 
-        source priority: Arctis_VC_Sink.monitor (RVC active) >
-                         Arctis_Manager_Mic > Arctis_NC_Mic > physical mic
-        Using the VC sink monitor directly avoids a PipeWire loopback
-        reconnect race that occurs when MicRouter recreates Arctis_Manager_Mic.
-        sink: physical headset output directly — the Arctis_Media null sink
-        depends on its own monitor loopback being alive, which is not
-        guaranteed (it can be lost across EQ/chain rebuilds).
+        Source priority is derived from UI state, not from a PulseAudio probe,
+        to avoid pulsectl visibility issues with daemon-managed virtual sources:
+          VC active  → Arctis_VC_Sink.monitor
+          NC active  → Arctis_Manager_Mic  (daemon points it at NC output)
+          otherwise  → physical mic from the Input Device combo
+
+        If the chosen source is not yet ready (daemon still building the chain),
+        pactl will fail and the retry loop in _restart_preview will try again.
+
+        sink: physical headset output — not the Arctis_Media null sink, which
+        depends on its own loopback being alive (may be lost during rebuilds).
         """
         source = self.nc_widget._source_combo.currentData() or ''
         sink = ''
         try:
             import pulsectl
             with pulsectl.Pulse('lam-sidetone-probe') as pulse:
-                source_names = {s.name for s in pulse.source_list()}
                 sink_names = [s.name for s in pulse.sink_list()]
-            for candidate in ('Arctis_VC_Sink.monitor', 'Arctis_Manager_Mic', 'Arctis_NC_Mic'):
-                if candidate in source_names:
-                    source = candidate
-                    break
             sink = next(
                 (n for n in sink_names
                  if n.startswith('alsa_output') and ('SteelSeries' in n or 'Arctis' in n)),
@@ -187,6 +197,12 @@ class QMicWidget(QWidget):
             )
         except Exception:
             pass
+
+        if self.vc_widget._enable_check.isChecked():
+            source = 'Arctis_VC_Sink.monitor'
+        elif self._nc_preset_active():
+            source = 'Arctis_Manager_Mic'
+
         return source, sink
 
     def _on_preview_toggled(self, checked: bool) -> None:
