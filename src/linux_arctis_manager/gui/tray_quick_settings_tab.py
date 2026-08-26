@@ -97,6 +97,14 @@ class QTrayQuickSettingsTab(QWidget):
         new_keys = set(new_config.keys())
         self._settings_config = new_config
 
+        # The daemon includes current values in the 'device' section of the
+        # settings payload.  Seed _current_values from it so controls are
+        # initialised correctly even before the first status push arrives, and
+        # for settings that are not reported in the status representation.
+        for sid, val in settings.get('device', {}).items():
+            if val is not None:
+                self._current_values[sid] = val
+
         for sid in self._enabled_items:
             self._ensure_options(sid)
 
@@ -104,6 +112,8 @@ class QTrayQuickSettingsTab(QWidget):
         # On value-only changes, _update_live() via update_status() is enough.
         if old_keys != new_keys:
             self._rebuild()
+        else:
+            self._update_live()
 
     def update_status(self, status: dict) -> None:
         for _cat, fields in status.items():
