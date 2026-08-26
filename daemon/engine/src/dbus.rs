@@ -44,6 +44,20 @@ impl StatusInterface {
         build_status_json(&state)
     }
 
+    async fn get_current_device(&self) -> String {
+        let state = self.state.lock().await;
+        if let Some(entry) = state.devices.values().next() {
+            serde_json::json!({
+                "pid": entry.pid,
+                "name": entry.name,
+                "capabilities": entry.capabilities,
+            })
+            .to_string()
+        } else {
+            "null".to_string()
+        }
+    }
+
     #[zbus(signal)]
     async fn status_changed(emitter: &SignalEmitter<'_>, status: &str) -> zbus::Result<()>;
 

@@ -11,8 +11,6 @@ from linux_arctis_manager.gui.main_app import QMainApp
 from linux_arctis_manager.gui.sni_item import SniItem
 from linux_arctis_manager.gui.tray_panel import QTrayPanel
 from linux_arctis_manager.gui.ui_utils import get_icon_pixmap
-from linux_arctis_manager.i18n import I18n
-
 
 class QSystrayApp(QBaseDesktopApp):
     _sig_status = Signal(object)
@@ -56,13 +54,9 @@ class QSystrayApp(QBaseDesktopApp):
         # which gives us real Activate(x, y) cursor coordinates on Wayland.
         self._sni = SniItem(
             icon_pixmap=pixmap,
-            open_label=I18n.translate('ui', 'open_app'),
-            exit_label=I18n.translate('ui', 'exit'),
             parent=self.app,
         )
         self._sni.sig_activate.connect(self._on_activate)
-        self._sni.sig_open_app.connect(self.open_main_window)
-        self._sni.sig_exit.connect(self.sig_stop)
 
         # ── D-Bus wrapper ──────────────────────────────────────────────────────
         self.dbus_wrapper = DbusWrapper()

@@ -13,6 +13,9 @@ class QTrayStatusTab(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
+        self.setStyleSheet('QTrayStatusTab { background: transparent; }')
+
         outer = QVBoxLayout()
         outer.setContentsMargins(0, 0, 0, 0)
         self.setLayout(outer)
@@ -20,7 +23,10 @@ class QTrayStatusTab(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setStyleSheet('QScrollArea { background: transparent; border: none; }')
+        scroll.viewport().setStyleSheet('background: transparent;')
         self._content = QWidget()
+        self._content.setStyleSheet('background: transparent;')
         self._content_layout = QVBoxLayout()
         self._content_layout.setContentsMargins(8, 8, 8, 8)
         self._content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -72,6 +78,7 @@ class QTrayStatusTab(QWidget):
             self._content_layout.addWidget(cat_lbl)
 
             form_container = QWidget()
+            form_container.setAutoFillBackground(False)
             form = QFormLayout()
             form.setContentsMargins(8, 0, 0, 4)
             form.setSpacing(2)

@@ -28,6 +28,8 @@ pub struct DeviceEntry {
     pub config: Arc<DeviceConfig>,
     pub vid: u16,
     pub pid: u16,
+    pub name: String,
+    pub capabilities: Vec<String>,
     /// Flat map of field_name → `{"value": ..., "type": "..."}`.
     pub status: HashMap<String, JsonValue>,
     /// Channel for sending API-write commands from the D-Bus layer to the

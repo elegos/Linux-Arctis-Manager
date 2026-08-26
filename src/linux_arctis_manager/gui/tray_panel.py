@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import ctypes
 import logging
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QByteArray, QEvent, QObject, QPoint, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel,
                                QPushButton, QSizePolicy, QTabWidget,
@@ -50,10 +51,11 @@ class QTrayPanel(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent, Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool)
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedSize(_PANEL_WIDTH, _PANEL_HEIGHT)
 
         self._suppress_hide = False
+        self._blur_set = False
 
         self._device_name: str = ''
         self._device_pid: int | None = None
@@ -83,6 +85,13 @@ class QTrayPanel(QWidget):
         # ── Tabs ───────────────────────────────────────────────────────────────
         self._tabs = QTabWidget()
         self._tabs.setDocumentMode(True)
+        self._tabs.setStyleSheet(
+            'QTabWidget::pane { background: transparent; border: none; }'
+            'QTabBar::tab { background: rgba(128,128,128,30); border-radius: 4px;'
+            ' padding: 4px 12px; margin-right: 2px; }'
+            'QTabBar::tab:selected { background: rgba(128,128,128,70); }'
+            'QTabBar::tab:hover:!selected { background: rgba(128,128,128,45); }'
+        )
         root.addWidget(self._tabs, 1)
 
         self._status_tab = QTrayStatusTab()
@@ -113,6 +122,62 @@ class QTrayPanel(QWidget):
         app.applicationStateChanged.connect(self._on_app_state_changed)
         self._click_filter = _OutsideClickFilter(self)
         app.installEventFilter(self._click_filter)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if not self._blur_set:
+            self._blur_set = True
+            self._try_set_blur()
+
+    def _try_set_blur(self) -> None:
+        """Request KWin to blur behind this window via the xcb _KDE_NET_WM_BLUR_BEHIND_REGION atom."""
+        try:
+            xcb = ctypes.CDLL('libxcb.so.1')
+            from PySide6.QtGui import QGuiApplication
+
+            ni = QGuiApplication.platformNativeInterface()
+            conn = ni.nativeResourceForIntegration(QByteArray(b'connection'))
+            if not conn:
+                return
+
+            class _Cookie(ctypes.Structure):
+                _fields_ = [('sequence', ctypes.c_uint32)]
+
+            class _Reply(ctypes.Structure):
+                _fields_ = [
+                    ('response_type', ctypes.c_uint8),
+                    ('pad0',          ctypes.c_uint8),
+                    ('sequence',      ctypes.c_uint16),
+                    ('length',        ctypes.c_uint32),
+                    ('atom',          ctypes.c_uint32),
+                ]
+
+            xcb.xcb_intern_atom.restype = _Cookie
+            xcb.xcb_intern_atom_reply.restype = ctypes.POINTER(_Reply)
+
+            conn_ptr = ctypes.c_void_p(int(conn))
+            name = b'_KDE_NET_WM_BLUR_BEHIND_REGION'
+            cookie = xcb.xcb_intern_atom(conn_ptr, ctypes.c_uint8(0),
+                                          ctypes.c_uint16(len(name)), name)
+            reply_ptr = xcb.xcb_intern_atom_reply(conn_ptr, cookie, None)
+            if not reply_ptr:
+                return
+            atom = reply_ptr.contents.atom
+            ctypes.cdll.LoadLibrary('libc.so.6').free(reply_ptr)
+
+            xcb.xcb_change_property(
+                conn_ptr,
+                ctypes.c_uint8(0),
+                ctypes.c_uint32(int(self.winId())),
+                ctypes.c_uint32(atom),
+                ctypes.c_uint32(6),   # XCB_ATOM_CARDINAL
+                ctypes.c_uint8(32),
+                ctypes.c_uint32(0),   # 0 elements = blur entire window
+                None,
+            )
+            xcb.xcb_flush(conn_ptr)
+        except Exception:
+            pass
 
     def sizeHint(self) -> QSize:
         return QSize(_PANEL_WIDTH, _PANEL_HEIGHT)
