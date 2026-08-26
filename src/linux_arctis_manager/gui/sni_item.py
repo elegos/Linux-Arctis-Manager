@@ -114,7 +114,7 @@ class _SniInterface(ServiceInterface):
 
     @dbus_property(access=PropertyAccess.READ)
     def Menu(self) -> 'o':
-        return '/StatusNotifierMenu'
+        return '/'
 
     # Methods ─────────────────────────────────────────────────────────────────
 
@@ -124,8 +124,7 @@ class _SniInterface(ServiceInterface):
 
     @method()
     async def ContextMenu(self, x: 'i', y: 'i'):  # noqa: N802
-        # KDE renders the dbusmenu natively; nothing to do here.
-        pass
+        self._owner.sig_activate.emit(x, y)
 
     @method()
     async def SecondaryActivate(self, x: 'i', y: 'i'):  # noqa: N802
@@ -166,158 +165,24 @@ class _SniInterface(ServiceInterface):
         return status
 
 
-class _MenuInterface(ServiceInterface):
-    """Minimal com.canonical.dbusmenu with three items: Open / Separator / Exit."""
-
-    _REVISION = 1
-
-    def __init__(self, open_label: str, exit_label: str, owner: SniItem) -> None:
-        super().__init__('com.canonical.dbusmenu')
-        self._open_label = open_label
-        self._exit_label = exit_label
-        self._owner = owner
-
-    def _layout(self) -> list:
-        return [
-            0,
-            {},
-            [
-                Variant('(ia{sv}av)', [
-                    1,
-                    {
-                        'label':   Variant('s', self._open_label),
-                        'enabled': Variant('b', True),
-                        'visible': Variant('b', True),
-                    },
-                    [],
-                ]),
-                Variant('(ia{sv}av)', [
-                    2,
-                    {'type': Variant('s', 'separator')},
-                    [],
-                ]),
-                Variant('(ia{sv}av)', [
-                    3,
-                    {
-                        'label':   Variant('s', self._exit_label),
-                        'enabled': Variant('b', True),
-                        'visible': Variant('b', True),
-                    },
-                    [],
-                ]),
-            ],
-        ]
-
-    # Properties ──────────────────────────────────────────────────────────────
-
-    @dbus_property(access=PropertyAccess.READ)
-    def Version(self) -> 'u':
-        return 3
-
-    @dbus_property(access=PropertyAccess.READ)
-    def TextDirection(self) -> 's':
-        return 'ltr'
-
-    @dbus_property(access=PropertyAccess.READ)
-    def Status(self) -> 's':
-        return 'normal'
-
-    @dbus_property(access=PropertyAccess.READ)
-    def IconThemePath(self) -> 'as':
-        return []
-
-    # Methods ─────────────────────────────────────────────────────────────────
-
-    @method()
-    async def GetLayout(  # noqa: N802
-        self,
-        parent_id: 'i',
-        recursion_depth: 'i',
-        property_names: 'as',
-    ) -> 'u(ia{sv}av)':
-        return [self._REVISION, self._layout()]
-
-    @method()
-    async def GetGroupProperties(  # noqa: N802
-        self, ids: 'ai', property_names: 'as'
-    ) -> 'a(ia{sv})':
-        return []
-
-    @method()
-    async def GetProperty(self, id: 'i', name: 's') -> 'v':  # noqa: N802
-        return Variant('s', '')
-
-    @method()
-    async def Event(  # noqa: N802
-        self, id: 'i', event_id: 's', data: 'v', timestamp: 'u'
-    ):
-        if event_id == 'clicked':
-            if id == 1:
-                self._owner.sig_open_app.emit()
-            elif id == 3:
-                self._owner.sig_exit.emit()
-
-    @method()
-    async def EventGroup(self, events: 'a(isvu)') -> 'ai':  # noqa: N802
-        for ev_id, event_id, _data, _ts in events:
-            if event_id == 'clicked':
-                if ev_id == 1:
-                    self._owner.sig_open_app.emit()
-                elif ev_id == 3:
-                    self._owner.sig_exit.emit()
-        return []
-
-    @method()
-    async def AboutToShow(self, id: 'i') -> 'b':  # noqa: N802
-        return False
-
-    @method()
-    async def AboutToShowGroup(self, ids: 'ai') -> 'aiai':  # noqa: N802
-        return [[], []]
-
-    # Signals ─────────────────────────────────────────────────────────────────
-
-    @signal()
-    def ItemsPropertiesUpdated(  # noqa: N802
-        self, updated: list, removed: list
-    ) -> 'a(ia{sv})a(ias)':
-        return [updated, removed]
-
-    @signal()
-    def LayoutUpdated(self, revision: int, parent: int) -> 'ui':  # noqa: N802
-        return [revision, parent]
-
-    @signal()
-    def ItemActivationRequested(self, id: int, timestamp: int) -> 'iu':  # noqa: N802
-        return [id, timestamp]
-
-
 # ── Public class ───────────────────────────────────────────────────────────────
 
 class SniItem(QObject):
-    """Manages the native SNI tray icon and its dbusmenu context menu.
+    """Manages the native SNI tray icon.
 
     Emits:
-        sig_activate(x, y)   — tray icon left-clicked (compositor coordinates)
-        sig_open_app         — "Open App" menu item clicked
-        sig_exit             — "Exit" menu item clicked
+        sig_activate(x, y)   — tray icon clicked (compositor coordinates)
     """
 
     sig_activate = Signal(int, int)
-    sig_open_app = Signal()
-    sig_exit = Signal()
 
     def __init__(
         self,
         icon_pixmap: QPixmap,
-        open_label: str,
-        exit_label: str,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._icon_data = _pixmap_to_sni(icon_pixmap)
-        self._open_label = open_label
-        self._exit_label = exit_label
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stop_event: asyncio.Event | None = None
         self._thread: Thread | None = None
@@ -341,8 +206,7 @@ class SniItem(QObject):
             logger.error('SNI: cannot connect to session bus: %s', exc)
             return
 
-        sni_iface  = _SniInterface(self)
-        menu_iface = _MenuInterface(self._open_label, self._exit_label, self)
+        sni_iface = _SniInterface(self)
 
         pid      = os.getpid()
         svc_name = f'org.kde.StatusNotifierItem-{pid}-1'
@@ -355,7 +219,6 @@ class SniItem(QObject):
             return
 
         bus.export('/StatusNotifierItem', sni_iface)
-        bus.export('/StatusNotifierMenu', menu_iface)
 
         # Register with the StatusNotifierWatcher (KDE or freedesktop fallback).
         registered = False

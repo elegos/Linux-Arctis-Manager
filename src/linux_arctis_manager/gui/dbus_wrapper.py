@@ -326,6 +326,28 @@ class DbusWrapper(QObject):
         if self._vc_signal_loop and self._stop_vc_signal_future:
             self._vc_signal_loop.call_soon_threadsafe(self._stop_vc_signal_future.set_result, None)
 
+    @staticmethod
+    def request_current_device(qt_signal: SignalInstance) -> None:
+        async def _call() -> None:
+            try:
+                bus = await MessageBus().connect()
+                reply = await bus.call(Message(
+                    destination=DBUS_BUS_NAME,
+                    path=DBUS_STATUS_OBJECT_PATH,
+                    interface=DBUS_STATUS_INTERFACE_NAME,
+                    member='GetCurrentDevice',
+                    message_type=MessageType.METHOD_CALL,
+                    signature='',
+                    body=[],
+                ))
+                if reply is not None and reply.message_type != MessageType.ERROR:
+                    data = json.loads(reply.body[0])
+                    if data:
+                        qt_signal.emit(data)
+            except Exception as e:
+                DbusWrapper.logger.warning('GetCurrentDevice failed: %s', e)
+        Thread(target=lambda: asyncio.run(_call())).start()
+
     def request_status(self) -> None:
         request_thread = Thread(target=lambda: asyncio.run(self._request_status_async()))
         request_thread.start()

@@ -41,6 +41,9 @@ class QTrayQuickSettingsTab(QWidget):
         self._setting_widgets: dict[str, QWidget] = {}
         self._active_editor: QQuickSettingsEditor | None = None
 
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
+        self.setStyleSheet('QTrayQuickSettingsTab { background: transparent; }')
+
         root = QVBoxLayout()
         root.setContentsMargins(8, 8, 8, 8)
         root.setSpacing(0)
@@ -49,7 +52,10 @@ class QTrayQuickSettingsTab(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setStyleSheet('QScrollArea { background: transparent; border: none; }')
+        scroll.viewport().setStyleSheet('background: transparent;')
         self._scroll_content = QWidget()
+        self._scroll_content.setStyleSheet('background: transparent;')
         self._items_layout = QVBoxLayout()
         self._items_layout.setContentsMargins(0, 0, 0, 0)
         self._items_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -213,6 +219,7 @@ class QTrayQuickSettingsTab(QWidget):
             return None
 
         row = QWidget()
+        row.setStyleSheet('background: transparent;')
         lay = QVBoxLayout()
         lay.setContentsMargins(4, 6, 4, 4)
         lay.setSpacing(4)

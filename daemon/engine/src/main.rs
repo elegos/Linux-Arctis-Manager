@@ -213,6 +213,8 @@ async fn run_device(
                 config: Arc::clone(&config),
                 vid: info.vid,
                 pid: info.pid,
+                name: friendly_name.clone(),
+                capabilities: capabilities.clone(),
                 status: HashMap::new(),
                 cmd_tx: placeholder_tx,
             },
