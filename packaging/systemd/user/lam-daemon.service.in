@@ -9,7 +9,7 @@ Type=simple
 ExecStart=@BINDIR@/lam-daemon
 Restart=on-failure
 RestartSec=5
-Environment=RUST_LOG=info
+Environment=RUST_LOG=info,lam_daemon::focus_monitor=debug
 
 [Install]
 WantedBy=default.target
