@@ -66,6 +66,13 @@ def main():
 
     logging.basicConfig(level=log_level, format='%(name)20s %(levelname)8s | %(message)s')
 
+    # On Wayland, xdg-toplevel windows cannot be positioned programmatically —
+    # the compositor controls placement (KWin ignores move() hints).
+    # Force XWayland for the systray so the popup panel appears near the icon.
+    import os
+    if args.systray and os.environ.get('WAYLAND_DISPLAY') and not os.environ.get('QT_QPA_PLATFORM'):
+        os.environ['QT_QPA_PLATFORM'] = 'xcb'
+
     app = QApplication(sys.argv)
     app.setApplicationName('Arctis Manager')
     app.setApplicationDisplayName('Arctis Manager')
