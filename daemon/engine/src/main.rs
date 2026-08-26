@@ -629,7 +629,16 @@ async fn main() {
         }
     };
 
-    run_main_loop(configs, helper_sock, app_state, signal_tx, audio_shared, nc_runtime, mic_router).await;
+    run_main_loop(
+        configs,
+        helper_sock,
+        app_state,
+        signal_tx,
+        audio_shared,
+        nc_runtime,
+        mic_router,
+    )
+    .await;
 }
 
 /// Keep only devices that are useful to start a task for.

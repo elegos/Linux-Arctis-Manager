@@ -358,9 +358,7 @@ async fn try_find_physical_source() -> Option<String> {
         if name.ends_with(".monitor") || name.starts_with("Arctis_") {
             continue;
         }
-        let vid = src["properties"]["device.vendor.id"]
-            .as_str()
-            .unwrap_or("");
+        let vid = src["properties"]["device.vendor.id"].as_str().unwrap_or("");
         if vid == STEELSERIES_VID {
             return Some(name.to_owned());
         }

@@ -16,8 +16,8 @@ use tokio::process::{Child, Command};
 use tracing::{debug, error, info, warn};
 
 use crate::nc_config::{
-    CompressorConfig, GateConfig, NcConfig, COMP_CANDIDATES, GATE_CANDIDATES,
-    RNNOISE_CONTROLS, RNNOISE_LABEL, RNNOISE_PLUGIN, RNNOISE_PLUGIN_ALT,
+    CompressorConfig, GateConfig, NcConfig, COMP_CANDIDATES, GATE_CANDIDATES, RNNOISE_CONTROLS,
+    RNNOISE_LABEL, RNNOISE_PLUGIN, RNNOISE_PLUGIN_ALT,
 };
 
 // ── Public constants ──────────────────────────────────────────────────────────
@@ -59,7 +59,9 @@ pub fn plugin_available(name: &str) -> bool {
         .any(|d| d.join(&filename).is_file())
 }
 
-fn find_plugin(candidates: &[(&'static str, &'static str)]) -> Option<(&'static str, &'static str)> {
+fn find_plugin(
+    candidates: &[(&'static str, &'static str)],
+) -> Option<(&'static str, &'static str)> {
     candidates
         .iter()
         .find(|(p, _)| plugin_available(p))
@@ -232,7 +234,9 @@ pub(crate) fn generate_conf(config: &NcConfig, stages: &[Stage]) -> String {
             };
             let plugin_line = match &s.stage_type {
                 StageType::Builtin => String::new(),
-                StageType::Ladspa { plugin } => format!("                        plugin = {plugin}\n"),
+                StageType::Ladspa { plugin } => {
+                    format!("                        plugin = {plugin}\n")
+                }
             };
             let controls = if s.controls.is_empty() {
                 String::new()
@@ -677,7 +681,10 @@ mod tests {
             .find(|(k, _)| k.contains("output select") || k.contains("Output select"))
             .unwrap()
             .1;
-        assert_eq!(output_select, 1.0, "disabled gate must bypass (output select = 1)");
+        assert_eq!(
+            output_select, 1.0,
+            "disabled gate must bypass (output select = 1)"
+        );
     }
 
     #[test]
