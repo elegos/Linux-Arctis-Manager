@@ -544,6 +544,9 @@ class CoreEngine:
 
         endpoint = self.get_command_endpoint_address()
         self.send_command(config.get_update_sequence(value), endpoint, self.device_config.command_interface_index[1])
+        persist_sequence = getattr(config, 'persist_sequence', None)
+        if persist_sequence:
+            self.send_command(persist_sequence, endpoint, self.device_config.command_interface_index[1])
 
 
     def send_command(self, command: list[int], endpoint: int, control_interface_index: int = 0) -> None:

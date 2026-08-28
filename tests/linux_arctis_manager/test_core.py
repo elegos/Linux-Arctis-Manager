@@ -44,6 +44,27 @@ def _make_usb_device(product: str, pid: int, vid: int = 0x1038) -> MagicMock:
     return dev
 
 
+def test_on_setting_changed_sends_optional_persist_sequence():
+    engine = _make_engine()
+    config = _make_config()
+    setting = MagicMock()
+    setting.name = 'hardware_eq_preset'
+    setting.get_update_sequence.return_value = [0x06, 0x2E, 0x01]
+    setting.persist_sequence = [0x06, 0x09]
+    config.settings = {'station': [setting]}
+    config.command_interface_index = [4, 0]
+    engine.device_config = config
+    engine.get_command_endpoint_address = MagicMock(return_value=0x04)
+    engine.send_command = MagicMock()
+
+    engine.on_setting_changed('hardware_eq_preset', 0x01)
+
+    assert engine.send_command.call_args_list == [
+        (([0x06, 0x2E, 0x01], 0x04, 0),),
+        (([0x06, 0x09], 0x04, 0),),
+    ]
+
+
 def _mock_configure_side_effects(engine: CoreEngine) -> None:
     """Stub out all configure_virtual_sinks side effects beyond the selection logic."""
     engine.teardown = MagicMock()
