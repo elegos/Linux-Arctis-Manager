@@ -15,6 +15,7 @@ An open-source replacement for SteelSeries GG, to manage your Arctis headset on 
 - Configure any device via a simple configuration file
 - Enable per-device features by adding them in the relative configuration file
 - D-Bus based communication, to support different clients (alternative clients, Plasma extensions, etc)
+- [User Manual](docs/manual.md)
 
 ## 🎧 Supported Devices
 
