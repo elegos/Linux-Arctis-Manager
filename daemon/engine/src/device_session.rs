@@ -274,6 +274,11 @@ impl DeviceSession {
                     .await?;
                 Ok(vec![])
             }
+            "reset_eq_preset" => {
+                self.send_api_write("selected_eq_preset", &u8_fields(&[("eq_preset", 0)]))
+                    .await?;
+                Ok(vec![])
+            }
             "enable_chatmix" => {
                 self.send_api_write("software_chatmix_status", &u8_fields(&[("status", 1)]))
                     .await?;
@@ -556,6 +561,42 @@ lifecycle:
         assert_eq!(received[0], 0x06); // report_id constant
         assert_eq!(received[1], 0x09); // command constant
         assert_eq!(&received[2..], &[0u8; 6]);
+    }
+
+    #[tokio::test]
+    async fn reset_eq_preset_lifecycle_selects_flat() {
+        let (engine_fd, peer_fd) = make_pair();
+        let session = DeviceSession::new(
+            cfg(r#"
+structs:
+  selected_eq_preset:
+    - {name: report_id, type: uint8, constant: 0x06}
+    - {name: command,   type: uint8, constant: 0x2E}
+    - {name: eq_preset, type: uint8, range: [0, 18]}
+apis:
+  selected_eq_preset:
+    write: {transport: HID_IO, chunk_size: 8}
+lifecycle:
+  init:
+    - call: reset_eq_preset
+"#),
+            engine_fd,
+        )
+        .expect("from_fd");
+
+        let task = tokio::spawn(async move {
+            let mut s = session;
+            s.device_init().await
+        });
+
+        let mut peer = HidTransport::from_fd(peer_fd).expect("from_fd");
+        let received = peer
+            .read_interrupt(Duration::from_millis(500))
+            .await
+            .expect("engine should have sent the flat preset report");
+
+        task.await.unwrap().unwrap();
+        assert_eq!(&received[..3], &[0x06, 0x2E, 0x00]);
     }
 
     #[tokio::test]
