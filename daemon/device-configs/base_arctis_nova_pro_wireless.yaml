@@ -483,7 +483,9 @@ sync_read:
 
 lifecycle:
   init:
-    - call: enable_sonar
+    # LAM does not provide SteelSeries Sonar. Clear a stale station icon while
+    # keeping software ChatMix available independently.
+    - call: disable_sonar
     - call: enable_chatmix
   post_init:
     - call: send_init_wireless_connection_battery_status
