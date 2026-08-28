@@ -33,7 +33,7 @@ def test_config_parse():
     assert config.command_padding.filler == 0x00
 
     assert config.device_init is not None
-    assert len(config.device_init) == 38
+    assert len(config.device_init) == 36
 
     assert config.status is not None
     assert config.status.request == 0x06b0
@@ -68,11 +68,34 @@ def test_config_parse():
 
     assert config.settings is not None
 
-    assert len(config.settings) == 4
+    assert len(config.settings) == 5
+    assert 'station' in config.settings
     assert 'headset' in config.settings
     assert 'microphone' in config.settings
     assert 'power_management' in config.settings
     assert 'wireless' in config.settings
+
+    station_settings: list[ConfigSetting] = config.settings['station']
+    chatmix = next((s for s in station_settings if s.name == 'chatmix_enabled'), None)
+    sonar = next((s for s in station_settings if s.name == 'sonar_icon_enabled'), None)
+    hardware_eq = next((s for s in station_settings if s.name == 'hardware_eq_preset'), None)
+    assert chatmix is not None
+    assert chatmix.type == SettingType.TOGGLE
+    assert chatmix.default_value == 0x01
+    assert chatmix.get_update_sequence(0x00) == [0x06, 0x49, 0x00]
+    assert sonar is not None
+    assert sonar.type == SettingType.TOGGLE
+    assert sonar.default_value == 0x00
+    assert sonar.get_update_sequence(0x01) == [0x06, 0x8d, 0x01]
+    assert hardware_eq is not None
+    assert hardware_eq.type == SettingType.DISCRETE_MAP
+    assert hardware_eq.default_value == 0x00
+    assert hardware_eq.get_update_sequence(0x04) == [0x06, 0x2e, 0x04]
+    assert hardware_eq.get_kwargs()['persist_sequence'] == [0x06, 0x09]
+    assert hardware_eq.get_kwargs()['display'] == 'combo'
+    assert hardware_eq.get_kwargs()['values_mapping'][0x04] == 'custom'
+    assert hardware_eq.get_kwargs()['values_mapping'][0x05] == 'apex_legends'
+    assert hardware_eq.get_kwargs()['values_mapping'][0x12] == 'rocket_league'
 
     assert len(config.settings['headset']) == 1
     assert len(config.settings['microphone']) == 3

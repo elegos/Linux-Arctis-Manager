@@ -152,13 +152,34 @@ class QSettingsWidget(QWidget):
             slider.valueChanged.connect(lambda value: widget_value_label.setText(slider_value(value)))
             slider.valueChanged.connect(lambda value: callback(config, value))
         elif config.type == SettingType.DISCRETE_MAP:
-            widget = QCheckableButtonGroup()
-
-            for map_value, map_label in config.get_kwargs().get('values_mapping', {}).items():
-                map_value = int(map_value)
-                widget.addButton(value=map_value, label=map_label, selected=(value == map_value), i18n_section='settings_values')
-
-            widget.new_value.connect(lambda value: callback(config, value))
+            values_mapping = config.get_kwargs().get('values_mapping', {})
+            if config.get_kwargs().get('display') == 'combo':
+                combo = QComboBox()
+                selected_index = 0
+                for index, (map_value, map_label) in enumerate(values_mapping.items()):
+                    numeric_value = int(map_value)
+                    combo.addItem(
+                        I18n.get_instance().translate('settings_values', map_label),
+                        numeric_value,
+                    )
+                    if value == numeric_value:
+                        selected_index = index
+                combo.setCurrentIndex(selected_index)
+                combo.currentIndexChanged.connect(
+                    lambda index: callback(config, combo.itemData(index)))
+                widget = combo
+            else:
+                button_group = QCheckableButtonGroup()
+                for map_value, map_label in values_mapping.items():
+                    numeric_value = int(map_value)
+                    button_group.addButton(
+                        value=numeric_value,
+                        label=map_label,
+                        selected=(value == numeric_value),
+                        i18n_section='settings_values',
+                    )
+                button_group.new_value.connect(lambda new_value: callback(config, new_value))
+                widget = button_group
 
         elif config.type == SettingType.SELECT:
             widget = QComboBox()

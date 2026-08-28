@@ -20,18 +20,20 @@ device:
     - [0x06, 0x10]
     - [0x06, 0x10]
     - [0x06, 0x10]
-    - [0x06, 0x3b] # Correction?
+    # The legacy 0x3b commands are intentionally omitted: hardware testing
+    # confirmed that they force the base station's EQ selector into an
+    # undocumented SONAR state. Current SteelSeries GG leaves it in PRESET.
     - [0x06, 0x8d, 0x01]
     - [0x06, 0x20]
     - [0x06, 0x20]
     - [0x06, 0x20]
     - [0x06, 0x80]
-    - [0x06, 0x3b] # Correction?
     # Burst of commands (device init?)
     - [0x06, 0x8d, 0x01]
     - [0x06, 0x33, 0x14, 0x14, 0x14]              # Equalizer with 3 bands
     - [0x06, 0xc3, 'settings.wireless_mode']      # 2.4G mode (0x00: speed, 0x01: range)
-    - [0x06, 0x2e, 0x00]                          # Set equalizer preset (0)
+    - [0x06, 0x2e, 'settings.hardware_eq_preset'] # Restore the selected hardware EQ preset
+    - [0x06, 0x09]                                # Persist the hardware EQ selection
     - [0x06, 0xc1, 'settings.pm_shutdown']        # Set inactive time (to 30 minutes, see INACTIVE_TIME_MINUTES)
     - [0x06, 0x85, 0x0a]
     - [0x06, 0x37, 'settings.mic_volume']         # Mic volume 100% (01 (mute) - a0 (100%))
@@ -45,7 +47,6 @@ device:
     - [0x06, 0xbf, 'settings.mic_led_brightness'] # Mute mic led brightness (out of 10)
     - [0x06, 0x43, 0x01]
     - [0x06, 0x69, 0x00]
-    - [0x06, 0x3b, 0x00]
     - [0x06, 0x8d, 0x01]
     - [0x06, 0x49, 0x01]
     - [0x06, 0xb7, 0x00]
@@ -108,6 +109,52 @@ device:
     online_value: online
 
   settings:
+    station:
+      chatmix_enabled:
+        type: toggle
+        values:
+          off: 0x00
+          on: 0x01
+          off_label: off
+          on_label: on
+        default: 0x01
+        update_sequence: [0x06, 0x49, 'value']
+      # 0x8d controls the station icon; it does not select a Sonar EQ.
+      sonar_icon_enabled:
+        type: toggle
+        values:
+          off: 0x00
+          on: 0x01
+          off_label: off
+          on_label: on
+        default: 0x00
+        update_sequence: [0x06, 0x8d, 'value']
+      hardware_eq_preset:
+        type: discrete_map
+        default: 0x00
+        update_sequence: [0x06, 0x2e, 'value']
+        persist_sequence: [0x06, 0x09]
+        display: combo
+        values_mapping:
+          0x00: flat
+          0x01: bass_boost
+          0x02: focus
+          0x03: smiley
+          0x04: custom
+          0x05: apex_legends
+          0x06: baldurs_gate_3
+          0x07: cod_modern_warfare_ii
+          0x08: cod_warzone_2
+          0x09: destiny_2
+          0x0a: diablo_iv
+          0x0b: fortnite
+          0x0c: fps_footsteps
+          0x0d: gta_v
+          0x0e: minecraft
+          0x0f: overwatch_2
+          0x10: pubg
+          0x11: rainbow_six_siege
+          0x12: rocket_league
     headset:
       gain:
         type: discrete_map
