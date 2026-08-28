@@ -11,6 +11,7 @@ RUN dnf update -y && \
         uv \
         python3 \
         python3-devel \
+        systemd-devel \
         rpm-build \
         rpmdevtools \
         libcap \
