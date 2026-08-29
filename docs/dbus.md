@@ -21,6 +21,14 @@ The response varies depending on the list, but it will always return a list of o
 [{ "id": "string", "name": "string" }]
 ```
 
+**List name: pulse_audio_sources**:
+
+Physical microphone sources only — monitor sources (`*.monitor`) and daemon-managed virtual sources (`Arctis_*`) are excluded. Used by any client-side panel that lets the user pick a mic to feed into NC, VC, or the sidetone preview, instead of each panel opening its own PulseAudio connection.
+
+```json
+[{ "id": "string", "name": "string", "is_default": true }]
+```
+
 ### Method: GetSettings
 - **Parameters**: (none)
 - **Response format**: JSON

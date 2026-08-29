@@ -80,9 +80,9 @@ V2 bug: stored `node.nick` as the device id — rename breaks redirect. V3 fix: 
 | Physical sink discovery with retry | yes | **Done** |
 | Redirect default sink on headset connect/disconnect | yes (`GeneralSettings`) | **Done** — hooks in `run_device` and event-forwarding task |
 | EQ LADSPA loopback routing (`Arctis_Media` → mbeq) | yes | **Done** — `eq_manager`: swaps channel loopback target, live gain update without reload |
-| NC virtual mic source (`Arctis_NC_Mic`) | yes | **Missing** |
+| NC virtual mic source (`Arctis_NC_Mic`) | yes | **Done** — `nc_manager.rs`, single-node PipeWire filter-chain |
 | VC virtual sink (`Arctis_VC_Sink`) | yes | **Missing** |
-| Mic routing chain (NC → VC → `Arctis_Manager_Mic`) | yes | **Missing** |
+| Mic routing chain (NC → VC → `Arctis_Manager_Mic`) | yes | **Partial** — `mic_router.rs` implements the NC → `Arctis_Manager_Mic` leg and already anticipates VC priority (`"Priority: VC output > NC output > teardown"`); VC leg missing until [E10] |
 
 ---
 
@@ -149,22 +149,20 @@ bands:
 
 ## Noise cancellation (NC)
 
-Everything in this section is **Missing** in V3.
-
-| Feature | V2 |
-|---|---|
-| `…NC` D-Bus interface (3 methods) | `ArctisManagerDbusNCService` |
-| Preset: off / light / standard / studio / custom | `NCSettings.preset` |
-| RNNoise LADSPA pipeline | `NCManager` |
-| HPF, noise gate, compressor stages (swh-plugins) | `NCSettings.{hpf,gate,comp}_*` |
-| Virtual mic source routing | `MicRouter` |
-| `GetNCCapabilities` (checks RNNoise + swh availability) | yes |
+| Feature | V2 | V3 |
+|---|---|---|
+| `…NC` D-Bus interface (3 methods) | `ArctisManagerDbusNCService` | **Done** — `GetNCCapabilities`, `GetNCSettings`, `SetNCSettings`; `NCChanged` signal |
+| Preset: off / on / custom | `NCSettings.preset` | **Done** — `NcConfig.preset` (`"off"` disables; any other value enables) |
+| RNNoise LADSPA pipeline | `NCManager` (module chain) | **Done** — `nc_manager.rs`, single-node `libpipewire-module-filter-chain` graph (not module chaining) |
+| HPF, noise gate, compressor stages (swh-plugins) | `NCSettings.{hpf,gate,comp}_*` | **Done** — baked into the filter-chain graph; disabled stages neutralised via bypass controls, no graph rebuild |
+| Virtual mic source routing | `MicRouter` | **Done** — `mic_router.rs`; VC priority already anticipated, not yet wired ([E10]) |
+| `GetNCCapabilities` (checks RNNoise + swh availability) | yes | **Done** |
 
 ---
 
 ## Voice changer (VC)
 
-Everything in this section is **Missing** in V3.
+Everything in this section is **Missing** in V3. Tracked as epic **[E10]** in [`v3-backlog.md`](v3-backlog.md); target architecture documented in [`voice-changing-feature.md`](voice-changing-feature.md).
 
 | Feature | V2 |
 |---|---|
