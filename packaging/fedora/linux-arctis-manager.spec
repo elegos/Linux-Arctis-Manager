@@ -14,6 +14,7 @@ BuildRequires:  cargo
 BuildRequires:  rust
 BuildRequires:  uv
 BuildRequires:  python3
+BuildRequires:  systemd-devel
 BuildRequires:  libcap
 
 Requires:       python3
