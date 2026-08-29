@@ -405,6 +405,14 @@ async fn run_device(
         let hidraw_path_clone = info.hidraw_path.clone();
         let audio_for_task = Arc::clone(&audio_shared);
         tokio::spawn(async move {
+            // Edge-detect state: the device re-emits full status (including
+            // radio_connection_status and chatmix_*) on every periodic poll,
+            // not only on change. Without tracking the last-seen value here,
+            // the audio lifecycle/redirect logic below would re-fire every
+            // poll cycle (~10s) even while nothing changed, spamming pactl
+            // calls against sinks that were already torn down.
+            let mut last_radio_status: Option<String> = None;
+            let mut last_chatmix: Option<(u8, u8)> = None;
             while let Some(ev) = event_rx.recv().await {
                 debug!(signal = %ev.signal, fields = ?ev.fields, "sync event");
                 let mut chatmix_changed = false;
@@ -432,38 +440,61 @@ async fn run_device(
                 let _ = signal_tx_clone.send(SignalEvent::StatusChanged);
 
                 // Drive audio sink lifecycle from the wireless connection event.
+                // Only react on an actual transition — the device re-sends the
+                // same radio_connection_status on every periodic poll, and
+                // acting on every poll spams pactl against already-torn-down
+                // sinks and repeatedly redirects the default sink.
                 // Guards are never held across .await — take/set value, drop, then await.
                 if let Some(ref status) = radio_status {
-                    if status.contains("NOT_CONNECTED") || status == "DISCONNECTED" {
-                        let setup = audio_for_task.lock().await.take();
-                        if let Some(s) = setup {
-                            info!("headset wireless off: removing virtual sinks");
-                            audio::teardown_sinks(s).await;
-                        }
-                        // Redirect to user-chosen sink on wireless disconnect.
-                        let (do_redirect, target) = {
-                            let s = state_for_events.lock().await;
-                            (
-                                s.general_settings.redirect_audio_on_disconnect,
-                                s.general_settings
-                                    .redirect_audio_on_disconnect_device
-                                    .clone(),
-                            )
-                        };
-                        if do_redirect {
-                            if let Some(ref sink) = target {
-                                audio::set_default_sink(sink).await;
+                    let changed = last_radio_status.as_deref() != Some(status.as_str());
+                    last_radio_status = Some(status.clone());
+                    if changed {
+                        if status.contains("NOT_CONNECTED") || status == "DISCONNECTED" {
+                            let setup = audio_for_task.lock().await.take();
+                            if let Some(s) = setup {
+                                info!("headset wireless off: removing virtual sinks");
+                                audio::teardown_sinks(s).await;
                             }
-                        }
-                    } else if status == "PAIRED_CONNECTED" || status == "CONNECTED" {
-                        let needs = audio_for_task.lock().await.is_none();
-                        if needs {
-                            match audio::setup_sinks().await {
-                                Ok(s) => {
-                                    info!("headset wireless on: virtual sinks created");
-                                    *audio_for_task.lock().await = Some(s);
+                            // Redirect to user-chosen sink on wireless disconnect.
+                            let (do_redirect, target) = {
+                                let s = state_for_events.lock().await;
+                                (
+                                    s.general_settings.redirect_audio_on_disconnect,
+                                    s.general_settings
+                                        .redirect_audio_on_disconnect_device
+                                        .clone(),
+                                )
+                            };
+                            if do_redirect {
+                                if let Some(ref sink) = target {
+                                    audio::set_default_sink(sink).await;
                                 }
-                                Err(e) => warn!("audio setup on reconnect failed: {e}"),
+                            }
+                        } else if status == "PAIRED_CONNECTED" || status == "CONNECTED" {
+                            let needs = audio_for_task.lock().await.is_none();
+                            if needs {
+                                match audio::setup_sinks().await {
+                                    Ok(s) => {
+                                        info!("headset wireless on: virtual sinks created");
+                                        *audio_for_task.lock().await = Some(s);
+
+                                        // Redirect default sink to Arctis_Media on
+                                        // wireless (re)connect, mirroring the
+                                        // cold-start redirect. Without this, a
+                                        // reconnect after the initial session start
+                                        // (e.g. headset powered on later) never
+                                        // switches the default sink.
+                                        let redirect = state_for_events
+                                            .lock()
+                                            .await
+                                            .general_settings
+                                            .redirect_audio_on_connect;
+                                        if redirect {
+                                            audio::set_default_sink(audio::MEDIA_SINK).await;
+                                        }
+                                    }
+                                    Err(e) => warn!("audio setup on reconnect failed: {e}"),
+                                }
                             }
                         }
                     }
@@ -484,7 +515,10 @@ async fn run_device(
                         (g, c)
                     };
                     if let (Some(g), Some(c)) = (game, chat) {
-                        audio::set_chatmix(g, c).await;
+                        if last_chatmix != Some((g, c)) {
+                            last_chatmix = Some((g, c));
+                            audio::set_chatmix(g, c).await;
+                        }
                     }
                 }
             }
