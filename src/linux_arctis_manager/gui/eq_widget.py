@@ -987,6 +987,10 @@ class QEQWidget(QWidget):
 
         self._ladspa_warn_label = QLabel()
         self._ladspa_warn_label.setWordWrap(True)
+        self._ladspa_warn_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+            | Qt.TextInteractionFlag.TextSelectableByKeyboard
+        )
         lf_layout.addWidget(self._ladspa_warn_label)
 
         lf_btn_row = QHBoxLayout()
