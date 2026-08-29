@@ -11,52 +11,44 @@ v3 replaces the Python engine with a Rust daemon while keeping the Python GUI an
 
 ## Component Diagram
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  User session                                                   │
-│                                                                 │
-│  ┌──────────────────┐      D-Bus (session bus)                 │
-│  │  GUI (Python/Qt) │ ◄──────────────────────────────────┐    │
-│  └──────────────────┘                                     │    │
-│                                                           │    │
-│  ┌──────────────────┐      D-Bus (session bus)            │    │
-│  │  CLI / other     │ ◄──────────────────────────────────┤    │
-│  └──────────────────┘                                     │    │
-│                                                           │    │
-│  ┌────────────────────────────────────────────────────────┴──┐ │
-│  │  lam-daemon  (Rust, systemd user service)              │ │
-│  │                                                           │ │
-│  │  ┌─────────────┐  ┌──────────────┐  ┌─────────────────┐  │ │
-│  │  │ Device      │  │ Config       │  │ D-Bus server    │  │ │
-│  │  │ Manager     │  │ (YAML DSL)   │  │ (zbus)          │  │ │
-│  │  └──────┬──────┘  └──────────────┘  └─────────────────┘  │ │
-│  │         │                                                  │ │
-│  │  ┌──────▼──────┐  ┌──────────────┐                        │ │
-│  │  │ HID event   │  │ Capability   │                        │ │
-│  │  │ dispatcher  │  │ modules      │                        │ │
-│  │  └─────────────┘  └──────────────┘                        │ │
-│  │                                                           │ │
-│  │  ┌─────────────────────────────────────────────────────┐  │ │
-│  │  │  hid-transport  (hidapi / hidraw)                   │  │ │
-│  │  └───────────────────────┬─────────────────────────────┘  │ │
-│  └──────────────────────────│───────────────────────────────┘ │
-└─────────────────────────────│─────────────────────────────────┘
-                              │ fd (opened by helper)
-┌─────────────────────────────▼─────────────────────────────────┐
-│  lam-hidraw-helper  (tiny setcap binary, ~100 LOC)            │
-│  Validates VID+PID → opens /dev/hidraw* → passes fd via socket│
-└─────────────────────────────┬─────────────────────────────────┘
-                              │
-              ┌───────────────▼───────────────┐
-              │  /dev/hidraw*   (kernel)       │
-              └───────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Session["User session"]
+        GUI["GUI (Python/Qt)"]
+        CLI["CLI / other D-Bus clients"]
+    end
 
-  ┌──────────────────────────────────────────┐
-  │  Voice changer  (Python, separate proc)  │
-  │  PipeWire filter-chain management        │
-  │  Communicates via D-Bus (device state)   │
-  └──────────────────────────────────────────┘
+    subgraph Daemon["lam-daemon — Rust, systemd user service"]
+        DBus["D-Bus server (zbus)<br/>Status · Settings · EQ · Config · NC"]
+        Core["Device session &amp; hotplug<br/>(tokio-udev, engine crate)"]
+        DSL["device-config crate<br/>YAML DSL interpreter<br/>(api_executor, sync_dispatcher,<br/>sync_reader, transform_eval, codec)"]
+        Transport["hid-transport crate<br/>HID_IO / HID_FEATURE reports"]
+        Audio["Audio subsystem (engine crate)<br/>virtual sinks · LADSPA/HW EQ · NC filter-chain<br/>mic router · stream &amp; focus monitor"]
+        State["state · general_settings ·<br/>device_persistence"]
+    end
+
+    Helper["lam-hidraw-helper<br/>setcap binary, ~100 LOC<br/>peer auth + VID allowlist"]
+    Hidraw[("/dev/hidraw*<br/>(kernel)")]
+    PipeWire[("PipeWire<br/>pactl / pw-cli / filter-chain")]
+
+    GUI -->|D-Bus session bus| DBus
+    CLI -->|D-Bus session bus| DBus
+
+    DBus --> Core
+    DBus --> Audio
+    Core --> DSL
+    Core --> State
+    Core --> Audio
+    DSL --> Transport
+
+    Transport <-->|fd via SCM_RIGHTS over Unix socket| Helper
+    Helper -->|open| Hidraw
+
+    Audio -->|spawn / control| PipeWire
 ```
+
+> [!NOTE]
+> The voice changer module is omitted here — it is under active development. See [`voice-changing-feature.md`](voice-changing-feature.md).
 
 ## Privilege Model
 
