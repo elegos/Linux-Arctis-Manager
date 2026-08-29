@@ -643,9 +643,11 @@ async fn main() {
     // cleared on disconnect.  Shared with the EQ D-Bus interface for routing.
     let audio_shared: Arc<Mutex<Option<audio::AudioSetup>>> = Arc::new(Mutex::new(None));
 
-    // NC and mic-router shared state.
+    // NC, VC, and mic-router shared state.
     let nc_runtime: Arc<Mutex<nc_manager::NcRuntime>> =
         Arc::new(Mutex::new(nc_manager::NcRuntime::new()));
+    let vc_runtime: Arc<Mutex<vc_ladspa_chain::VcLadspaRuntime>> =
+        Arc::new(Mutex::new(vc_ladspa_chain::VcLadspaRuntime::new()));
     let mic_router: Arc<Mutex<mic_router::MicRouterState>> =
         Arc::new(Mutex::new(mic_router::MicRouterState::new()));
 
@@ -658,6 +660,8 @@ async fn main() {
         Arc::clone(&audio_shared),
         Arc::clone(&nc_runtime),
         Arc::clone(&mic_router),
+        Arc::clone(&vc_runtime),
+        Arc::new(Mutex::new(vc_calibration::CalibrationSession::new())),
     )
     .await
     {
@@ -678,6 +682,7 @@ async fn main() {
         signal_tx,
         audio_shared,
         nc_runtime,
+        vc_runtime,
         mic_router,
     )
     .await;
@@ -761,6 +766,9 @@ fn filter_to_command_interfaces(
         .collect()
 }
 
+// Same rationale as `dbus::start_dbus_service`: one param per shared
+// feature-runtime handle, matching the existing pattern.
+#[allow(clippy::too_many_arguments)]
 async fn run_main_loop(
     configs: Vec<Arc<DeviceConfig>>,
     helper_sock: PathBuf,
@@ -768,6 +776,7 @@ async fn run_main_loop(
     signal_tx: broadcast::Sender<SignalEvent>,
     audio_shared: Arc<Mutex<Option<audio::AudioSetup>>>,
     nc_runtime: Arc<Mutex<nc_manager::NcRuntime>>,
+    vc_runtime: Arc<Mutex<vc_ladspa_chain::VcLadspaRuntime>>,
     mic_router: Arc<Mutex<mic_router::MicRouterState>>,
 ) {
     let existing = match hotplug::scan_existing(&[]) {
@@ -949,6 +958,7 @@ async fn run_main_loop(
                         }
                         mic_router::teardown(&mut *mic_router.lock().await).await;
                         nc_manager::teardown_nc(&mut *nc_runtime.lock().await).await;
+                        vc_ladspa_chain::teardown_vc_ladspa(&mut *vc_runtime.lock().await).await;
                         cleanup_device(&app_state, &dev.hidraw_path, dev.pid, &signal_tx).await;
                     }
                 }
@@ -974,4 +984,5 @@ async fn run_main_loop(
     }
     mic_router::teardown(&mut *mic_router.lock().await).await;
     nc_manager::teardown_nc(&mut *nc_runtime.lock().await).await;
+    vc_ladspa_chain::teardown_vc_ladspa(&mut *vc_runtime.lock().await).await;
 }

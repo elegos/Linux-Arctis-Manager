@@ -11,12 +11,6 @@
 // `module-ladspa-source` chain) rather than baked-in-and-neutralised.
 // The filter-chain process is rebuilt whenever the *set* of enabled effects
 // changes; a pure parameter change on an unchanged set is a live control push.
-//
-// Not yet wired into dbus.rs — the `VcInterface` D-Bus service and
-// `mic_router` hookup land in a later phase ([E10-S5], see
-// docs/voice-changing-feature.md and docs/v3-backlog.md). Unit tests below
-// exercise this module directly in the meantime.
-#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
