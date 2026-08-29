@@ -20,6 +20,11 @@ pub const MIC_DESC: &str = "Arctis Manager Mic";
 pub struct MicRouterState {
     module_id: Option<u32>,
     current_master: Option<String>,
+    /// Candidate sources set by each feature; `resolve()` picks the
+    /// highest-priority one (VC > NC > teardown) independently of the order
+    /// NC/VC settings happen to be applied in.
+    nc_source: Option<String>,
+    vc_source: Option<String>,
 }
 
 impl MicRouterState {
@@ -30,10 +35,42 @@ impl MicRouterState {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
+/// Set (or clear, with `None`) NC's candidate output source, then re-resolve
+/// priority. Returns `true` on success.
+pub async fn set_nc_source(state: &mut MicRouterState, source: Option<String>) -> bool {
+    state.nc_source = source;
+    resolve(state).await
+}
+
+/// Set (or clear, with `None`) VC's candidate output source, then re-resolve
+/// priority. Returns `true` on success.
+pub async fn set_vc_source(state: &mut MicRouterState, source: Option<String>) -> bool {
+    state.vc_source = source;
+    resolve(state).await
+}
+
+/// VC takes priority over NC; if neither has a candidate source, tear down
+/// (no virtual mic at all — apps fall back to whatever they had selected).
+async fn resolve(state: &mut MicRouterState) -> bool {
+    match resolve_master(&state.vc_source, &state.nc_source) {
+        Some(master) => update(state, &master).await,
+        None => {
+            unload(state).await;
+            true
+        }
+    }
+}
+
+/// Pure priority pick: VC > NC > none. Factored out of `resolve()` so the
+/// precedence rule is directly testable without a running PipeWire.
+fn resolve_master(vc_source: &Option<String>, nc_source: &Option<String>) -> Option<String> {
+    vc_source.clone().or_else(|| nc_source.clone())
+}
+
 /// Point `Arctis_Manager_Mic` at `master`.
 /// Reloads the module only when `master` changes or the module is absent.
 /// Returns `true` on success.
-pub async fn update(state: &mut MicRouterState, master: &str) -> bool {
+async fn update(state: &mut MicRouterState, master: &str) -> bool {
     if state.current_master.as_deref() == Some(master) && state.module_id.is_some() {
         return true;
     }
@@ -41,8 +78,13 @@ pub async fn update(state: &mut MicRouterState, master: &str) -> bool {
     load(state, master).await
 }
 
-/// Unload `Arctis_Manager_Mic` if loaded.
+/// Unconditionally unload `Arctis_Manager_Mic` and forget both candidate
+/// sources. Used at daemon shutdown; feature code should use
+/// `set_nc_source`/`set_vc_source` with `None` instead, so the other
+/// feature's source (if any) still gets applied.
 pub async fn teardown(state: &mut MicRouterState) {
+    state.nc_source = None;
+    state.vc_source = None;
     unload(state).await;
 }
 
@@ -141,6 +183,29 @@ mod tests {
         let s = MicRouterState::new();
         assert!(s.module_id.is_none());
         assert!(s.current_master.is_none());
+    }
+
+    // ── resolve_master priority (pure) ──────────────────────────────────
+
+    #[test]
+    fn resolve_master_vc_wins_over_nc() {
+        assert_eq!(
+            resolve_master(&Some("vc_mic".to_owned()), &Some("nc_mic".to_owned())),
+            Some("vc_mic".to_owned())
+        );
+    }
+
+    #[test]
+    fn resolve_master_falls_back_to_nc_when_vc_absent() {
+        assert_eq!(
+            resolve_master(&None, &Some("nc_mic".to_owned())),
+            Some("nc_mic".to_owned())
+        );
+    }
+
+    #[test]
+    fn resolve_master_none_when_both_absent() {
+        assert_eq!(resolve_master(&None, &None), None);
     }
 
     #[test]

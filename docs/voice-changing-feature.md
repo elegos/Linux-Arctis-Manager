@@ -8,7 +8,7 @@ The Voice Changer adds real-time microphone processing on top of the existing au
 - **AI Voice Changer (RVC)** — neural voice conversion using community `.pth` models. Requires a compatible GPU (NVIDIA/AMD via CUDA/ROCm, or Intel GPU/NPU via OpenVINO).
 
 > [!IMPORTANT]
-> **Status**: fully implemented on the legacy Python daemon; **partially ported** to the v3 Rust engine (`daemon/engine/`) — source listing, LADSPA effect chain, and HuggingFace/model management are done; calibration recording is done but rendering (and neural inference generally) is not started, since it needs the inference engine first. Tracked as epic **[E10]** in [`v3-backlog.md`](v3-backlog.md) (story-level status) and itemised in [`v2-v3-gaps.md`](v2-v3-gaps.md#voice-changer-vc). This document describes the **target v3 architecture**; sections describing the current Python implementation are marked as such.
+> **Status**: fully implemented on the legacy Python daemon; **partially ported** to the v3 Rust engine (`daemon/engine/`) — source listing, LADSPA effect chain, HuggingFace/model management, calibration recording, and the `VcInterface` D-Bus service exposing all of it are done. Calibration rendering and neural inference are not started — they need the inference engine. **The GUI still talks to the legacy Python daemon** (`vc_widget.py`/`vc_calibration_wizard.py` not yet cut over), so end users don't see any of this v3 work yet. Tracked as epic **[E10]** in [`v3-backlog.md`](v3-backlog.md) (story-level status) and itemised in [`v2-v3-gaps.md`](v2-v3-gaps.md#voice-changer-vc). This document describes the **target v3 architecture**; sections describing the current Python implementation are marked as such.
 
 The Voice Changer is one of several D-Bus clients of the daemon — the GUI is not privileged over any other client. Consequently **all voice-changer logic lives in the daemon**: PipeWire graph management, settings persistence, calibration, model management, and (target state) neural inference. Clients only send settings and render state.
 
@@ -16,7 +16,7 @@ The Voice Changer is one of several D-Bus clients of the daemon — the GUI is n
 
 ## Migration approach
 
-The Python implementation (`src/linux_arctis_manager/voice_changer/`) is already close to server-authoritative: its D-Bus service (`ArctisManagerDbusVCService`, 19 methods + 6 progress/completion signals) already owns settings, the LADSPA chain, calibration recording/rendering, and HuggingFace model search/download. The GUI (`gui/vc_widget.py`, `gui/vc_calibration_wizard.py`) is a thin client that polls and renders — with one exception shared with the NC and sidetone panels: it opens its own `pulsectl` connection to list microphone sources instead of asking the daemon. That gap is closed generically for all mic-consuming panels (see [E-transversal] below), not specifically for VC.
+The Python implementation (`src/linux_arctis_manager/voice_changer/`) is already close to server-authoritative: its D-Bus service (`ArctisManagerDbusVCService`, 19 methods + 6 progress/completion signals) already owns settings, the LADSPA chain, calibration recording/rendering, and HuggingFace model search/download. The GUI (`gui/vc_widget.py`, `gui/vc_calibration_wizard.py`) is a thin client that polls and renders — with one exception shared with the NC and sidetone panels: it opens its own `pulsectl` connection to list microphone sources instead of asking the daemon. That gap was closed generically for all mic-consuming panels in Phase 1 (`GetListOptions("pulse_audio_sources")`), not specifically for VC.
 
 So this is **not** a "move logic out of the GUI" refactor — it is a straight **Python → Rust port** of server-side logic that is already in the right place, following the patterns `daemon/engine/src/nc_manager.rs` (PipeWire filter-chain) and `daemon/engine/src/eq/ladspa.rs` (LADSPA hosting) already established for Noise Cancellation and EQ.
 
@@ -30,10 +30,11 @@ flowchart LR
     P2["Phase 2\nvc_config.rs +\nvc_ladspa_chain.rs"]:::done
     P3["Phase 3\nvc_models.rs + vc_hf_client.rs\n+ vc_base_models.rs"]:::done
     P4["Phase 4\nvc_calibration.rs\n(recording done, render blocked)"]:::partial
-    P5["Phase 5\nVcInterface (D-Bus)\n+ mic_router hookup"]:::todo
+    P5a["Phase 5a\nVcInterface (D-Bus)\n+ mic_router hookup"]:::done
+    P5b["Phase 5b\nGUI cutover"]:::todo
     P6["Phase 6\ninference/ (ort engine,\nretrieval, providers)"]:::todo
 
-    P1 --> P2 --> P3 --> P4 --> P5 --> P6
+    P1 --> P2 --> P3 --> P4 --> P5a --> P5b --> P6
 ```
 
 ---
@@ -58,7 +59,7 @@ Flat files (`vc_*.rs`), matching the project's existing convention for single/fe
 | `vc/inference/engine.rs` | `ort` session(s): ContentVec → RMVPE (f0) → retrieval blend → synthesizer | `pipeline.py`, `rmvpe.py`, `synth_modules.py` | — | Not started |
 | `vc/inference/providers.rs` | Execution-provider selection (CUDA/ROCm/OpenVINO/CPU) | `rvc/registry.py`, `rvc/pytorch_impl.py`, `rvc/openvino_impl.py` | — | Not started |
 
-None of the completed modules are wired into a D-Bus interface yet (Phase 5, `VcInterface`) — each carries `#![allow(dead_code)]` with a comment pointing here in the meantime, and is exercised directly by its own unit tests.
+All completed modules are wired into `VcInterface` (Phase 5a) — see the D-Bus interface section below. `vc_calibration.rs` keeps a narrow `#![allow(dead_code)]` for the pieces that genuinely aren't reachable yet (`RenderResult`, `CalibrationState::{Rendering,Done}`) pending [E10-S6b].
 
 > [!NOTE]
 > `pytorch_impl.py` and `openvino_impl.py` collapse into a **single** Rust module. Both existing Python backends already require `.pth → ONNX` export as their real bottleneck (OpenVINO explicitly; PyTorch implicitly, since `ort` needs the same graph). `providers.rs` picks the ONNX Runtime execution provider instead of choosing between two separate backend implementations.
@@ -130,19 +131,28 @@ Local model files, calibration recordings, and downloaded base models (RMVPE/Con
 
 ---
 
-## D-Bus interface (target)
+## D-Bus interface
 
-Bus name: `name.giacomofurlan.ArctisManager.Next.VC` (unchanged), same namespace as `...Next.NC` / `...Next.EQ`. Method names are kept close to the current Python service to minimise the diff in `gui/dbus_wrapper.py` and `gui/vc_widget.py` when the GUI cuts over in Phase 5.
+Bus name: `name.giacomofurlan.ArctisManager.Next.VC`, same namespace as `...Next.NC` / `...Next.EQ`. Method names are kept close to the current Python service to minimise the diff in `gui/dbus_wrapper.py` and `gui/vc_widget.py` for the GUI cutover ([E10-S5b]).
 
-| Category | Methods |
-|---|---|
-| Capabilities & settings | `GetVCCapabilities`, `GetVCSettings`, `SetVCSettings` |
-| RVC runtime | `GetRVCModels`, `GetRVCMetrics`, `SetRVCLiveParams` |
-| Calibration | `CalibrationStartRecording`, `CalibrationStopRecording`, `CalibrationStartRender`, `CalibrationGetStatus` |
-| Model management | `DeleteRVCModel`, `DownloadBaseModels`, `SearchHFModels`, `ListRepoFiles`, `DownloadHFModel`, `GetHFToken`, `SetHFToken` |
-| GPU / deps | `DetectGPU` |
+| Category | Methods | Status |
+|---|---|---|
+| Capabilities & settings | `GetVCCapabilities`, `GetVCSettings`, `SetVCSettings` | Done |
+| Local model management | `GetRVCModels`, `DeleteRVCModel` | Done |
+| HuggingFace | `SearchHFModels`, `ListRepoFiles`, `DownloadHFModel`, `GetHFToken`, `SetHFToken` | Done |
+| Base models | `DownloadBaseModels` (status folded into `GetVCCapabilities`'s `rvc.base_models`) | Done |
+| Calibration | `CalibrationStartRecording`, `CalibrationStopRecording`, `CalibrationGetStatus` | Done |
+| Calibration render | `CalibrationStartRender` | **Not in the interface** — needs [E10-S6b] |
+| RVC runtime | `GetRVCMetrics`, `SetRVCLiveParams` | **Not in the interface** — needs [E10-S6a] |
+| GPU / deps | `DetectGPU` | **Not in the interface** — needs [E10-S6a]; no `InstallAIDeps` equivalent, the Rust daemon has no runtime Python deps to install |
 
-Signals: `VCChanged` (settings), plus progress/completion pairs for installs/downloads (`InstallProgress`/`InstallComplete`, `DownloadProgress`/`DownloadComplete`, `BaseModelProgress`/`BaseModelComplete`) — same pattern as `EQChanged`/`NCChanged`.
+Methods marked "not in the interface" are omitted rather than stubbed — calling one is an UnknownMethod D-Bus error. `GetVCCapabilities` reports `rvc.available: false`, so clients should gate their RVC UI on that instead of calling them.
+
+Signals: `VCChanged` (settings), `DownloadProgress`/`DownloadComplete` (HF downloads), `BaseModelProgress`/`BaseModelComplete` — same pattern as `EQChanged`/`NCChanged`. No byte-level download progress yet, only start/complete — `vc_hf_client`/`vc_base_models` don't stream progress internally.
+
+### Mic priority fix
+
+Wiring `SetVCSettings` surfaced a real bug opportunity in `mic_router.rs`: it previously took whichever of `SetNCSettings`/`SetVCSettings` called it last, with no actual precedence — the "VC output > NC output" comment in `mic_router.rs` wasn't enforced by anything before VC had a caller. It now tracks both candidate sources (`set_nc_source`/`set_vc_source`) and resolves priority on every change, independent of call order.
 
 ---
 

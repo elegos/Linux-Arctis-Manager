@@ -21,6 +21,8 @@ use crate::eq::settings::{load_eq_settings, save_eq_settings};
 use crate::eq_manager::{self as eq_manager, EqRuntime};
 use crate::general_settings::GeneralSettings;
 use crate::state::{AppState, DeviceCommand, SignalEvent};
+use crate::vc_calibration::CalibrationSession;
+use crate::vc_ladspa_chain::VcLadspaRuntime;
 
 // ── D-Bus constants ───────────────────────────────────────────────────────────
 
@@ -30,6 +32,7 @@ const SETTINGS_PATH: &str = "/name/giacomofurlan/ArctisManager/Next/Settings";
 const CONFIG_PATH: &str = "/name/giacomofurlan/ArctisManager/Next/Config";
 const EQ_PATH: &str = "/name/giacomofurlan/ArctisManager/Next/EQ";
 const NC_PATH: &str = "/name/giacomofurlan/ArctisManager/Next/NC";
+const VC_PATH: &str = "/name/giacomofurlan/ArctisManager/Next/VC";
 
 // ── Status interface ──────────────────────────────────────────────────────────
 
@@ -843,14 +846,8 @@ impl NcInterface {
 
         {
             let mut mr = self.mic_router.lock().await;
-            match output_source {
-                Some(src) => {
-                    crate::mic_router::update(&mut mr, src).await;
-                }
-                None => {
-                    crate::mic_router::teardown(&mut mr).await;
-                }
-            }
+            let source = output_source.map(str::to_owned);
+            crate::mic_router::set_nc_source(&mut mr, source).await;
         }
 
         let out_json = serde_json::to_string(&cfg).unwrap_or_else(|_| "{}".to_string());
@@ -862,12 +859,259 @@ impl NcInterface {
     async fn nc_changed(emitter: &SignalEmitter<'_>, config_json: &str) -> zbus::Result<()>;
 }
 
+// ── VC interface ──────────────────────────────────────────────────────────────
+//
+// Covers everything server-side today: the LADSPA effect chain, local model
+// management, HuggingFace search/download, base model download, and
+// calibration *recording*. RVC live conversion, RVC metrics/live-param
+// tuning, GPU detection, and calibration *rendering* are not exposed here —
+// they need the inference engine ([E10-S6a]/[E10-S6b], see
+// docs/voice-changing-feature.md). `GetVCCapabilities` reports
+// `rvc.available: false` so clients can gate their RVC UI on it instead of
+// hitting an UnknownMethod error.
+
+use crate::vc_config::VcLadspaConfig;
+
+fn vc_config_path(base: &std::path::Path) -> std::path::PathBuf {
+    base.join("vc_config.json")
+}
+
+fn load_vc_config(base: &std::path::Path) -> VcLadspaConfig {
+    std::fs::read_to_string(vc_config_path(base))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn save_vc_config(base: &std::path::Path, cfg: &VcLadspaConfig) -> bool {
+    let path = vc_config_path(base);
+    let Ok(json) = serde_json::to_string_pretty(cfg) else {
+        return false;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::write(&path, json).is_ok()
+}
+
+struct VcInterface {
+    settings_base_dir: std::path::PathBuf,
+    signal_tx: broadcast::Sender<SignalEvent>,
+    vc_runtime: Arc<Mutex<VcLadspaRuntime>>,
+    mic_router: Arc<Mutex<MicRouterState>>,
+    calibration: Arc<Mutex<CalibrationSession>>,
+}
+
+#[interface(name = "name.giacomofurlan.ArctisManager.Next.VC")]
+impl VcInterface {
+    #[zbus(name = "GetVCCapabilities")]
+    async fn get_vc_capabilities(&self) -> String {
+        let ladspa = crate::vc_ladspa_chain::capabilities();
+        let base_models_dir = crate::vc_base_models::base_models_dir(&self.settings_base_dir);
+        let (rmvpe, contentvec) = crate::vc_base_models::base_models_status(&base_models_dir);
+        serde_json::json!({
+            "ladspa": ladspa,
+            "rvc": {
+                "available": false,
+                "base_models": { "rmvpe": rmvpe, "contentvec": contentvec },
+            },
+        })
+        .to_string()
+    }
+
+    #[zbus(name = "GetVCSettings")]
+    async fn get_vc_settings(&self) -> String {
+        let cfg = load_vc_config(&self.settings_base_dir);
+        serde_json::to_string(&cfg).unwrap_or_else(|_| "{}".to_string())
+    }
+
+    #[zbus(name = "SetVCSettings")]
+    async fn set_vc_settings(&self, json: &str) -> bool {
+        let cfg: VcLadspaConfig = match serde_json::from_str(json) {
+            Ok(c) => c,
+            Err(e) => {
+                warn!("SetVCSettings: invalid JSON: {e}");
+                return false;
+            }
+        };
+
+        if !save_vc_config(&self.settings_base_dir, &cfg) {
+            warn!("SetVCSettings: failed to persist config");
+        }
+
+        let output_source = {
+            let mut rt = self.vc_runtime.lock().await;
+            crate::vc_ladspa_chain::apply_vc_ladspa(&cfg, &mut rt).await
+        };
+
+        {
+            let mut mr = self.mic_router.lock().await;
+            let source = output_source.map(str::to_owned);
+            crate::mic_router::set_vc_source(&mut mr, source).await;
+        }
+
+        let out_json = serde_json::to_string(&cfg).unwrap_or_else(|_| "{}".to_string());
+        let _ = self.signal_tx.send(SE::VCChanged { json: out_json });
+        true
+    }
+
+    #[zbus(signal)]
+    async fn vc_changed(emitter: &SignalEmitter<'_>, settings_json: &str) -> zbus::Result<()>;
+
+    // ── Local model management ──────────────────────────────────────────
+
+    #[zbus(name = "GetRVCModels")]
+    async fn get_rvc_models(&self) -> String {
+        let models = crate::vc_models::list_models(&self.settings_base_dir);
+        serde_json::to_string(&models).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    #[zbus(name = "DeleteRVCModel")]
+    async fn delete_rvc_model(&self, name: &str) -> bool {
+        crate::vc_models::delete_model(&self.settings_base_dir, name)
+    }
+
+    // ── HuggingFace ──────────────────────────────────────────────────────
+
+    #[zbus(name = "GetHFToken")]
+    async fn get_hf_token(&self) -> String {
+        crate::vc_hf_client::get_token(&self.settings_base_dir).unwrap_or_default()
+    }
+
+    #[zbus(name = "SetHFToken")]
+    async fn set_hf_token(&self, token: &str) -> bool {
+        crate::vc_hf_client::set_token(&self.settings_base_dir, token).is_ok()
+    }
+
+    #[zbus(name = "SearchHFModels")]
+    async fn search_hf_models(&self, query: &str, sort_by: &str) -> String {
+        let token = crate::vc_hf_client::get_token(&self.settings_base_dir);
+        match crate::vc_hf_client::search_models(query, sort_by, 20, token.as_deref()).await {
+            Ok(models) => serde_json::to_string(&models).unwrap_or_else(|_| "[]".to_string()),
+            Err(e) => {
+                warn!("SearchHFModels: {e}");
+                "[]".to_string()
+            }
+        }
+    }
+
+    #[zbus(name = "ListRepoFiles")]
+    async fn list_repo_files(&self, repo_id: &str) -> String {
+        let token = crate::vc_hf_client::get_token(&self.settings_base_dir);
+        match crate::vc_hf_client::list_repo_model_files(repo_id, token.as_deref()).await {
+            Ok(files) => serde_json::to_string(&files).unwrap_or_else(|_| "[]".to_string()),
+            Err(e) => {
+                warn!("ListRepoFiles({repo_id}): {e}");
+                "[]".to_string()
+            }
+        }
+    }
+
+    /// Fire-and-forget: downloads in a background task, reporting via
+    /// `DownloadProgress`/`DownloadComplete` signals (no byte-level progress
+    /// yet — `vc_hf_client::download_model` does not stream progress today).
+    #[zbus(name = "DownloadHFModel")]
+    async fn download_hf_model(&self, repo_id: &str, filename: &str) {
+        let base = self.settings_base_dir.clone();
+        let signal_tx = self.signal_tx.clone();
+        let repo_id = repo_id.to_owned();
+        let filename = filename.to_owned();
+        tokio::spawn(async move {
+            let _ = signal_tx.send(SE::VCDownloadProgress {
+                message: format!("Downloading {filename}..."),
+            });
+            let token = crate::vc_hf_client::get_token(&base);
+            let dest = crate::vc_models::models_dir(&base);
+            let result =
+                crate::vc_hf_client::download_model(&repo_id, &filename, &dest, token.as_deref())
+                    .await;
+            let json = match result {
+                Ok(outcome) => serde_json::json!({
+                    "success": true,
+                    "names": outcome.model_names,
+                    "index_downloaded": outcome.index_downloaded,
+                })
+                .to_string(),
+                Err(e) => {
+                    serde_json::json!({ "success": false, "error": e.to_string() }).to_string()
+                }
+            };
+            let _ = signal_tx.send(SE::VCDownloadComplete { json });
+        });
+    }
+
+    #[zbus(signal)]
+    async fn download_progress(emitter: &SignalEmitter<'_>, message: &str) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    async fn download_complete(emitter: &SignalEmitter<'_>, result_json: &str) -> zbus::Result<()>;
+
+    // ── Base models (RMVPE / ContentVec) ────────────────────────────────
+
+    #[zbus(name = "DownloadBaseModels")]
+    async fn download_base_models(&self) {
+        let models_dir = crate::vc_base_models::base_models_dir(&self.settings_base_dir);
+        let signal_tx = self.signal_tx.clone();
+        tokio::spawn(async move {
+            let _ = signal_tx.send(SE::VCBaseModelProgress {
+                message: "Downloading base models...".to_string(),
+            });
+            let json = match crate::vc_base_models::download_base_models(&models_dir).await {
+                Ok(()) => serde_json::json!({ "success": true }).to_string(),
+                Err(e) => {
+                    serde_json::json!({ "success": false, "error": e.to_string() }).to_string()
+                }
+            };
+            let _ = signal_tx.send(SE::VCBaseModelComplete { json });
+        });
+    }
+
+    #[zbus(signal)]
+    async fn base_model_progress(emitter: &SignalEmitter<'_>, message: &str) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    async fn base_model_complete(
+        emitter: &SignalEmitter<'_>,
+        result_json: &str,
+    ) -> zbus::Result<()>;
+
+    // ── Calibration (recording only — see module doc comment) ──────────
+
+    #[zbus(name = "CalibrationStartRecording")]
+    async fn calibration_start_recording(&self, source_id: &str) -> bool {
+        let cache_base = crate::vc_calibration::user_cache_base_dir();
+        let mut session = self.calibration.lock().await;
+        session.record_start(&cache_base, source_id).await
+    }
+
+    #[zbus(name = "CalibrationStopRecording")]
+    async fn calibration_stop_recording(&self) -> String {
+        let cache_base = crate::vc_calibration::user_cache_base_dir();
+        let mut session = self.calibration.lock().await;
+        session
+            .record_stop(&cache_base)
+            .await
+            .map(|p| p.display().to_string())
+            .unwrap_or_default()
+    }
+
+    #[zbus(name = "CalibrationGetStatus")]
+    async fn calibration_get_status(&self) -> String {
+        let session = self.calibration.lock().await;
+        serde_json::to_string(&session.status()).unwrap_or_else(|_| "{}".to_string())
+    }
+}
+
 // ── Service startup ───────────────────────────────────────────────────────────
 
 /// Register all interfaces on the session bus and spawn a background task that
 /// forwards `SignalEvent`s from device tasks to D-Bus signals.
 ///
 /// Returns the `Connection` so the caller can keep it alive.
+// One parameter per piece of shared feature state passed in from `main`,
+// same shape as the other per-feature runtimes already here (nc_runtime,
+// mic_router) — a wrapper struct would just move the same list elsewhere.
+#[allow(clippy::too_many_arguments)]
 pub async fn start_dbus_service(
     state: Arc<Mutex<AppState>>,
     mut signal_rx: broadcast::Receiver<SignalEvent>,
@@ -876,6 +1120,8 @@ pub async fn start_dbus_service(
     audio_shared: Arc<Mutex<Option<AudioSetup>>>,
     nc_runtime: Arc<Mutex<NcRuntime>>,
     mic_router: Arc<Mutex<MicRouterState>>,
+    vc_runtime: Arc<Mutex<VcLadspaRuntime>>,
+    calibration: Arc<Mutex<CalibrationSession>>,
 ) -> zbus::Result<zbus::Connection> {
     let eq_runtime = EqRuntime::new();
     let focus_backend = crate::focus_monitor::detect();
@@ -929,10 +1175,20 @@ pub async fn start_dbus_service(
         .serve_at(
             NC_PATH,
             NcInterface {
-                settings_base_dir,
+                settings_base_dir: settings_base_dir.clone(),
                 signal_tx: signal_tx.clone(),
                 nc_runtime,
+                mic_router: Arc::clone(&mic_router),
+            },
+        )?
+        .serve_at(
+            VC_PATH,
+            VcInterface {
+                settings_base_dir,
+                signal_tx: signal_tx.clone(),
+                vc_runtime,
                 mic_router,
+                calibration,
             },
         )?
         .build()
@@ -941,6 +1197,7 @@ pub async fn start_dbus_service(
     let status_emitter = SignalEmitter::new(&conn, STATUS_PATH)?.into_owned();
     let settings_emitter = SignalEmitter::new(&conn, SETTINGS_PATH)?.into_owned();
     let eq_emitter = SignalEmitter::new(&conn, EQ_PATH)?.into_owned();
+    let vc_emitter = SignalEmitter::new(&conn, VC_PATH)?.into_owned();
     let nc_emitter = SignalEmitter::new(&conn, NC_PATH)?.into_owned();
 
     tokio::spawn(crate::stream_monitor::run(
@@ -994,6 +1251,31 @@ pub async fn start_dbus_service(
                 SignalEvent::NCChanged { json } => {
                     if let Err(e) = NcInterface::nc_changed(&nc_emitter, &json).await {
                         error!("NCChanged signal failed: {e}");
+                    }
+                }
+                SignalEvent::VCChanged { json } => {
+                    if let Err(e) = VcInterface::vc_changed(&vc_emitter, &json).await {
+                        error!("VCChanged signal failed: {e}");
+                    }
+                }
+                SignalEvent::VCDownloadProgress { message } => {
+                    if let Err(e) = VcInterface::download_progress(&vc_emitter, &message).await {
+                        error!("VCDownloadProgress signal failed: {e}");
+                    }
+                }
+                SignalEvent::VCDownloadComplete { json } => {
+                    if let Err(e) = VcInterface::download_complete(&vc_emitter, &json).await {
+                        error!("VCDownloadComplete signal failed: {e}");
+                    }
+                }
+                SignalEvent::VCBaseModelProgress { message } => {
+                    if let Err(e) = VcInterface::base_model_progress(&vc_emitter, &message).await {
+                        error!("VCBaseModelProgress signal failed: {e}");
+                    }
+                }
+                SignalEvent::VCBaseModelComplete { json } => {
+                    if let Err(e) = VcInterface::base_model_complete(&vc_emitter, &json).await {
+                        error!("VCBaseModelComplete signal failed: {e}");
                     }
                 }
                 SignalEvent::DeviceConnected {

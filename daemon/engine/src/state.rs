@@ -70,6 +70,21 @@ pub enum SignalEvent {
     NCChanged {
         json: String,
     },
+    VCChanged {
+        json: String,
+    },
+    VCDownloadProgress {
+        message: String,
+    },
+    VCDownloadComplete {
+        json: String,
+    },
+    VCBaseModelProgress {
+        message: String,
+    },
+    VCBaseModelComplete {
+        json: String,
+    },
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

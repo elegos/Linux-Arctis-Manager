@@ -3,10 +3,6 @@
 // Direct port of `voice_changer/rvc/model_manager.py` (`RVCModelManager`).
 // Models live in `<settings_base_dir>/rvc_models/`, one `.pth` file per
 // model, optionally paired with a `.index` FAISS feature-retrieval file.
-//
-// Not yet wired into dbus.rs — lands with the `VcInterface` D-Bus service
-// in a later phase ([E10-S5], see docs/voice-changing-feature.md).
-#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 
@@ -79,6 +75,9 @@ pub fn list_models(base: &Path) -> Vec<RvcModel> {
     models
 }
 
+/// Not called yet — the RVC live chain and calibration will need this to
+/// resolve a model by name once [E10-S6a] lands.
+#[allow(dead_code)]
 pub fn find_model(base: &Path, name: &str) -> Option<RvcModel> {
     list_models(base).into_iter().find(|m| m.name == name)
 }
