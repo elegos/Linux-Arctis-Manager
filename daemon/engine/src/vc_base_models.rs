@@ -3,10 +3,6 @@
 // HuggingFace, with SHA-256 verification.
 //
 // Direct port of `voice_changer/rvc/model_downloader.py`.
-//
-// Not yet wired into dbus.rs — lands with the `VcInterface` D-Bus service
-// in a later phase ([E10-S5], see docs/voice-changing-feature.md).
-#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 

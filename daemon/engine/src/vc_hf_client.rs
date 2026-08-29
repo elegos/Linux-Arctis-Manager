@@ -5,12 +5,6 @@
 // the `huggingface_hub` Python SDK. `.pth` downloads and `.zip` archives
 // (RVC WebUI sometimes bundles `.pth` + `.index` together) are both
 // supported, each followed by a best-effort matching `.index` sidecar fetch.
-//
-// Not yet wired into dbus.rs — the `VcInterface` D-Bus service lands in a
-// later phase ([E10-S5], see docs/voice-changing-feature.md). Unit tests
-// below exercise the pure parts (URL building, JSON parsing, tie-break
-// logic, zip extraction) directly in the meantime.
-#![allow(dead_code)]
 
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
@@ -391,11 +385,6 @@ async fn download_matching_index(
     std::fs::write(dest_folder.join(format!("{stem}.index")), &bytes).is_ok()
 }
 
-pub fn delete_model_files(dest_folder: &Path, stem: &str) -> bool {
-    let path = dest_folder.join(format!("{stem}.pth"));
-    path.is_file() && std::fs::remove_file(&path).is_ok()
-}
-
 // ── HTTP plumbing ────────────────────────────────────────────────────────────
 
 #[derive(Debug)]
@@ -613,23 +602,6 @@ mod tests {
             repo_info_url("someuser/my-model"),
             "https://huggingface.co/api/models/someuser/my-model"
         );
-    }
-
-    // ── Delete ───────────────────────────────────────────────────────────
-
-    #[test]
-    fn delete_model_files_removes_pth() {
-        let dir = tempdir().unwrap();
-        let pth = dir.path().join("voice_a.pth");
-        std::fs::write(&pth, b"").unwrap();
-        assert!(delete_model_files(dir.path(), "voice_a"));
-        assert!(!pth.exists());
-    }
-
-    #[test]
-    fn delete_model_files_false_when_absent() {
-        let dir = tempdir().unwrap();
-        assert!(!delete_model_files(dir.path(), "missing"));
     }
 
     // ── Zip extraction ───────────────────────────────────────────────────

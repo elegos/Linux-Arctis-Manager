@@ -81,8 +81,8 @@ V2 bug: stored `node.nick` as the device id — rename breaks redirect. V3 fix: 
 | Redirect default sink on headset connect/disconnect | yes (`GeneralSettings`) | **Done** — hooks in `run_device` and event-forwarding task |
 | EQ LADSPA loopback routing (`Arctis_Media` → mbeq) | yes | **Done** — `eq_manager`: swaps channel loopback target, live gain update without reload |
 | NC virtual mic source (`Arctis_NC_Mic`) | yes | **Done** — `nc_manager.rs`, single-node PipeWire filter-chain |
-| VC virtual sink (`Arctis_VC_Sink`) | yes | **Missing** |
-| Mic routing chain (NC → VC → `Arctis_Manager_Mic`) | yes | **Partial** — `mic_router.rs` implements the NC → `Arctis_Manager_Mic` leg and already anticipates VC priority (`"Priority: VC output > NC output > teardown"`); VC leg missing until [E10] |
+| VC virtual mic source (`Arctis_VC_Sink` in V2) | yes | **Done** — `vc_ladspa_chain.rs`; V3 exposes `Arctis_VC_Mic` directly as an Audio/Source via the filter-chain (no separate null-sink, same modernisation NC underwent) |
+| Mic routing chain (NC → VC → `Arctis_Manager_Mic`) | yes | **Done** — `mic_router.rs` resolves VC > NC > teardown priority (see Voice changer section below) |
 
 ---
 
@@ -162,20 +162,25 @@ bands:
 
 ## Voice changer (VC)
 
-Everything in this section is **Missing** in V3. Tracked as epic **[E10]** in [`v3-backlog.md`](v3-backlog.md); target architecture documented in [`voice-changing-feature.md`](voice-changing-feature.md).
+Tracked as epic **[E10]** in [`v3-backlog.md`](v3-backlog.md); target architecture documented in [`voice-changing-feature.md`](voice-changing-feature.md). Daemon-side is mostly ported; the GUI still talks to the legacy Python daemon's VC service (**[E10-S5b]**), so end users don't see any of this yet.
 
-| Feature | V2 |
-|---|---|
-| `…VC` D-Bus interface (18 methods, 4 signals) | `ArctisManagerDbusVCService` |
-| LADSPA chain: pitch / chorus / delay / distortion / reverb | `VCSettings`, `VoiceChangerManager` |
-| RVC (Retrieval-based Voice Conversion) inference | `rvc/pipeline.py` |
-| Per-model param snapshot | `VCSettings.rvc_model_params` |
-| Live parameter update without pipeline rebuild | `SetRVCLiveParams` |
-| Calibration wizard (record → render variants → pick) | `Calibration{Start,Stop}Recording`, `CalibrationStartRender` |
-| GPU detection | `ai_deps.py` |
-| AI deps install (pip in venv, with progress signal) | `InstallAIDeps`, `InstallProgress/Complete` |
-| HuggingFace model search / browse / download | `SearchHFModels`, `DownloadHFModel`, … |
-| HF token management | `GetHFToken`, `SetHFToken` |
+| Feature | V2 | V3 |
+|---|---|---|
+| `…VC` D-Bus interface | `ArctisManagerDbusVCService` (18 methods, 4 signals) | **Done** for LADSPA + model management + calibration recording — `VcInterface`, same bus namespace |
+| LADSPA chain: pitch / chorus / delay / distortion / reverb | `VCSettings`, `VoiceChangerManager` (module-chain) | **Done** — `vc_ladspa_chain.rs`, single-node PipeWire filter-chain (not module chaining) |
+| Local model scan / delete | `RVCModelManager` | **Done** — `vc_models.rs` |
+| HuggingFace model search / browse / download (`.pth` and `.zip`) | `SearchHFModels`, `DownloadHFModel`, … | **Done** — `vc_hf_client.rs`, public HF Hub REST API via `reqwest` |
+| HF token management | `GetHFToken`, `SetHFToken` | **Done** |
+| Base model (RMVPE/ContentVec) download + checksum | `model_downloader.py` | **Done** — `vc_base_models.rs`, folded into `GetVCCapabilities` |
+| Calibration recording (record → WAV, peak detection) | `Calibration{Start,Stop}Recording` | **Done** — `vc_calibration.rs` |
+| Calibration rendering (render variants, pick by ear) | `CalibrationStartRender` | **Missing** — needs the inference engine ([E10-S6b]) |
+| RVC (Retrieval-based Voice Conversion) inference | `rvc/pipeline.py` | **Missing** ([E10-S6a]) |
+| Per-model param snapshot | `VCSettings.rvc_model_params` | **Missing** |
+| Live parameter update without pipeline rebuild | `SetRVCLiveParams` | **Missing** |
+| GPU detection | `ai_deps.py` | **Missing** ([E10-S6a] execution-provider selection) |
+| AI deps install (pip in venv, with progress signal) | `InstallAIDeps`, `InstallProgress/Complete` | **N/A** — Rust daemon has no runtime Python deps to install |
+| Mic priority arbitration (VC output takes precedence over NC) | `MicRouter` | **Done** — `mic_router.rs` now tracks both candidate sources and resolves VC > NC > teardown independently of call order (previously whichever of NC/VC's D-Bus handler ran last won outright) |
+| GUI wired to the V3 interface | — | **Missing** ([E10-S5b]) |
 
 ---
 

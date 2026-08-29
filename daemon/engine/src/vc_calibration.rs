@@ -7,14 +7,12 @@
 // `render_start`/`_render` are NOT ported here: they require the actual RVC
 // inference pipeline (ContentVec → RMVPE → synthesizer) to convert the
 // recording through candidate parameter sets, and that pipeline does not
-// exist in Rust yet — see [E10-S6] in docs/v3-backlog.md. `CalibrationState`
-// still declares `Rendering`/`Done` for the eventual full D-Bus contract
-// shape, but this module can only ever produce `Idle`/`Recording`/
-// `Recorded`/`Error` until rendering lands.
-//
-// Not yet wired into dbus.rs — the `VcInterface` D-Bus service lands in a
-// later phase ([E10-S5], see docs/voice-changing-feature.md).
-#![allow(dead_code)]
+// exist in Rust yet — see [E10-S6a]/[E10-S6b] in docs/v3-backlog.md.
+// `CalibrationState::Rendering`/`Done` and `RenderResult` are declared for
+// that eventual full D-Bus contract shape, but nothing constructs them yet
+// — this module can only ever produce `Idle`/`Recording`/`Recorded`/`Error`
+// until [E10-S6b] wires rendering in.
+#![allow(dead_code)] // RenderResult, CalibrationState::{Rendering,Done}: see above.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
