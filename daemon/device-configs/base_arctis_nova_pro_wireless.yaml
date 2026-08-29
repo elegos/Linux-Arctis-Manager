@@ -425,7 +425,7 @@ sync_events:
   0xBF:
     emit: muted_mic_brightness_changed
     fields:
-      - {name: muted_mic_brightness, byte: 2, transform: mic_vol_to_percent, display_type: percentage}
+      - {name: muted_mic_brightness, byte: 2}
     side_effects:
       - call: sync_all
 
@@ -466,7 +466,7 @@ sync_read:
     maps:
       - {emit: bluetooth_startup_changed,       field: bt_power_default,         display_type: on_off}
       - {emit: bt_call_default_changed,          field: bt_call_default}
-      - {emit: muted_mic_brightness_changed,     field: muted_mic_brightness,     transform: mic_vol_to_percent, display_type: percentage}
+      - {emit: muted_mic_brightness_changed,     field: muted_mic_brightness}
       - {emit: power_inactivity_timer_changed,   field: power_inactivity_timer,   transform: timer_enum_to_minutes}
       - {emit: wireless_mode_changed,            field: wireless_mode}
       - {emit: wireless_connection_changed,      field: radio_connection_status,  transform: radio_connection_to_label}
