@@ -8,7 +8,7 @@ The Voice Changer adds real-time microphone processing on top of the existing au
 - **AI Voice Changer (RVC)** — neural voice conversion using community `.pth` models. Requires a compatible GPU (NVIDIA/AMD via CUDA/ROCm, or Intel GPU/NPU via OpenVINO).
 
 > [!IMPORTANT]
-> **Status**: fully implemented on the legacy Python daemon (branch history up to `develop`/`feature/v3`), **not yet ported** to the v3 Rust engine (`daemon/engine/`). This is the last major feature-parity gap between v2 and v3 — tracked as epic **[E10]** in [`v3-backlog.md`](v3-backlog.md) and itemised in [`v2-v3-gaps.md`](v2-v3-gaps.md#voice-changer-vc). This document describes the **target v3 architecture**; sections describing the current Python implementation are marked as such.
+> **Status**: fully implemented on the legacy Python daemon; **partially ported** to the v3 Rust engine (`daemon/engine/`) — source listing, LADSPA effect chain, and HuggingFace/model management are done; calibration and neural inference are not started. Tracked as epic **[E10]** in [`v3-backlog.md`](v3-backlog.md) (story-level status) and itemised in [`v2-v3-gaps.md`](v2-v3-gaps.md#voice-changer-vc). This document describes the **target v3 architecture**; sections describing the current Python implementation are marked as such.
 
 The Voice Changer is one of several D-Bus clients of the daemon — the GUI is not privileged over any other client. Consequently **all voice-changer logic lives in the daemon**: PipeWire graph management, settings persistence, calibration, model management, and (target state) neural inference. Clients only send settings and render state.
 
@@ -25,10 +25,10 @@ flowchart LR
     classDef done fill:#cce5ff,stroke:#004085,color:#000
     classDef todo fill:#fff3cd,stroke:#b8860b,color:#000
 
-    P1["Phase 1\nGeneric source listing\n(closes pulsectl leak)"]:::todo
-    P2["Phase 2\nvc_config.rs +\nvc_ladspa_chain.rs"]:::todo
-    P3["Phase 3\nmodels.rs + hf_client.rs\n+ base_models.rs"]:::todo
-    P4["Phase 4\ncalibration.rs"]:::todo
+    P1["Phase 1\nGeneric source listing\n(closes pulsectl leak)"]:::done
+    P2["Phase 2\nvc_config.rs +\nvc_ladspa_chain.rs"]:::done
+    P3["Phase 3\nvc_models.rs + vc_hf_client.rs\n+ vc_base_models.rs"]:::done
+    P4["Phase 4\nvc_calibration.rs"]:::todo
     P5["Phase 5\nVcInterface (D-Bus)\n+ mic_router hookup"]:::todo
     P6["Phase 6\ninference/ (ort engine,\nretrieval, providers)"]:::todo
 
@@ -39,19 +39,24 @@ flowchart LR
 
 ## Target architecture
 
-### Module layout (`daemon/engine/src/vc/`)
+### Module layout (`daemon/engine/src/`)
 
-| Module | Responsibility | Python equivalent | Mirrors |
-|---|---|---|---|
-| `config.rs` | Persisted settings (`vc_config.json`), same shape as today's YAML | `voice_changer/settings.py` | `nc_config.rs` |
-| `ladspa_chain.rs` | LADSPA filter-chain graph generation, live control push | `voice_changer/ladspa/{effects,chain}.py` | `nc_manager.rs` |
-| `models.rs` | Local `.pth`/`.index` scan, delete | `voice_changer/rvc/model_manager.py` | — |
-| `hf_client.rs` | HuggingFace search/download over `reqwest` | `voice_changer/rvc/hf_search.py`, `model_downloader.py` | — |
-| `base_models.rs` | RMVPE/ContentVec download + SHA-256 verification | referenced in CHANGELOG (GitHub release download) | — |
-| `calibration.rs` | Guided calibration state machine, `pw-record` subprocess | `voice_changer/rvc/calibration.py` | — |
-| `retrieval.rs` | Weighted k-NN blend over the model's `.index` feature vectors | `pipeline.py` (`faiss.read_index`/`search`) | — |
-| `inference/engine.rs` | `ort` session(s): ContentVec → RMVPE (f0) → retrieval blend → synthesizer | `pipeline.py`, `rmvpe.py`, `synth_modules.py` | — |
-| `inference/providers.rs` | Execution-provider selection (CUDA/ROCm/OpenVINO/CPU) | `rvc/registry.py`, `rvc/pytorch_impl.py`, `rvc/openvino_impl.py` | — |
+Flat files (`vc_*.rs`), matching the project's existing convention for single/few-submodule features (`nc_config.rs`/`nc_manager.rs`) rather than a subdirectory — `eq/` is the exception, used there because EQ has enough submodules (preset, settings, hardware, ladspa) to warrant one. `vc/inference/` (Phase 6) is the one place a subdirectory may make sense once it exists, given it groups 2-3 files of its own.
+
+| Module | Responsibility | Python equivalent | Mirrors | Status |
+|---|---|---|---|---|
+| `vc_config.rs` | Persisted LADSPA settings (`vc_config.json`), same field set as today's YAML | `voice_changer/settings.py` (LADSPA fields) | `nc_config.rs` | Done |
+| `vc_ladspa_chain.rs` | LADSPA filter-chain graph generation, live control push | `voice_changer/ladspa/{effects,chain}.py` | `nc_manager.rs` | Done |
+| `ladspa_util.rs` | Shared LADSPA plugin discovery (extracted from `nc_manager.rs`) | — | — | Done |
+| `vc_models.rs` | Local `.pth`/`.index` scan, delete | `voice_changer/rvc/model_manager.py` | — | Done |
+| `vc_hf_client.rs` | HuggingFace search/repo-listing/download over `reqwest`, `.pth` and `.zip` (`zip`/`flate2`) | `voice_changer/rvc/hf_search.py` | — | Done |
+| `vc_base_models.rs` | RMVPE/ContentVec download + SHA-256 verification | `voice_changer/rvc/model_downloader.py` | — | Done |
+| `vc_calibration.rs` | Guided calibration state machine, `pw-record` subprocess | `voice_changer/rvc/calibration.py` | — | Not started |
+| `vc_retrieval.rs` | Weighted k-NN blend over the model's `.index` feature vectors | `pipeline.py` (`faiss.read_index`/`search`) | — | Not started |
+| `vc/inference/engine.rs` | `ort` session(s): ContentVec → RMVPE (f0) → retrieval blend → synthesizer | `pipeline.py`, `rmvpe.py`, `synth_modules.py` | — | Not started |
+| `vc/inference/providers.rs` | Execution-provider selection (CUDA/ROCm/OpenVINO/CPU) | `rvc/registry.py`, `rvc/pytorch_impl.py`, `rvc/openvino_impl.py` | — | Not started |
+
+None of the completed modules are wired into a D-Bus interface yet (Phase 5, `VcInterface`) — each carries `#![allow(dead_code)]` with a comment pointing here in the meantime, and is exercised directly by its own unit tests.
 
 > [!NOTE]
 > `pytorch_impl.py` and `openvino_impl.py` collapse into a **single** Rust module. Both existing Python backends already require `.pth → ONNX` export as their real bottleneck (OpenVINO explicitly; PyTorch implicitly, since `ort` needs the same graph). `providers.rs` picks the ONNX Runtime execution provider instead of choosing between two separate backend implementations.
