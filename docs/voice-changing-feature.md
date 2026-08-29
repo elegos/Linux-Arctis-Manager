@@ -8,7 +8,7 @@ The Voice Changer adds real-time microphone processing on top of the existing au
 - **AI Voice Changer (RVC)** — neural voice conversion using community `.pth` models. Requires a compatible GPU (NVIDIA/AMD via CUDA/ROCm, or Intel GPU/NPU via OpenVINO).
 
 > [!IMPORTANT]
-> **Status**: fully implemented on the legacy Python daemon; **partially ported** to the v3 Rust engine (`daemon/engine/`) — source listing, LADSPA effect chain, and HuggingFace/model management are done; calibration and neural inference are not started. Tracked as epic **[E10]** in [`v3-backlog.md`](v3-backlog.md) (story-level status) and itemised in [`v2-v3-gaps.md`](v2-v3-gaps.md#voice-changer-vc). This document describes the **target v3 architecture**; sections describing the current Python implementation are marked as such.
+> **Status**: fully implemented on the legacy Python daemon; **partially ported** to the v3 Rust engine (`daemon/engine/`) — source listing, LADSPA effect chain, and HuggingFace/model management are done; calibration recording is done but rendering (and neural inference generally) is not started, since it needs the inference engine first. Tracked as epic **[E10]** in [`v3-backlog.md`](v3-backlog.md) (story-level status) and itemised in [`v2-v3-gaps.md`](v2-v3-gaps.md#voice-changer-vc). This document describes the **target v3 architecture**; sections describing the current Python implementation are marked as such.
 
 The Voice Changer is one of several D-Bus clients of the daemon — the GUI is not privileged over any other client. Consequently **all voice-changer logic lives in the daemon**: PipeWire graph management, settings persistence, calibration, model management, and (target state) neural inference. Clients only send settings and render state.
 
@@ -23,12 +23,13 @@ So this is **not** a "move logic out of the GUI" refactor — it is a straight *
 ```mermaid
 flowchart LR
     classDef done fill:#cce5ff,stroke:#004085,color:#000
+    classDef partial fill:#e2d9f3,stroke:#5a3d99,color:#000
     classDef todo fill:#fff3cd,stroke:#b8860b,color:#000
 
     P1["Phase 1\nGeneric source listing\n(closes pulsectl leak)"]:::done
     P2["Phase 2\nvc_config.rs +\nvc_ladspa_chain.rs"]:::done
     P3["Phase 3\nvc_models.rs + vc_hf_client.rs\n+ vc_base_models.rs"]:::done
-    P4["Phase 4\nvc_calibration.rs"]:::todo
+    P4["Phase 4\nvc_calibration.rs\n(recording done, render blocked)"]:::partial
     P5["Phase 5\nVcInterface (D-Bus)\n+ mic_router hookup"]:::todo
     P6["Phase 6\ninference/ (ort engine,\nretrieval, providers)"]:::todo
 
@@ -51,7 +52,8 @@ Flat files (`vc_*.rs`), matching the project's existing convention for single/fe
 | `vc_models.rs` | Local `.pth`/`.index` scan, delete | `voice_changer/rvc/model_manager.py` | — | Done |
 | `vc_hf_client.rs` | HuggingFace search/repo-listing/download over `reqwest`, `.pth` and `.zip` (`zip`/`flate2`) | `voice_changer/rvc/hf_search.py` | — | Done |
 | `vc_base_models.rs` | RMVPE/ContentVec download + SHA-256 verification | `voice_changer/rvc/model_downloader.py` | — | Done |
-| `vc_calibration.rs` | Guided calibration state machine, `pw-record` subprocess | `voice_changer/rvc/calibration.py` | — | Not started |
+| `vc_calibration.rs` | Guided calibration: recording (`pw-record`, downmix, WAV) + variant proposal | `voice_changer/rvc/calibration.py` | — | Recording done — rendering needs `vc/inference/` |
+| `vc_rvc_config.rs` | `RvcParams` — per-model inference tuning | `voice_changer/rvc/backend.py` | — | Done |
 | `vc_retrieval.rs` | Weighted k-NN blend over the model's `.index` feature vectors | `pipeline.py` (`faiss.read_index`/`search`) | — | Not started |
 | `vc/inference/engine.rs` | `ort` session(s): ContentVec → RMVPE (f0) → retrieval blend → synthesizer | `pipeline.py`, `rmvpe.py`, `synth_modules.py` | — | Not started |
 | `vc/inference/providers.rs` | Execution-provider selection (CUDA/ROCm/OpenVINO/CPU) | `rvc/registry.py`, `rvc/pytorch_impl.py`, `rvc/openvino_impl.py` | — | Not started |
