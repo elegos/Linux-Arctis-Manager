@@ -15,6 +15,7 @@ use serde_json::Value;
 use tokio::process::{Child, Command};
 use tracing::{debug, error, info, warn};
 
+use crate::ladspa_util::{find_plugin, plugin_available};
 use crate::nc_config::{
     CompressorConfig, GateConfig, NcConfig, COMP_CANDIDATES, GATE_CANDIDATES, RNNOISE_CONTROLS,
     RNNOISE_LABEL, RNNOISE_PLUGIN, RNNOISE_PLUGIN_ALT,
@@ -27,46 +28,6 @@ pub const NC_MIC: &str = "Arctis_NC_Mic";
 /// Capture-side (invisible) stream node inside the graph.
 pub const NC_INPUT: &str = "Arctis_NC_Mic_input";
 const NC_MIC_DESC: &str = "Arctis Manager NC Mic (internal)";
-
-// ── LADSPA search paths ───────────────────────────────────────────────────────
-
-const LADSPA_SEARCH_PATHS: &[&str] = &[
-    "/usr/lib/ladspa",
-    "/usr/lib64/ladspa",
-    "/usr/local/lib/ladspa",
-    "/usr/local/lib64/ladspa",
-];
-
-fn ladspa_search_paths() -> Vec<PathBuf> {
-    let mut paths: Vec<PathBuf> = std::env::var("LADSPA_PATH")
-        .unwrap_or_default()
-        .split(':')
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
-        .collect();
-    paths.extend(LADSPA_SEARCH_PATHS.iter().map(PathBuf::from));
-    let home = std::env::var("HOME").unwrap_or_default();
-    if !home.is_empty() {
-        paths.push(PathBuf::from(home).join(".ladspa"));
-    }
-    paths
-}
-
-pub fn plugin_available(name: &str) -> bool {
-    let filename = format!("{name}.so");
-    ladspa_search_paths()
-        .iter()
-        .any(|d| d.join(&filename).is_file())
-}
-
-fn find_plugin(
-    candidates: &[(&'static str, &'static str)],
-) -> Option<(&'static str, &'static str)> {
-    candidates
-        .iter()
-        .find(|(p, _)| plugin_available(p))
-        .copied()
-}
 
 /// True when the gate and compressor (sc4m) plugins are both present.
 pub fn swh_available() -> bool {

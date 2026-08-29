@@ -2,410 +2,145 @@
 
 ## Overview
 
-The Voice Changer adds real-time microphone processing on top of the existing audio pipeline. It exposes a virtual PulseAudio source (`Arctis_VC_Mic`) that any application can select as its microphone input. Two independent modes are offered:
+The Voice Changer adds real-time microphone processing on top of the existing audio pipeline. It exposes a virtual PipeWire/PulseAudio microphone source that any application can select as its input. Two independent modes are offered:
 
-- **LADSPA Effects** — lightweight plugin chain (pitch shift, formant, chorus, delay, distortion, reverb). No GPU required, minimal CPU overhead.
-- **AI Voice Changer (RVC)** — neural voice conversion using community `.pth` models. Requires a compatible GPU.
+- **LADSPA Effects** — lightweight plugin chain (pitch shift, chorus, delay, distortion, reverb). No GPU required, minimal CPU overhead.
+- **AI Voice Changer (RVC)** — neural voice conversion using community `.pth` models. Requires a compatible GPU (NVIDIA/AMD via CUDA/ROCm, or Intel GPU/NPU via OpenVINO).
 
-Both modes integrate with the **Microphone** panel in the GUI, which also hosts Noise Cancellation under a second tab and a shared sidetone preview toggle.
+> [!IMPORTANT]
+> **Status**: fully implemented on the legacy Python daemon (branch history up to `develop`/`feature/v3`), **not yet ported** to the v3 Rust engine (`daemon/engine/`). This is the last major feature-parity gap between v2 and v3 — tracked as epic **[E10]** in [`v3-backlog.md`](v3-backlog.md) and itemised in [`v2-v3-gaps.md`](v2-v3-gaps.md#voice-changer-vc). This document describes the **target v3 architecture**; sections describing the current Python implementation are marked as such.
 
----
-
-## Analysis
-
-### Problem Statement
-
-SteelSeries GG on Windows ships a voice changer. Linux users have none. The options evaluated were:
-
-| Approach | CPU | GPU | Latency | Quality |
-|---|---|---|---|---|
-| LADSPA plugin chain | Low | None | < 5 ms | Good for effects |
-| RVC (Retrieval-based Voice Conversion) | Medium | Required | 20–100 ms | Convincing voice clone |
-| ONNX Runtime | Medium | Optional | 30–150 ms | Portable, no PyTorch |
-
-**LADSPA** was chosen as the always-available baseline. **RVC** was added as the AI tier because it is the dominant community standard for open-source voice conversion, with thousands of models on HuggingFace.
-
-### Why Not weights.gg?
-
-weights.gg (the previous go-to model repository) was acquired by OpenAI in early 2026 and shut down. HuggingFace Hub is the only large-scale public repository for RVC models at this point.
-
-### Virtual Source Naming
-
-All virtual devices are created with stable `source_name` / `source_properties` so they appear with friendly names in PipeWire / PulseAudio clients:
-
-| PulseAudio name | Description shown to user |
-|---|---|
-| `Arctis_VC_Sink` | Arctis VC Output (internal sink) |
-| `Arctis_VC_Mic` | Arctis Manager Voice Mic |
+The Voice Changer is one of several D-Bus clients of the daemon — the GUI is not privileged over any other client. Consequently **all voice-changer logic lives in the daemon**: PipeWire graph management, settings persistence, calibration, model management, and (target state) neural inference. Clients only send settings and render state.
 
 ---
 
-## File Scaffolding
+## Migration approach
 
-```
-src/linux_arctis_manager/
-├── voice_changer/
-│   ├── __init__.py
-│   ├── base.py                  # VoiceChangerBackend ABC + virtual device names
-│   ├── settings.py              # VoiceChangerSettings (persisted to YAML)
-│   ├── ladspa/
-│   │   ├── __init__.py
-│   │   ├── effects.py           # LADSPAEffect ABC + 6 concrete effect classes
-│   │   └── chain.py             # LADSPAVoiceChanger (VoiceChangerBackend impl)
-│   └── rvc/
-│       ├── __init__.py
-│       ├── backend.py           # RVCBackend ABC
-│       ├── pytorch_impl.py      # PyTorchRVCBackend (NVIDIA CUDA / AMD ROCm)
-│       ├── openvino_impl.py     # OpenVINORVCBackend (Intel GPU / NPU)
-│       ├── registry.py          # BackendRegistry (detects best available backend)
-│       ├── model_manager.py     # RVCModelManager + RVCModel + HFModelCard
-│       └── rvc_chain.py         # RVCVoiceChanger (VoiceChangerBackend impl)
-└── gui/
-    ├── vc_widget.py             # QVCWidget + QHFSearchDialog
-    └── mic_widget.py            # QMicWidget (hosts NC + VC tabs + sidetone preview)
+The Python implementation (`src/linux_arctis_manager/voice_changer/`) is already close to server-authoritative: its D-Bus service (`ArctisManagerDbusVCService`, 19 methods + 6 progress/completion signals) already owns settings, the LADSPA chain, calibration recording/rendering, and HuggingFace model search/download. The GUI (`gui/vc_widget.py`, `gui/vc_calibration_wizard.py`) is a thin client that polls and renders — with one exception shared with the NC and sidetone panels: it opens its own `pulsectl` connection to list microphone sources instead of asking the daemon. That gap is closed generically for all mic-consuming panels (see [E-transversal] below), not specifically for VC.
 
-src/linux_arctis_manager/constants.py
-    DBUS_VC_INTERFACE_NAME, DBUS_VC_OBJECT_PATH
+So this is **not** a "move logic out of the GUI" refactor — it is a straight **Python → Rust port** of server-side logic that is already in the right place, following the patterns `daemon/engine/src/nc_manager.rs` (PipeWire filter-chain) and `daemon/engine/src/eq/ladspa.rs` (LADSPA hosting) already established for Noise Cancellation and EQ.
 
-src/linux_arctis_manager/core.py
-    vc_manager field + reapply_vc()
+```mermaid
+flowchart LR
+    classDef done fill:#cce5ff,stroke:#004085,color:#000
+    classDef todo fill:#fff3cd,stroke:#b8860b,color:#000
 
-src/linux_arctis_manager/dbus_service.py
-    ArctisManagerDbusVCService
+    P1["Phase 1\nGeneric source listing\n(closes pulsectl leak)"]:::todo
+    P2["Phase 2\nvc_config.rs +\nvc_ladspa_chain.rs"]:::todo
+    P3["Phase 3\nmodels.rs + hf_client.rs\n+ base_models.rs"]:::todo
+    P4["Phase 4\ncalibration.rs"]:::todo
+    P5["Phase 5\nVcInterface (D-Bus)\n+ mic_router hookup"]:::todo
+    P6["Phase 6\ninference/ (ort engine,\nretrieval, providers)"]:::todo
 
-src/linux_arctis_manager/gui/dbus_wrapper.py
-    request_vc_capabilities(), request_vc_settings(), set_vc_settings()
-
-src/linux_arctis_manager/lang/en.ini
-    [ui] vc_* keys (53 entries)
-```
-
-### Installation optional extras (`pyproject.toml`)
-
-```toml
-[project.optional-dependencies]
-nvidia = ["torch", "huggingface-hub"]
-amd    = ["torch", "huggingface-hub"]
-intel  = ["openvino", "huggingface-hub"]
-rvc    = ["huggingface-hub"]   # model search only, no inference
-```
-
-`torch` is not on PyPI — install with the matching index URL:
-
-```bash
-# NVIDIA
-pipx install "linux-arctis-manager[nvidia]" \
-  --pip-args="--extra-index-url https://download.pytorch.org/whl/cu124"
-
-# AMD ROCm
-pipx install "linux-arctis-manager[amd]" \
-  --pip-args="--extra-index-url https://download.pytorch.org/whl/rocm6.2"
-
-# Intel GPU / NPU
-pipx install "linux-arctis-manager[intel]"
+    P1 --> P2 --> P3 --> P4 --> P5 --> P6
 ```
 
 ---
 
-## Architecture
+## Target architecture
 
-### Class Hierarchy
+### Module layout (`daemon/engine/src/vc/`)
 
-```
-VoiceChangerBackend (ABC)           base.py
-├── LADSPAVoiceChanger              ladspa/chain.py
-└── RVCVoiceChanger                 rvc/rvc_chain.py
-
-LADSPAEffect (ABC)                  ladspa/effects.py
-├── PitchShiftEffect
-├── FormantShiftEffect
-├── ChorusEffect
-├── DelayEffect
-├── DistortionEffect
-└── ReverbEffect
-
-RVCBackend (ABC)                    rvc/backend.py
-├── PyTorchRVCBackend               rvc/pytorch_impl.py
-└── OpenVINORVCBackend              rvc/openvino_impl.py
-```
-
-### Signal Flow
-
-**LADSPA mode:**
-```
-Physical mic source
-  → module-ladspa-source (PitchShift)
-  → module-ladspa-source (Formant)
-  → module-ladspa-source (Chorus)
-  → module-ladspa-source (Delay)
-  → module-ladspa-source (Distortion)
-  → module-ladspa-source (Reverb)
-  → module-loopback  ──→  Arctis_VC_Sink (null sink)
-                              └─ Arctis_VC_Mic (virtual source)
-```
-
-Only enabled effects are chained; disabled ones are skipped entirely (no passthrough).
-
-**RVC mode:**
-```
-Physical mic source
-  ─ captured by sounddevice / pulsectl (TODO) ─→
-  RVCBackend.process_chunk()  (GPU inference)
-  ─ written to ─→ Arctis_VC_Sink (null sink)
-                      └─ Arctis_VC_Mic (virtual source)
-```
-
----
-
-## LADSPA Effects Path
-
-### `ladspa/effects.py`
-
-Each effect is a class that:
-
-1. Implements `is_available()` — checks whether its `.so` plugin exists in `LADSPA_PATH` or standard system paths.
-2. Returns `install_hint` — per-distro package install commands.
-3. Implements `module_args(master, sink_name)` — produces the full argument string for `module-ladspa-source`.
-
-| Class | Plugin | LADSPA ID | Package |
+| Module | Responsibility | Python equivalent | Mirrors |
 |---|---|---|---|
-| `PitchShiftEffect` | `pitch_scale_1193` | 1193 | `ladspa-swh-plugins` |
-| `FormantShiftEffect` | `autotalent` | — | `autotalent` |
-| `ChorusEffect` | `chorus_1423` | 1423 | `ladspa-swh-plugins` |
-| `DelayEffect` | `delay_1898` | 1898 | `ladspa-swh-plugins` |
-| `DistortionEffect` | `amp_1181` / `diode_1185` | 1181/1185 | `ladspa-swh-plugins` |
-| `ReverbEffect` | `gverb_1216` | 1216 | `ladspa-swh-plugins` |
+| `config.rs` | Persisted settings (`vc_config.json`), same shape as today's YAML | `voice_changer/settings.py` | `nc_config.rs` |
+| `ladspa_chain.rs` | LADSPA filter-chain graph generation, live control push | `voice_changer/ladspa/{effects,chain}.py` | `nc_manager.rs` |
+| `models.rs` | Local `.pth`/`.index` scan, delete | `voice_changer/rvc/model_manager.py` | — |
+| `hf_client.rs` | HuggingFace search/download over `reqwest` | `voice_changer/rvc/hf_search.py`, `model_downloader.py` | — |
+| `base_models.rs` | RMVPE/ContentVec download + SHA-256 verification | referenced in CHANGELOG (GitHub release download) | — |
+| `calibration.rs` | Guided calibration state machine, `pw-record` subprocess | `voice_changer/rvc/calibration.py` | — |
+| `retrieval.rs` | Weighted k-NN blend over the model's `.index` feature vectors | `pipeline.py` (`faiss.read_index`/`search`) | — |
+| `inference/engine.rs` | `ort` session(s): ContentVec → RMVPE (f0) → retrieval blend → synthesizer | `pipeline.py`, `rmvpe.py`, `synth_modules.py` | — |
+| `inference/providers.rs` | Execution-provider selection (CUDA/ROCm/OpenVINO/CPU) | `rvc/registry.py`, `rvc/pytorch_impl.py`, `rvc/openvino_impl.py` | — |
 
-Plugin discovery uses a candidate list pattern to handle distributions that add numeric suffixes to filenames (e.g. `gate_1410.so` on Fedora).
+> [!NOTE]
+> `pytorch_impl.py` and `openvino_impl.py` collapse into a **single** Rust module. Both existing Python backends already require `.pth → ONNX` export as their real bottleneck (OpenVINO explicitly; PyTorch implicitly, since `ort` needs the same graph). `providers.rs` picks the ONNX Runtime execution provider instead of choosing between two separate backend implementations.
 
-### `ladspa/chain.py` — `LADSPAVoiceChanger`
+### The one Python piece that stays: `.pth → ONNX` conversion
 
-`apply(source)`:
-1. Tears down any previously loaded chain.
-2. Iterates the enabled effect list, calling `module_args()` for each and loading `module-ladspa-source`.
-3. Each stage's `source_name` becomes the next stage's `master` — forming a source chain.
-4. Loads a `module-null-sink` named `Arctis_VC_Sink` (creating `Arctis_VC_Mic` as its monitor).
-5. Loads a `module-loopback` from the last stage to `Arctis_VC_Sink` at 1 ms latency.
+Model conversion remains a **one-shot, offline Python script** (not a daemon runtime dependency), invoked when a user downloads or adds a new model — analogous to a build tool, not a service. Since the GUI itself stays Python/Qt (talking to the Rust daemon over D-Bus, same as every other v3 feature), the project already carries a Python runtime dependency; this does not add a new one. `torch`/`huggingface_hub` stay optional extras for this script only, not for the daemon.
 
-`teardown()` unloads all modules in reverse order.
+### FAISS retrieval without libfaiss
+
+The Python pipeline loads a `.index` file (`faiss.read_index`) exported by RVC WebUI (typically an IVF index over a few hundred thousand 256-dim vectors) and does a weighted `k=8` nearest-neighbour search per audio chunk. Rather than linking `libfaiss` (a large C++ dependency) into the daemon, `retrieval.rs` reconstructs the raw feature vectors once at model-load time and performs a **brute-force weighted k-NN** in Rust — cheap enough at this vector count and avoids depending on FAISS's on-disk index format.
+
+### Signal flow
+
+**LADSPA mode** (mirrors NC — single `pipewire -c <generated_conf>` process, `libpipewire-module-filter-chain`, live `pw-cli s <node_id> Props` updates, no graph rebuild when only parameters change):
+
+```mermaid
+flowchart LR
+    A[Physical mic source] --> B[pitch]
+    B --> C[chorus]
+    C --> D[delay]
+    D --> E[distortion]
+    E --> F[reverb]
+    F --> G["Arctis_VC_Mic\n(Audio/Source, filter-chain output)"]
+```
+
+Only plugins found on the system are baked into the graph; a disabled stage is neutralised via bypass controls (same approach as NC's HPF/gate/compressor), so the graph topology never needs a rebuild for on/off toggles.
+
+**RVC mode** (target state):
+
+```mermaid
+flowchart LR
+    A[Physical mic source] --> B["capture (PipeWire stream)"]
+    B --> C["ContentVec (ort)"]
+    B --> D["RMVPE — f0 (ort)"]
+    C --> E["retrieval.rs — k-NN blend"]
+    E --> F["synthesizer (ort)"]
+    D --> F
+    F --> G["Arctis_VC_Mic\n(Audio/Source)"]
+```
+
+### Mic priority
+
+`daemon/engine/src/mic_router.rs` already anticipates this: *"Priority: VC output > NC output > teardown"*. Phase 5 wires `vc/ladspa_chain.rs` / `vc/inference/engine.rs`'s output source into it — no new priority logic needed.
 
 ---
 
-## RVC / AI Voice Changer Path
+## LADSPA effects reference
 
-### GPU Backend Detection — `rvc/registry.py`
+Unchanged from the current implementation (`voice_changer/ladspa/effects.py`); ported as-is into `vc_ladspa_chain.rs`.
 
-`BackendRegistry.detect()` iterates the priority list `[PyTorchRVCBackend, OpenVINORVCBackend]` and returns the first whose `is_available()` returns `True`. The result is logged at INFO level.
-
-```python
-BackendRegistry._BACKENDS = [PyTorchRVCBackend, OpenVINORVCBackend]
-```
-
-### `rvc/pytorch_impl.py` — NVIDIA (CUDA) / AMD (ROCm)
-
-Detection: `torch.cuda.is_available()` — ROCm exposes itself through the CUDA compatibility layer, so a single check covers both vendors.
-
-Vendor is distinguished at label time via `torch.version.hip` (set on ROCm, absent on CUDA).
-
-Model conversion is not required for PyTorch — `.pth` files are loaded natively.
-
-**Current status:** `load_model`, `unload_model`, `process_chunk` are stubs marked `# TODO`.
-
-### `rvc/openvino_impl.py` — Intel GPU / NPU
-
-Detection: `openvino.Core().available_devices` is queried for `'GPU'` or `'NPU'`.
-
-Intel models require a one-time conversion from `.pth` → ONNX → OpenVINO IR:
-
-```
-<model>.pth
-  → <model>.onnx          (torch.onnx.export, TODO)
-  → <model>_openvino_ir/
-       model.xml           (openvino.convert_model, TODO)
-       model.bin
-```
-
-The converted path is cached next to the source `.pth`. `is_model_conversion_required()` checks for `model.xml` existence. The GUI shows a progress bar and "Convert Model" button when conversion is needed.
-
-**Current status:** ONNX export and OpenVINO conversion are stubs. Progress callbacks fire at 0%, 50%, 100% for UI testing.
-
-### `rvc/rvc_chain.py` — `RVCVoiceChanger`
-
-`apply(source)`:
-1. Calls `backend.load_model(model_path)`.
-2. Creates `Arctis_VC_Sink` null sink (same as LADSPA path).
-3. Starts a daemon thread (`arctis-rvc-loop`) for real-time capture → inference → playback.
-
-`teardown()`:
-1. Sets `_stop_event`, joins the thread (3 s timeout).
-2. Calls `backend.unload_model()`.
-3. Unloads PulseAudio modules.
-
-`_process_loop` is a stub. Full implementation requires:
-1. Open capture stream on `source` via `sounddevice` or `pulsectl`.
-2. Read chunks in a loop while `not _stop_event.is_set()`.
-3. Call `self._backend.process_chunk(chunk, sample_rate)`.
-4. Write output to `Arctis_VC_Sink`.
-
----
-
-## Model Management — `rvc/model_manager.py`
-
-### Local Models
-
-Models live in `~/.config/arctis_manager/rvc_models/`. Each model is a `.pth` file, optionally paired with a `.index` file of the same stem (used by some RVC forks for feature retrieval).
-
-```python
-@dataclass
-class RVCModel:
-    name: str
-    path: Path
-    index_path: Path | None
-```
-
-`RVCModelManager.list_local()` scans recursively for `.pth` files.
-
-`RVCModelManager.delete_local(model)` removes the `.pth`, the `.index` (if present), and any `<stem>_openvino_ir/` sibling directory.
-
-### HuggingFace Hub Search
-
-`RVCModelManager.search_hf(query, sort, limit)` uses `huggingface_hub.HfApi.list_models()` with filter `'rvc'`. Sort is `'likes'` (default) or `'downloads'`, configurable per user.
-
-Results are `HFModelCard` dataclasses:
-
-```python
-@dataclass
-class HFModelCard:
-    model_id:   str
-    author:     str
-    model_name: str
-    likes:      int
-    downloads:  int
-```
-
-`RVCModelManager.download(model_id, progress_cb)` uses `snapshot_download()` to pull the full repo into `MODELS_DIR/<repo-name>/`, then returns the path to the first `.pth` found. Binary files (`.bin`) are excluded from the download.
-
-`search_hf` degrades gracefully when `huggingface_hub` is not installed (returns `[]` with a warning log), so the base package runs without the optional extras.
-
----
-
-## Settings Persistence — `voice_changer/settings.py`
-
-`VoiceChangerSettings` is saved to `~/.config/arctis_manager/vc_settings.yaml`. All fields have typed defaults; `load()` handles missing keys gracefully.
-
-```yaml
-mode: ladspa
-pitch:
-  enabled: true
-  semitones: -3.0
-formant:
-  enabled: false
-  shift: 1.0
-chorus: {enabled: false, depth: 2.0, rate: 1.5, delay: 25.0}
-delay:  {enabled: false, time: 0.3, feedback: 0.3, damping: 0.5}
-distortion: {enabled: false, drive: 6.0}
-reverb: {enabled: false, room: 75.0, time: 2.0, wet: 0.3}
-rvc:
-  model_path: ''
-  pitch_shift: 0
-  index_ratio: 0.75
-  hf_sort: likes
-```
-
-Helper methods `to_ladspa_config()` and `to_rvc_config()` return sub-dicts for passing to the respective backend constructors.
-
----
-
-## GUI
-
-### `gui/mic_widget.py` — `QMicWidget`
-
-Top-level panel widget registered as the `'mic'` nav entry. Contains:
-
-- **Title** label ("Microphone")
-- **Sidetone preview toggle** (`QToggle`, default off) — loads a `module-loopback` at 5 ms latency. Source priority: `Arctis_VC_Mic` → `Arctis_NC_Mic` → system default.
-- **`QTabWidget`** with two tabs:
-  - `Noise Cancellation` → `QNCWidget(show_title=False)`
-  - `Voice Changer` → `QVCWidget(show_title=False)`
-
-`hideEvent` auto-stops the sidetone preview when the panel is switched or the window is closed.
-
-`_SidetonePreview` manages the loopback in background threads (start and stop) to avoid blocking the UI thread.
-
-### `gui/vc_widget.py` — `QVCWidget`
-
-Mode selector: **Off / LADSPA Effects / AI Voice Changer**.
-
-**LADSPA section** — one `QGroupBox` per effect. Each group shows:
-- Enable toggle
-- Per-parameter sliders
-- Install hint + Retry button when the plugin is unavailable
-
-**RVC section:**
-- Hardware label (from `BackendRegistry.available_label()`)
-- Model dropdown (`RVCModelManager.list_local()`)
-- "Search HuggingFace..." button → `QHFSearchDialog`
-- "Open Folder" button → opens `MODELS_DIR` in the file manager
-- Pitch shift slider (semitones)
-- Index ratio slider
-- Conversion progress bar + "Convert Model" button (shown only for OpenVINO backend)
-
-### `QHFSearchDialog`
-
-Modal dialog with a search field, sort toggle (Likes / Downloads), results table (`QTableWidget`), and a per-row Download button. Download progress is shown inline. The search runs in a background `QThread` to keep the UI responsive.
-
----
-
-## D-Bus Interface
-
-| Constant | Value |
-|---|---|
-| `DBUS_VC_INTERFACE_NAME` | `name.giacomofurlan.ArctisManager.Next.VC` |
-| `DBUS_VC_OBJECT_PATH` | `/name/giacomofurlan/ArctisManager/Next/VC` |
-
-Methods exposed by `ArctisManagerDbusVCService`:
-
-| Method | Signature | Description |
+| Effect | Plugin (preferred → fallback) | Controls |
 |---|---|---|
-| `GetVCCapabilities` | `→ s (JSON)` | Returns available backends and installed effects |
-| `GetVCSettings` | `→ s (JSON)` | Returns current `VoiceChangerSettings` as JSON |
-| `SetVCSettings` | `s (JSON) →` | Applies new settings, re-chains if mode is active |
+| Pitch | `am_pitchshift_1433` → `pitch_scale_1193` | `pitch_shift` (factor from ±24 semitones), `buffer_size=4` |
+| Chorus | `multivoice_chorus_1201` | voices, delay, separation, detune, LFO rate, output attenuation |
+| Delay | `delay_1898` | delay time (max_delay = delay + 0.5 s headroom) |
+| Distortion | `valve_1209` | level, character (0 = warm/even harmonics, 1 = harsh/odd) |
+| Reverb | `gverb_1216` | room size, time, damping, bandwidth, dry/early/tail levels — **stereo output, must be last in chain** |
 
-GUI side (in `DbusWrapper`): `request_vc_capabilities()`, `request_vc_settings()`, `set_vc_settings()`.
-
----
-
-## Virtual Device Names
-
-| Constant | PulseAudio name | Displayed as |
-|---|---|---|
-| `ARCTIS_VC_SINK` | `Arctis_VC_Sink` | Arctis VC Output |
-| `ARCTIS_VC_MIC` | `Arctis_VC_Mic` | Arctis Manager Voice Mic |
-| `ARCTIS_VC_MIC_DESC` | — | `'Arctis Manager Voice Mic'` |
-
-The NC mic (`Arctis_NC_Mic`) sits upstream of the VC mic in the sidetone preview priority chain, so the most-processed available source is always selected.
+All plugins ship in `ladspa-swh-plugins` (Arch/AUR), `swh-plugins` (Debian/Ubuntu, Fedora).
 
 ---
 
-## Current Implementation Status
+## Settings persistence
 
-| Component | Status |
+`vc_config.json` under the daemon's settings base dir (same layout convention as `nc_config.json`, `eq_settings.json`). Field set is a direct port of `VCSettings` (`voice_changer/settings.py`): global mode/source, per-effect LADSPA params, and an `rvc` sub-object (model path, pitch offset, Hubert model choice, VTLN alpha, RMS mix rate, F0 filter radius, target RMS, limiter threshold, index rate, per-model parameter snapshots).
+
+Local model files, calibration recordings, and downloaded base models (RMVPE/ContentVec) keep their existing filesystem locations under `~/.config/arctis_manager/` for a seamless migration — no user-facing path changes.
+
+---
+
+## D-Bus interface (target)
+
+Bus name: `name.giacomofurlan.ArctisManager.Next.VC` (unchanged), same namespace as `...Next.NC` / `...Next.EQ`. Method names are kept close to the current Python service to minimise the diff in `gui/dbus_wrapper.py` and `gui/vc_widget.py` when the GUI cuts over in Phase 5.
+
+| Category | Methods |
 |---|---|
-| LADSPA effect chain | Complete |
-| PulseAudio module loading / teardown | Complete |
-| Virtual source creation | Complete |
-| Sidetone preview loopback | Complete |
-| Settings persistence | Complete |
-| HuggingFace model search | Complete |
-| HuggingFace model download | Complete |
-| Local model management | Complete |
-| GPU backend detection (PyTorch) | Complete |
-| GPU backend detection (OpenVINO) | Complete |
-| RVC model loading — PyTorch | **TODO** |
-| RVC model loading — OpenVINO | **TODO** |
-| RVC inference (`process_chunk`) — PyTorch | **TODO** |
-| RVC inference (`process_chunk`) — OpenVINO | **TODO** |
-| ONNX export for OpenVINO conversion | **TODO** |
-| Real-time capture → inference → playback loop | **TODO** |
+| Capabilities & settings | `GetVCCapabilities`, `GetVCSettings`, `SetVCSettings` |
+| RVC runtime | `GetRVCModels`, `GetRVCMetrics`, `SetRVCLiveParams` |
+| Calibration | `CalibrationStartRecording`, `CalibrationStopRecording`, `CalibrationStartRender`, `CalibrationGetStatus` |
+| Model management | `DeleteRVCModel`, `DownloadBaseModels`, `SearchHFModels`, `ListRepoFiles`, `DownloadHFModel`, `GetHFToken`, `SetHFToken` |
+| GPU / deps | `DetectGPU` |
 
-The TODO items are confined to `rvc/pytorch_impl.py`, `rvc/openvino_impl.py`, and `_process_loop` in `rvc/rvc_chain.py`. All scaffolding, PulseAudio plumbing, GUI, settings, and model management are fully implemented.
+Signals: `VCChanged` (settings), plus progress/completion pairs for installs/downloads (`InstallProgress`/`InstallComplete`, `DownloadProgress`/`DownloadComplete`, `BaseModelProgress`/`BaseModelComplete`) — same pattern as `EQChanged`/`NCChanged`.
+
+---
+
+## Related documents
+
+- [`v3-backlog.md`](v3-backlog.md) — epic **[E10]**, story-level checklist for this migration.
+- [`v2-v3-gaps.md`](v2-v3-gaps.md#voice-changer-vc) — feature-by-feature V2/V3 status table.
+- [`dbus.md`](dbus.md) — general D-Bus interface conventions shared across daemon services.

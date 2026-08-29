@@ -335,6 +335,59 @@ pub async fn teardown_sinks(setup: AudioSetup) {
     info!("audio: virtual sinks removed");
 }
 
+// ── Audio source enumeration ──────────────────────────────────────────────────
+
+/// A user-visible PipeWire/PulseAudio input source (microphone).
+#[derive(Debug, Clone, Serialize)]
+pub struct AudioSource {
+    /// `name` — stable id, used as `source_id` in NC/VC/sidetone settings.
+    pub id: String,
+    /// `description` — human-readable label.
+    pub name: String,
+    /// True when this is the current PipeWire/PulseAudio default source.
+    pub is_default: bool,
+}
+
+/// Parse `pactl -f json list sources` output into `AudioSource`s.
+/// Skips monitor sources (`*.monitor`) and daemon-managed virtual sources
+/// (`Arctis_*`) — clients pick a *physical* mic to feed NC/VC, not our own
+/// output. Pure function so it can be unit-tested without a running PipeWire.
+pub fn parse_audio_sources(json: &str, default_id: &str) -> Vec<AudioSource> {
+    let Ok(sources) = serde_json::from_str::<serde_json::Value>(json) else {
+        return vec![];
+    };
+    let Some(arr) = sources.as_array() else {
+        return vec![];
+    };
+    arr.iter()
+        .filter_map(|src| {
+            let id = src["name"].as_str()?;
+            if id.ends_with(".monitor") || id.starts_with("Arctis_") {
+                return None;
+            }
+            let name = src["description"].as_str().unwrap_or(id);
+            Some(AudioSource {
+                id: id.to_owned(),
+                name: name.to_owned(),
+                is_default: id == default_id,
+            })
+        })
+        .collect()
+}
+
+/// Enumerate all physical PipeWire input sources, flagging the current default.
+/// Returns an empty list if `pactl` is unavailable or returns an error.
+pub async fn list_audio_sources() -> Vec<AudioSource> {
+    let default_id = pactl(&["get-default-source"]).await.unwrap_or_default();
+    match pactl(&["-f", "json", "list", "sources"]).await {
+        Ok(json) => parse_audio_sources(&json, &default_id),
+        Err(e) => {
+            warn!("audio: list sources failed: {e}");
+            vec![]
+        }
+    }
+}
+
 /// Find the physical Arctis microphone source (not a virtual/monitor source).
 /// Retries a few times because the audio device may appear slightly after HID.
 pub async fn find_physical_source() -> Option<String> {
@@ -435,5 +488,60 @@ mod tests {
     fn parse_audio_sinks_returns_empty_on_bad_json() {
         assert!(parse_audio_sinks("not json").is_empty());
         assert!(parse_audio_sinks("null").is_empty());
+    }
+
+    // ── Audio source enumeration ────────────────────────────────────────────
+
+    const SOURCES_JSON: &str = r#"[
+        {"name": "alsa_input.usb-SteelSeries_Arctis_Nova_Pro_Wireless-00.mono-fallback", "description": "Arctis Nova Pro Wireless Mono"},
+        {"name": "alsa_output.pci-0000_0d_00.4.iec958-stereo.monitor", "description": "Monitor of Starship/Matisse HD Audio Controller"},
+        {"name": "Arctis_NC_Mic", "description": "Arctis Manager NC Mic (internal)"},
+        {"name": "alsa_input.pci-0000_0d_00.4.analog-stereo", "description": "Starship/Matisse HD Audio Controller Stereo analogico"}
+    ]"#;
+
+    #[test]
+    fn parse_audio_sources_skips_monitor_and_virtual_sources() {
+        let sources = parse_audio_sources(SOURCES_JSON, "");
+        assert_eq!(sources.len(), 2);
+        assert!(sources.iter().all(|s| !s.id.ends_with(".monitor")));
+        assert!(sources.iter().all(|s| !s.id.starts_with("Arctis_")));
+    }
+
+    #[test]
+    fn parse_audio_sources_uses_top_level_name_and_description() {
+        let sources = parse_audio_sources(SOURCES_JSON, "");
+        let steelseries = sources
+            .iter()
+            .find(|s| {
+                s.id == "alsa_input.usb-SteelSeries_Arctis_Nova_Pro_Wireless-00.mono-fallback"
+            })
+            .expect("SteelSeries source must survive filtering");
+        assert_eq!(steelseries.name, "Arctis Nova Pro Wireless Mono");
+    }
+
+    #[test]
+    fn parse_audio_sources_flags_the_default_source() {
+        let sources = parse_audio_sources(
+            SOURCES_JSON,
+            "alsa_input.usb-SteelSeries_Arctis_Nova_Pro_Wireless-00.mono-fallback",
+        );
+        let steelseries = sources
+            .iter()
+            .find(|s| {
+                s.id == "alsa_input.usb-SteelSeries_Arctis_Nova_Pro_Wireless-00.mono-fallback"
+            })
+            .unwrap();
+        let other = sources
+            .iter()
+            .find(|s| s.id == "alsa_input.pci-0000_0d_00.4.analog-stereo")
+            .unwrap();
+        assert!(steelseries.is_default);
+        assert!(!other.is_default);
+    }
+
+    #[test]
+    fn parse_audio_sources_returns_empty_on_bad_json() {
+        assert!(parse_audio_sources("not json", "").is_empty());
+        assert!(parse_audio_sources("null", "").is_empty());
     }
 }
