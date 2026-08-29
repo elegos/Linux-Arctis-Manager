@@ -100,10 +100,10 @@ This keeps the checklist honest and makes blocked work immediately visible witho
   - [ ] [E9-S3] Transparent level setting
   - [ ] [E9-S4] GUI integration
 - [ ] **[E10] AI voice changer port to Rust** *(stretch)*
-  - [ ] [E10-S1] Generic source listing (`GetListOptions("pulse_audio_sources")`), close the pulsectl leak in NC/mic/sidetone GUI panels
-  - [ ] [E10-S2] `vc_config.rs` (settings persistence) + `vc_ladspa_chain.rs` (LADSPA filter-chain, mirrors `nc_manager.rs`)
-  - [ ] [E10-S3] `vc/models.rs` (local model scan/delete) + `vc/hf_client.rs` (HuggingFace search/download) + `vc/base_models.rs` (RMVPE/ContentVec download + SHA-256 verification)
-  - [ ] [E10-S4] `vc/calibration.rs` — guided calibration state machine (`pw-record` subprocess), same lifecycle as the Python `CalibrationSession`
+  - [x] [E10-S1] Generic source listing (`GetListOptions("pulse_audio_sources")`), close the pulsectl leak in NC/mic/sidetone GUI panels
+  - [x] [E10-S2] `vc_config.rs` (settings persistence) + `vc_ladspa_chain.rs` (LADSPA filter-chain, mirrors `nc_manager.rs`)
+  - [x] [E10-S3] `vc_models.rs` (local model scan/delete) + `vc_hf_client.rs` (HuggingFace search/download, `.pth` and `.zip`) + `vc_base_models.rs` (RMVPE/ContentVec download + SHA-256 verification)
+  - [ ] [E10-S4] `vc_calibration.rs` — guided calibration state machine (`pw-record` subprocess), same lifecycle as the Python `CalibrationSession`
   - [ ] [E10-S5] `VcInterface` D-Bus service (`...Next.VC`) + `mic_router` hookup (VC output takes priority over NC per the existing `mic_router.rs` comment); GUI (`vc_widget.py`, `vc_calibration_wizard.py`) cut over from the legacy Python daemon to the Rust engine
   - [ ] [E10-S6] `vc/inference/` — unified `ort`-based engine (ContentVec, RMVPE, synthesizer) replacing the separate PyTorch/OpenVINO backends, execution-provider selection (`providers.rs`), brute-force k-NN retrieval (`retrieval.rs`) replacing the `libfaiss` dependency
     > Model conversion (`.pth` → ONNX) stays a one-shot offline Python script, not a daemon runtime dependency. See `docs/voice-changing-feature.md` for the full design.
@@ -389,18 +389,22 @@ The official spec exposes `transparency_mode` (off / transparent / ANC) as a rea
 
 ---
 
-## [E10] AI voice changer integration *(stretch)*
+## [E10] AI voice changer port to Rust *(stretch)*
 
-The voice changer (RVC-based, PipeWire-backed) was developed on `feature/voice-changer` and merges into v3. The integration work is limited to connecting the Python voice changer process to the v3 engine's D-Bus signals.
+The voice changer (RVC-based, PipeWire-backed) is fully implemented on the legacy Python daemon (`src/linux_arctis_manager/voice_changer/`), whose D-Bus service is already server-authoritative — settings, LADSPA chain, calibration, and HuggingFace model management all live daemon-side, not in the GUI. This epic is a straight Python → Rust port of that existing server-side logic, not an architecture change. See `docs/voice-changing-feature.md` for the full target design (module layout, signal flow, the unified `ort` inference engine decision).
 
-- **[E10-S1] Merge `feature/voice-changer` into `feature/v3`**
-  Rebase or merge the voice changer branch. Resolve any conflicts with changes made in v3 to the PipeWire pipeline management and D-Bus wrapper.
+- **[E10-S1] Generic source listing** — Done. `GetListOptions("pulse_audio_sources")` (`audio.rs`, `dbus.rs`) lists physical mic sources with an `is_default` flag; `nc_widget.py` and `mic_widget.py`'s sidetone preview use it instead of opening their own `pulsectl` connection (`mic_widget.py`'s separate physical-*sink* lookup for the sidetone destination is a distinct, smaller follow-up — not source listing).
 
-- **[E10-S2] Subscribe to engine mic state signals**
-  Update the voice changer process to listen for `StatusChanged` events on the v3 D-Bus interface instead of reading the Python engine's internal state. React to `mic_status` (muted/unmuted) and `DeviceDisconnected` to pause or stop the VC pipeline appropriately.
+- **[E10-S2] `vc_config.rs` + `vc_ladspa_chain.rs`** — Done. LADSPA effect chain (pitch/chorus/delay/distortion/reverb) via `libpipewire-module-filter-chain`, mirroring `nc_manager.rs`. Unlike NC, these plugins have no true bypass port, so a disabled effect is omitted from the graph rather than baked-in-and-neutralised; the process rebuilds when the *set* of enabled effects changes. `ladspa_util.rs` extracted from `nc_manager.rs` for the LADSPA plugin-discovery code shared between NC and VC.
 
-- **[E10-S3] Expose VC state on D-Bus**
-  Add a `VoiceChanger` interface to the D-Bus service (or extend the existing one) with methods `Enable`, `Disable`, `SetModel(path)`, and a `VoiceChangerStateChanged` signal. This allows the GUI's VC widget to control the Python VC process via the same D-Bus connection it uses for device settings, without a separate IPC channel.
+- **[E10-S3] `vc_models.rs` + `vc_hf_client.rs` + `vc_base_models.rs`** — Done.
+  Local model scan/delete (`vc_models.rs`, port of `model_manager.py`), HuggingFace search/repo-listing/download over `reqwest` (`vc_hf_client.rs`, port of `hf_search.py`, using the public HF Hub REST API instead of the `huggingface_hub` Python SDK), and RMVPE/ContentVec download with SHA-256 verification (`vc_base_models.rs`, port of `model_downloader.py`, same release URL and checksums). `.zip` archive downloads (RVC WebUI sometimes bundles `.pth` + `.index` together) are extracted in-memory via the `zip` crate (`flate2`'s pure-Rust backend for DEFLATE, no system zlib) — port of `hf_search.py`'s `_extract_pth_from_zip`, including its `__MACOSX`/dotfile filtering and stem-based index pairing.
 
-- **[E10-S4] Guided calibration persistence**
-  Ensure the calibration data (speaker embedding, pitch statistics) written by the calibration wizard is stored in `~/.config/arctis_manager/vc_calibration/` and survives engine restarts. Validate on startup that the calibration file matches the current model; emit a warning signal if stale.
+- **[E10-S4] `vc_calibration.rs`**
+  Guided calibration state machine (`idle → recording → recorded → rendering → done`), `pw-record` subprocess capture — port of `rvc/calibration.py`'s `CalibrationSession`, already server-owned in the Python reference.
+
+- **[E10-S5] `VcInterface` D-Bus service + `mic_router` hookup**
+  Wire `vc_config.rs`/`vc_ladspa_chain.rs`/`vc_models.rs`/`vc_hf_client.rs`/`vc_base_models.rs`/`vc_calibration.rs` behind a `name.giacomofurlan.ArctisManager.Next.VC` interface (method names close to the current Python service to minimise the GUI diff), and point `mic_router.rs`'s existing VC-priority logic (`"Priority: VC output > NC output > teardown"`) at its output source. Cut `vc_widget.py` / `vc_calibration_wizard.py` over from the legacy Python daemon to the Rust engine.
+
+- **[E10-S6] `vc/inference/` — unified `ort` engine**
+  Single Rust inference module (ContentVec → RMVPE f0 → retrieval blend → synthesizer) via the `ort` crate, replacing the separate `pytorch_impl.py`/`openvino_impl.py` backends with one execution-provider selection (`providers.rs`: CUDA/ROCm/OpenVINO/CPU). Brute-force weighted k-NN retrieval (`retrieval.rs`) over the model's `.index` feature vectors replaces the `libfaiss` dependency. Model conversion (`.pth` → ONNX) stays a one-shot offline Python script, not a daemon runtime dependency.

@@ -15,8 +15,11 @@ mod nc_config;
 mod nc_manager;
 mod state;
 mod stream_monitor;
+mod vc_base_models;
 mod vc_config;
+mod vc_hf_client;
 mod vc_ladspa_chain;
+mod vc_models;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

@@ -27,6 +27,10 @@ nix = { workspace = true }
 serde = { workspace = true }
 serde_yaml = { workspace = true }
 serde_json = { workspace = true }
+reqwest = { workspace = true }
+sha2 = { workspace = true }
+zip = { workspace = true }
+flate2 = { workspace = true }
 
 [dev-dependencies]
 lam-hidraw-helper = { workspace = true }
