@@ -99,11 +99,14 @@ This keeps the checklist honest and makes blocked work immediately visible witho
   - [ ] [E9-S2] ANC / transparent mode setting
   - [ ] [E9-S3] Transparent level setting
   - [ ] [E9-S4] GUI integration
-- [ ] **[E10] AI voice changer integration** *(stretch)*
-  - [ ] [E10-S1] Merge `feature/voice-changer` into `feature/v3`
-  - [ ] [E10-S2] Subscribe to engine mic state signals
-  - [ ] [E10-S3] Expose VC state on D-Bus
-  - [ ] [E10-S4] Guided calibration persistence
+- [ ] **[E10] AI voice changer port to Rust** *(stretch)*
+  - [ ] [E10-S1] Generic source listing (`GetListOptions("pulse_audio_sources")`), close the pulsectl leak in NC/mic/sidetone GUI panels
+  - [ ] [E10-S2] `vc_config.rs` (settings persistence) + `vc_ladspa_chain.rs` (LADSPA filter-chain, mirrors `nc_manager.rs`)
+  - [ ] [E10-S3] `vc/models.rs` (local model scan/delete) + `vc/hf_client.rs` (HuggingFace search/download) + `vc/base_models.rs` (RMVPE/ContentVec download + SHA-256 verification)
+  - [ ] [E10-S4] `vc/calibration.rs` — guided calibration state machine (`pw-record` subprocess), same lifecycle as the Python `CalibrationSession`
+  - [ ] [E10-S5] `VcInterface` D-Bus service (`...Next.VC`) + `mic_router` hookup (VC output takes priority over NC per the existing `mic_router.rs` comment); GUI (`vc_widget.py`, `vc_calibration_wizard.py`) cut over from the legacy Python daemon to the Rust engine
+  - [ ] [E10-S6] `vc/inference/` — unified `ort`-based engine (ContentVec, RMVPE, synthesizer) replacing the separate PyTorch/OpenVINO backends, execution-provider selection (`providers.rs`), brute-force k-NN retrieval (`retrieval.rs`) replacing the `libfaiss` dependency
+    > Model conversion (`.pth` → ONNX) stays a one-shot offline Python script, not a daemon runtime dependency. See `docs/voice-changing-feature.md` for the full design.
 
 ---
 
@@ -270,7 +273,7 @@ Makes the engine trivial to install, start, and keep running across reboots with
   Write a short migration note: stop the v2 service, install v3, run `make install-helper`, enable the new unit. Note that existing device YAML files in `~/.config/arctis_manager/devices/` are superseded by the bundled v3 files and should be removed.
 
 - **[E5-S5] Python engine cleanup**
-  Once `lam-daemon` is functional and the D-Bus interface is validated end-to-end, remove the Python engine layer that it replaces. Specifically: delete `core.py`, `config.py`, `status_parser_fn.py`, `eq_manager.py`, `app_matcher.py`, `cli_tools.py`, `dbus_service.py`, and `constants.py`. Remove the `usb` and `pyserial` dependencies from `pyproject.toml`. Keep `gui/`, `eq_preset.py`, `ai_deps.py`, and the voice changer modules untouched — they remain in Python. Update the `lam-gui` entry point to connect to the session bus (replacing the in-process engine startup it currently does) and remove the `--no-daemon` / `--daemon` CLI flags that are no longer meaningful.
+  Once `lam-daemon` is functional and the D-Bus interface is validated end-to-end, remove the Python engine layer that it replaces. Specifically: delete `core.py`, `config.py`, `status_parser_fn.py`, `eq_manager.py`, `app_matcher.py`, `cli_tools.py`, `dbus_service.py`, and `constants.py`. Remove the `usb` and `pyserial` dependencies from `pyproject.toml`. Keep `gui/` and `eq_preset.py` — they remain in Python. `ai_deps.py` and `voice_changer/` are removed once [E10] lands (superseded by `vc/inference/providers.rs` and the rest of the Rust `vc/` module); only the one-shot `.pth → ONNX` conversion script stays Python. Update the `lam-gui` entry point to connect to the session bus (replacing the in-process engine startup it currently does) and remove the `--no-daemon` / `--daemon` CLI flags that are no longer meaningful.
 
 - **[E5-S6] README and docs refresh**
   Update `README.md` to describe v3: new prerequisites (`lam-hidraw-helper` + `setcap`), installation steps, D-Bus interface overview, supported devices list, and a link to `DEVICE_DSL.md` for adding new devices. Remove or rewrite any section that references the v2 Python engine. Audit `docs/`: retire files that described v2-only concerns (e.g. old architecture notes, the old status-parser reference if present), and confirm that `ARCHITECTURE.md`, `DEVICE_DSL.md`, and `dbus.md` are accurate against the shipped code.

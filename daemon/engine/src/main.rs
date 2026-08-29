@@ -9,11 +9,14 @@ mod focus_monitor;
 mod general_settings;
 mod hidraw_client;
 mod hotplug;
+mod ladspa_util;
 mod mic_router;
 mod nc_config;
 mod nc_manager;
 mod state;
 mod stream_monitor;
+mod vc_config;
+mod vc_ladspa_chain;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

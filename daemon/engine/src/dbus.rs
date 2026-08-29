@@ -214,6 +214,10 @@ impl SettingsInterface {
                 let sinks = crate::audio::list_audio_sinks().await;
                 serde_json::to_string(&sinks).unwrap_or_else(|_| "[]".to_string())
             }
+            "pulse_audio_sources" => {
+                let sources = crate::audio::list_audio_sources().await;
+                serde_json::to_string(&sources).unwrap_or_else(|_| "[]".to_string())
+            }
             _ => "[]".to_string(),
         }
     }

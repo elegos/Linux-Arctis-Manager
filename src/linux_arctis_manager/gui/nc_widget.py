@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import logging
-import threading
 
-import pulsectl
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (QComboBox, QFrame, QGroupBox, QHBoxLayout,
                                QLabel, QPushButton, QScrollArea, QSizePolicy,
@@ -61,7 +59,7 @@ def _slider_row(
 class QNCWidget(QWidget):
     sig_nc_capabilities  = Signal(object)
     sig_nc_settings      = Signal(object)
-    _sig_sources_loaded  = Signal(object)   # internal: fired from background thread
+    _sig_sources_loaded  = Signal(object)   # internal: GetListOptions("pulse_audio_sources") reply
 
     def __init__(self, parent: QWidget, show_title: bool = True) -> None:
         super().__init__(parent)
@@ -318,32 +316,16 @@ class QNCWidget(QWidget):
         self.refresh()
 
     def refresh(self) -> None:
-        threading.Thread(target=self._load_sources_thread, daemon=True).start()
+        DbusWrapper.request_list_options('pulse_audio_sources', self._sig_sources_loaded)
         DbusWrapper.request_nc_capabilities(self.sig_nc_capabilities)
         DbusWrapper.request_nc_settings(self.sig_nc_settings)
 
-    # ── Source loading (direct PulseAudio, no daemon needed) ───────────
-
-    def _load_sources_thread(self) -> None:
-        try:
-            with pulsectl.Pulse('lam-nc-sources') as pulse:
-                default_name = pulse.server_info().default_source_name
-                all_sources = [
-                    s for s in pulse.source_list()
-                    if not s.name.endswith('.monitor')
-                    and not s.name.startswith('Arctis_')
-                ]
-            self._sig_sources_loaded.emit({
-                'sources': [{'id': s.name, 'name': s.description} for s in all_sources],
-                'default': default_name,
-            })
-        except Exception as e:
-            logger.warning('Failed to load PulseAudio sources: %s', e)
+    # ── Source loading (daemon GetListOptions("pulse_audio_sources")) ──
 
     def _on_sources_loaded(self, data: dict) -> None:
-        sources: list[dict] = data.get('sources', [])
-        default_name: str = data.get('default', '')
-        self._populate_sources(sources, prefer_id=default_name)
+        sources: list[dict] = data.get('list', [])
+        default_id = next((s['id'] for s in sources if s.get('is_default')), '')
+        self._populate_sources(sources, prefer_id=default_id)
 
     # ── D-Bus handlers (daemon NC interface, stubbed until daemon supports NC) ──
 
