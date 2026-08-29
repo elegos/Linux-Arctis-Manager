@@ -34,6 +34,14 @@ nix = { version = "0.30", features = ["user", "socket", "uio", "ioctl", "fs"] }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 serde_json = "1"
+# HTTP client (HuggingFace Hub API, base RVC model downloads — added in E10-S3)
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+# checksums (base RVC model download verification — added in E10-S3)
+sha2 = "0.10"
+# zip archive extraction (RVC WebUI .pth+.index bundles — added in E10-S3);
+# deflate via flate2's pure-Rust backend, no system zlib required
+zip = { version = "2", default-features = false, features = ["deflate"] }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 # internal crates
 device-config = { path = "device-config" }
 hid-transport = { path = "hid-transport" }
