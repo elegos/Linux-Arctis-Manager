@@ -148,7 +148,7 @@ Bus name: `name.giacomofurlan.ArctisManager.Next.VC`, same namespace as `...Next
 
 Methods marked "not in the interface" are omitted rather than stubbed — calling one is an UnknownMethod D-Bus error. `GetVCCapabilities` reports `rvc.available: false`, so clients should gate their RVC UI on that instead of calling them.
 
-Signals: `VCChanged` (settings), `DownloadProgress`/`DownloadComplete` (HF downloads), `BaseModelProgress`/`BaseModelComplete` — same pattern as `EQChanged`/`NCChanged`. No byte-level download progress yet, only start/complete — `vc_hf_client`/`vc_base_models` don't stream progress internally.
+Signals: `VcChanged` (settings), `DownloadProgress`/`DownloadComplete` (HF downloads), `BaseModelProgress`/`BaseModelComplete` — same pattern as `EqChanged`/`NcChanged` (zbus derives the signal name from the Rust fn name; none of these three interfaces override it, so it's not the fully-capitalised `VCChanged` the acronym might suggest). No byte-level download progress yet, only start/complete — `vc_hf_client`/`vc_base_models` don't stream progress internally.
 
 ### Mic priority fix
 
