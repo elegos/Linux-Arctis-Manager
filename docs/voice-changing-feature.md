@@ -56,7 +56,7 @@ Flat files (`vc_*.rs`), matching the project's existing convention for single/fe
 | `vc_calibration.rs` | Guided calibration: recording (`pw-record`, downmix, WAV) + variant proposal | `voice_changer/rvc/calibration.py` | — | Recording done — rendering needs `vc/inference/` |
 | `vc_rvc_config.rs` | `RvcParams` — per-model inference tuning | `voice_changer/rvc/backend.py` | — | Done |
 | `vc_retrieval.rs` | Weighted k-NN blend over the model's `.index` feature vectors | `pipeline.py` (`faiss.read_index`/`search`) | — | Not started |
-| `vc/inference/engine.rs` | `ort` session(s): ContentVec → RMVPE (f0) → retrieval blend → synthesizer | `pipeline.py`, `rmvpe.py`, `synth_modules.py` | — | Not started |
+| `vc/inference/engine.rs` | `ort` session(s): ContentVec → RMVPE (f0) → retrieval blend → synthesizer | `pipeline.py`, `rmvpe.py`, `synth_modules.py` | — | Not started — ONNX export of all 3 models verified, see [`voice-changer-rvc-pipeline.md`](voice-changer-rvc-pipeline.md) |
 | `vc/inference/providers.rs` | Execution-provider selection (CUDA/ROCm/OpenVINO/CPU) | `rvc/registry.py`, `rvc/pytorch_impl.py`, `rvc/openvino_impl.py` | — | Not started |
 
 All completed modules are wired into `VcInterface` (Phase 5a) — see the D-Bus interface section below. `vc_calibration.rs` keeps a narrow `#![allow(dead_code)]` for the pieces that genuinely aren't reachable yet (`RenderResult`, `CalibrationState::{Rendering,Done}`) pending [E10-S6b].
@@ -173,3 +173,4 @@ Both phases were verified end to end against a real Arctis Nova Pro Wireless on 
 - [`v3-backlog.md`](v3-backlog.md) — epic **[E10]**, story-level checklist for this migration.
 - [`v2-v3-gaps.md`](v2-v3-gaps.md#voice-changer-vc) — feature-by-feature V2/V3 status table.
 - [`dbus.md`](dbus.md) — general D-Bus interface conventions shared across daemon services.
+- [`voice-changer-rvc-pipeline.md`](voice-changer-rvc-pipeline.md) — technical deep dive on the AI inference pipeline itself: signal flow, model architecture, ONNX conversion strategy and verification results, target Rust engine design ([E10-S6a]).
