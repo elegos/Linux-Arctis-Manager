@@ -8,7 +8,7 @@ The Voice Changer adds real-time microphone processing on top of the existing au
 - **AI Voice Changer (RVC)** — neural voice conversion using community `.pth` models. Requires a compatible GPU (NVIDIA/AMD via CUDA/ROCm, or Intel GPU/NPU via OpenVINO).
 
 > [!IMPORTANT]
-> **Status**: fully implemented on the legacy Python daemon; **partially ported** to the v3 Rust engine (`daemon/engine/`) — source listing, LADSPA effect chain, HuggingFace/model management, calibration recording, and the `VcInterface` D-Bus service exposing all of it are done. Calibration rendering and neural inference are not started — they need the inference engine. **The GUI still talks to the legacy Python daemon** (`vc_widget.py`/`vc_calibration_wizard.py` not yet cut over), so end users don't see any of this v3 work yet. Tracked as epic **[E10]** in [`v3-backlog.md`](v3-backlog.md) (story-level status) and itemised in [`v2-v3-gaps.md`](v2-v3-gaps.md#voice-changer-vc). This document describes the **target v3 architecture**; sections describing the current Python implementation are marked as such.
+> **Status**: fully implemented on the legacy Python daemon; **partially ported** to the v3 Rust engine (`daemon/engine/`) — source listing, LADSPA effect chain, HuggingFace/model management, calibration recording, the `VcInterface` D-Bus service exposing all of it, **and the GUI cutover to that interface**, are done and live-verified against a real Arctis Nova Pro Wireless. Calibration rendering and neural inference are not started — they need the inference engine, and the GUI gates their controls (Detect GPU, Install AI Dependencies, AI Voice Changer mode, the calibration wizard) accordingly. Tracked as epic **[E10]** in [`v3-backlog.md`](v3-backlog.md) (story-level status) and itemised in [`v2-v3-gaps.md`](v2-v3-gaps.md#voice-changer-vc). This document describes the **target v3 architecture**; sections describing the current Python implementation are marked as such.
 
 The Voice Changer is one of several D-Bus clients of the daemon — the GUI is not privileged over any other client. Consequently **all voice-changer logic lives in the daemon**: PipeWire graph management, settings persistence, calibration, model management, and (target state) neural inference. Clients only send settings and render state.
 
@@ -31,7 +31,7 @@ flowchart LR
     P3["Phase 3\nvc_models.rs + vc_hf_client.rs\n+ vc_base_models.rs"]:::done
     P4["Phase 4\nvc_calibration.rs\n(recording done, render blocked)"]:::partial
     P5a["Phase 5a\nVcInterface (D-Bus)\n+ mic_router hookup"]:::done
-    P5b["Phase 5b\nGUI cutover"]:::todo
+    P5b["Phase 5b\nGUI cutover"]:::done
     P6["Phase 6\ninference/ (ort engine,\nretrieval, providers)"]:::todo
 
     P1 --> P2 --> P3 --> P4 --> P5a --> P5b --> P6
@@ -150,9 +150,21 @@ Methods marked "not in the interface" are omitted rather than stubbed — callin
 
 Signals: `VcChanged` (settings), `DownloadProgress`/`DownloadComplete` (HF downloads), `BaseModelProgress`/`BaseModelComplete` — same pattern as `EqChanged`/`NcChanged` (zbus derives the signal name from the Rust fn name; none of these three interfaces override it, so it's not the fully-capitalised `VCChanged` the acronym might suggest). No byte-level download progress yet, only start/complete — `vc_hf_client`/`vc_base_models` don't stream progress internally.
 
-### Mic priority fix
+### Bugs found live-testing E10-S5a/S5b
 
-Wiring `SetVCSettings` surfaced a real bug opportunity in `mic_router.rs`: it previously took whichever of `SetNCSettings`/`SetVCSettings` called it last, with no actual precedence — the "VC output > NC output" comment in `mic_router.rs` wasn't enforced by anything before VC had a caller. It now tracks both candidate sources (`set_nc_source`/`set_vc_source`) and resolves priority on every change, independent of call order.
+Both phases were verified end to end against a real Arctis Nova Pro Wireless on a KDE Wayland session with PipeWire 1.6.8 (`busctl` calls, live `SetVCSettings` toggles, then the actual GUI). It surfaced four real bugs that unit tests alone couldn't have caught, all fixed:
+
+> [!NOTE]
+> **Mic priority arbitration.** `mic_router.rs` previously took whichever of `SetNCSettings`/`SetVCSettings` called it last, with no actual precedence — the "VC output > NC output" comment wasn't enforced by anything before VC had a caller. It now tracks both candidate sources (`set_nc_source`/`set_vc_source`) and resolves priority on every change, independent of call order.
+
+> [!NOTE]
+> **Duplicate `Arctis_Manager_Mic` on unclean restart.** `find_existing_module()` read PipeWire's `owner_module` as a JSON string; this PipeWire version (1.6.8) emits it as a JSON number, and the `?` inside the scan loop aborted the whole function right as it reached the real entry — so the daemon always concluded no existing module was present and created a duplicate. Reproduced with `systemctl --user kill -s SIGKILL lam-daemon` + restart; fixed to accept either JSON type and to skip non-matching entries instead of aborting the scan.
+
+> [!NOTE]
+> **Empty filter-chain graph crash.** Enabling VC with every individual LADSPA effect toggled off — enable the master switch, then pick an effect, a perfectly reasonable first-time sequence — tried to spawn a `libpipewire-module-filter-chain` graph with zero nodes. PipeWire rejects that outright (`filter.graph has no nodes`, exits with code 234) rather than passing audio through untouched; unlike NC, these plugins have no bypass port to fall back to. `apply_vc_ladspa` now treats zero active stages as inactive.
+
+> [!NOTE]
+> **GUI dead-ends on methods the interface doesn't have.** `_register_vc_signals` tried to subscribe to `InstallProgress`/`InstallComplete`, which `VcInterface` doesn't declare (no runtime deps to install in Rust) — `dbus_next` raises `AttributeError` for an `on_<signal>` accessor missing from the introspected interface, aborting registration of the *working* signals (`DownloadProgress`/`DownloadComplete`) too. Separately, "Detect GPU" and the calibration wizard's render step called methods (`DetectGPU`, `CalibrationStartRender`) that don't exist in the interface either — the GUI awaited a reply that would never come, hanging silently forever rather than erroring. Fixed by removing the dead subscriptions and gating the affected buttons on `GetVCCapabilities`'s `rvc.available`.
 
 ---
 

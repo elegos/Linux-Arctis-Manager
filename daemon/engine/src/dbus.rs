@@ -904,16 +904,28 @@ struct VcInterface {
 
 #[interface(name = "name.giacomofurlan.ArctisManager.Next.VC")]
 impl VcInterface {
+    /// Shape matches the legacy Python service's `GetVCCapabilities` (minus
+    /// `sources`, which the GUI already populates itself via `pulsectl` —
+    /// same as it does for NC — independently of this call) so
+    /// `vc_widget.py`'s existing `.get(key, default)`-defended handler needs
+    /// no changes: the model dropdown is populated from `rvc.models` here,
+    /// not from a separate `GetRVCModels` call, on the widget's initial show.
     #[zbus(name = "GetVCCapabilities")]
     async fn get_vc_capabilities(&self) -> String {
         let ladspa = crate::vc_ladspa_chain::capabilities();
         let base_models_dir = crate::vc_base_models::base_models_dir(&self.settings_base_dir);
         let (rmvpe, contentvec) = crate::vc_base_models::base_models_status(&base_models_dir);
+        let models = crate::vc_models::list_models(&self.settings_base_dir);
+        let models_folder = crate::vc_models::models_dir(&self.settings_base_dir);
         serde_json::json!({
             "ladspa": ladspa,
             "rvc": {
                 "available": false,
+                "backends": Vec::<String>::new(),
+                "ai_env_exists": false,
                 "base_models": { "rmvpe": rmvpe, "contentvec": contentvec },
+                "models": models,
+                "models_folder": models_folder.display().to_string(),
             },
         })
         .to_string()
@@ -925,23 +937,51 @@ impl VcInterface {
         serde_json::to_string(&cfg).unwrap_or_else(|_| "{}".to_string())
     }
 
+    /// The GUI's payload carries a top-level `mode` (`"ladspa"` | `"rvc"`)
+    /// that `VcLadspaConfig` doesn't model — RVC mode has no backend yet
+    /// ([E10-S6a]). The client's `enabled` checkbox is independent of that
+    /// mode selector, so a client that let a user pick "AI Voice Changer"
+    /// and enable would otherwise silently run the unrelated LADSPA chain
+    /// instead. Never actually activate LADSPA unless `mode` is `"ladspa"`
+    /// (or absent) — the server is the source of truth on what can run, not
+    /// whatever a client happens to send.
     #[zbus(name = "SetVCSettings")]
     async fn set_vc_settings(&self, json: &str) -> bool {
-        let cfg: VcLadspaConfig = match serde_json::from_str(json) {
+        let value: serde_json::Value = match serde_json::from_str(json) {
+            Ok(v) => v,
+            Err(e) => {
+                warn!("SetVCSettings: invalid JSON: {e}");
+                return false;
+            }
+        };
+        let cfg: VcLadspaConfig = match serde_json::from_value(value.clone()) {
             Ok(c) => c,
             Err(e) => {
                 warn!("SetVCSettings: invalid JSON: {e}");
                 return false;
             }
         };
+        let mode = value
+            .get("mode")
+            .and_then(|m| m.as_str())
+            .unwrap_or("ladspa")
+            .to_owned();
 
         if !save_vc_config(&self.settings_base_dir, &cfg) {
             warn!("SetVCSettings: failed to persist config");
         }
 
+        let effective_cfg = if mode == "ladspa" {
+            cfg.clone()
+        } else {
+            VcLadspaConfig {
+                enabled: false,
+                ..cfg.clone()
+            }
+        };
         let output_source = {
             let mut rt = self.vc_runtime.lock().await;
-            crate::vc_ladspa_chain::apply_vc_ladspa(&cfg, &mut rt).await
+            crate::vc_ladspa_chain::apply_vc_ladspa(&effective_cfg, &mut rt).await
         };
 
         {
@@ -1025,16 +1065,30 @@ impl VcInterface {
             let result =
                 crate::vc_hf_client::download_model(&repo_id, &filename, &dest, token.as_deref())
                     .await;
+            // Field names/shape match the legacy Python service's
+            // DownloadComplete payload (`dbus_service.py::_run_download`) so
+            // the existing GUI handler needs no changes: {success, message, name}.
             let json = match result {
-                Ok(outcome) => serde_json::json!({
-                    "success": true,
-                    "names": outcome.model_names,
-                    "index_downloaded": outcome.index_downloaded,
+                Ok(outcome) => {
+                    let joined = outcome.model_names.join(", ");
+                    let message = if joined.is_empty() {
+                        "Done.".to_string()
+                    } else {
+                        format!("Downloaded {joined}.")
+                    };
+                    serde_json::json!({
+                        "success": true,
+                        "message": message,
+                        "name": outcome.model_names.first().cloned().unwrap_or_default(),
+                    })
+                    .to_string()
+                }
+                Err(e) => serde_json::json!({
+                    "success": false,
+                    "message": format!("Download of {filename} failed: {e}"),
+                    "name": "",
                 })
                 .to_string(),
-                Err(e) => {
-                    serde_json::json!({ "success": false, "error": e.to_string() }).to_string()
-                }
             };
             let _ = signal_tx.send(SE::VCDownloadComplete { json });
         });
@@ -1056,11 +1110,19 @@ impl VcInterface {
             let _ = signal_tx.send(SE::VCBaseModelProgress {
                 message: "Downloading base models...".to_string(),
             });
+            // Same {success, message} shape as the legacy service's
+            // `_run_base_download`.
             let json = match crate::vc_base_models::download_base_models(&models_dir).await {
-                Ok(()) => serde_json::json!({ "success": true }).to_string(),
-                Err(e) => {
-                    serde_json::json!({ "success": false, "error": e.to_string() }).to_string()
-                }
+                Ok(()) => serde_json::json!({
+                    "success": true,
+                    "message": "Base models downloaded successfully.",
+                })
+                .to_string(),
+                Err(e) => serde_json::json!({
+                    "success": false,
+                    "message": e.to_string(),
+                })
+                .to_string(),
             };
             let _ = signal_tx.send(SE::VCBaseModelComplete { json });
         });

@@ -479,9 +479,9 @@ class QVCWidget(QWidget):
         self._rvc_gpu_lbl = QLabel(_T('ui', 'vc_rvc_gpu_none'))
         self._rvc_gpu_lbl.setWordWrap(True)
         gpu_row.addWidget(self._rvc_gpu_lbl, 1)
-        detect_btn = QPushButton(_T('ui', 'vc_rvc_detect_gpu'))
-        detect_btn.clicked.connect(self._detect_gpu)
-        gpu_row.addWidget(detect_btn)
+        self._rvc_detect_btn = QPushButton(_T('ui', 'vc_rvc_detect_gpu'))
+        self._rvc_detect_btn.clicked.connect(self._detect_gpu)
+        gpu_row.addWidget(self._rvc_detect_btn)
         nb.addLayout(gpu_row)
 
         install_row = QHBoxLayout()
@@ -717,15 +717,17 @@ class QVCWidget(QWidget):
         ms.addLayout(tune_row)
 
         # Guided calibration: read a short text, hear 3 tunings, pick by ear.
+        # Gated on rvc_avail in _on_vc_capabilities — recording alone works
+        # without a backend, but the wizard's render step does not.
         calib_row = QHBoxLayout()
-        calib_btn = QPushButton(_T('ui', 'vc_calib_button'))
-        calib_btn.setToolTip(
+        self._calib_btn = QPushButton(_T('ui', 'vc_calib_button'))
+        self._calib_btn.setToolTip(
             'Read a short text once; the daemon renders it through three\n'
             'candidate tunings. Listen (original included), pick the best,\n'
             'optionally refine, then save it for this model.'
         )
-        calib_btn.clicked.connect(self._open_calibration_wizard)
-        calib_row.addWidget(calib_btn, 1)
+        self._calib_btn.clicked.connect(self._open_calibration_wizard)
+        calib_row.addWidget(self._calib_btn, 1)
         reset_btn = QPushButton(_T('ui', 'vc_reset_params'))
         reset_btn.setToolTip('Revert all tuning for this model to the defaults.')
         reset_btn.clicked.connect(self._reset_model_params)
@@ -894,8 +896,16 @@ class QVCWidget(QWidget):
         ai_env_exists  = bool(self._rvc_caps.get('ai_env_exists', False))
         backends       = self._rvc_caps.get('backends', [])
         self._rvc_no_backend_frame.setVisible(not rvc_avail)
+        # DetectGPU/InstallAIDeps aren't in the v3 daemon's VcInterface yet
+        # ([E10-S6a] — inference engine not built) — clicking either would
+        # silently hang forever (no reply ever comes). Keep them visibly
+        # disabled with an explanation instead of a dead click.
+        no_engine_tip = _T('ui', 'vc_rvc_v3_no_engine')
+        self._rvc_detect_btn.setEnabled(False)
+        self._rvc_detect_btn.setToolTip(no_engine_tip)
+        self._rvc_install_btn.setEnabled(False)
+        self._rvc_install_btn.setToolTip(no_engine_tip)
         if not rvc_avail:
-            self._rvc_install_btn.setEnabled(True)
             if ai_env_exists:
                 self._rvc_no_backend_lbl.setText(_T('ui', 'vc_rvc_ai_incomplete'))
                 self._rvc_install_btn.setText(_T('ui', 'vc_rvc_repair_ai'))
@@ -906,6 +916,7 @@ class QVCWidget(QWidget):
             _T('ui', 'vc_rvc_backend') + ': ' + (', '.join(backends) if backends else '—')
         )
         self._rvc_model_combo.setEnabled(rvc_avail)
+        self._calib_btn.setEnabled(rvc_avail)
 
         models: list[dict] = self._rvc_caps.get('models', [])
         self._refresh_rvc_models(models, self._rvc_caps.get('models_folder', ''))

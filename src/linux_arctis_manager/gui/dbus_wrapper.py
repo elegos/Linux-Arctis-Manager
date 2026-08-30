@@ -266,16 +266,6 @@ class DbusWrapper(QObject):
             obj = bus.get_proxy_object(DBUS_BUS_NAME, DBUS_VC_OBJECT_PATH, introspection)
             iface = obj.get_interface(DBUS_VC_INTERFACE_NAME)
 
-            def on_progress(message: str) -> None:
-                self.sig_ai_progress.emit(message)
-
-            def on_complete(result_json: str) -> None:
-                try:
-                    data = json.loads(result_json)
-                    self.sig_ai_complete.emit(data.get('success', False), data.get('message', ''))
-                except Exception:
-                    self.sig_ai_complete.emit(False, result_json)
-
             def on_dl_progress(message: str) -> None:
                 self.sig_download_progress.emit(message)
 
@@ -301,12 +291,16 @@ class DbusWrapper(QObject):
                 except Exception:
                     self.sig_base_model_complete.emit(False, result_json)
 
-            iface.on_install_progress(on_progress)                      # type: ignore
-            iface.on_install_complete(on_complete)                       # type: ignore
+            # No InstallProgress/InstallComplete subscription: the v3 Rust
+            # daemon has no runtime Python deps to install, so VcInterface
+            # doesn't declare those signals — dbus_next raises AttributeError
+            # for an on_<signal> accessor the introspected interface doesn't
+            # have, which would abort this whole registration (including the
+            # download signals below) before it got here.
             iface.on_download_progress(on_dl_progress)                   # type: ignore
             iface.on_download_complete(on_dl_complete)                   # type: ignore
-            iface.on_base_model_download_progress(on_base_progress)     # type: ignore
-            iface.on_base_model_download_complete(on_base_complete)     # type: ignore
+            iface.on_base_model_progress(on_base_progress)               # type: ignore
+            iface.on_base_model_complete(on_base_complete)               # type: ignore
 
             self._vc_signal_loop = asyncio.get_running_loop()
             self._stop_vc_signal_future = self._vc_signal_loop.create_future()
