@@ -18,6 +18,7 @@ mod stream_monitor;
 mod vc_base_models;
 mod vc_calibration;
 mod vc_config;
+mod vc_dsp;
 mod vc_hf_client;
 mod vc_ladspa_chain;
 mod vc_models;

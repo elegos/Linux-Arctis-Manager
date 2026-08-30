@@ -55,6 +55,7 @@ Flat files (`vc_*.rs`), matching the project's existing convention for single/fe
 | `vc_base_models.rs` | RMVPE/ContentVec download + SHA-256 verification | `voice_changer/rvc/model_downloader.py` | — | Done |
 | `vc_calibration.rs` | Guided calibration: recording (`pw-record`, downmix, WAV) + variant proposal | `voice_changer/rvc/calibration.py` | — | Recording done — rendering needs `vc/inference/` |
 | `vc_rvc_config.rs` | `RvcParams` — per-model inference tuning | `voice_changer/rvc/backend.py` | — | Done |
+| `vc_dsp.rs` | Deterministic DSP glue: F0 coarse quantisation, gap filling, RMS envelope mix, soft limiter (more to come: VAD, VTLN, SOLA, RMVPE decode) | `pipeline.py` (pure-numpy parts) | — | In progress — 4 of ~10 functions ported, each verified against fixed Python-computed test vectors |
 | `vc_retrieval.rs` | Weighted k-NN blend over the model's `.index` feature vectors | `pipeline.py` (`faiss.read_index`/`search`) | — | Not started |
 | `vc/inference/engine.rs` | `ort` session(s): ContentVec → RMVPE (f0) → retrieval blend → synthesizer | `pipeline.py`, `rmvpe.py`, `synth_modules.py` | — | Not started — ONNX export of all 3 models verified, see [`voice-changer-rvc-pipeline.md`](voice-changer-rvc-pipeline.md) |
 | `vc/inference/providers.rs` | Execution-provider selection (CUDA/ROCm/OpenVINO/CPU) | `rvc/registry.py`, `rvc/pytorch_impl.py`, `rvc/openvino_impl.py` | — | Not started |
