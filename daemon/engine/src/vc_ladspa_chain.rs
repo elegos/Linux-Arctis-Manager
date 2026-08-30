@@ -342,6 +342,18 @@ pub async fn apply_vc_ladspa(
     };
 
     let stages = collect_stages(config);
+    if stages.is_empty() {
+        // A filter-chain graph with zero nodes is a hard PipeWire error
+        // ("filter.graph has no nodes", the process exits immediately) —
+        // unlike NC, these plugins have no bypass port to fall back to, so
+        // there is no meaningful graph to build here. "Enabled" with every
+        // individual effect toggled off has nothing to process; treat it as
+        // inactive rather than attempting (and failing) to spawn one.
+        // Found live: enabling VC before turning on any specific effect
+        // (a very reachable first-time-user sequence) crashed the spawn.
+        teardown_vc_ladspa(runtime).await;
+        return None;
+    }
     let stage_names: Vec<String> = stages.iter().map(|s| s.name.clone()).collect();
 
     // Try live update first (graph topology unchanged, only controls differ).

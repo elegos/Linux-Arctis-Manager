@@ -162,7 +162,7 @@ bands:
 
 ## Voice changer (VC)
 
-Tracked as epic **[E10]** in [`v3-backlog.md`](v3-backlog.md); target architecture documented in [`voice-changing-feature.md`](voice-changing-feature.md). Daemon-side is mostly ported; the GUI still talks to the legacy Python daemon's VC service (**[E10-S5b]**), so end users don't see any of this yet.
+Tracked as epic **[E10]** in [`v3-backlog.md`](v3-backlog.md); target architecture documented in [`voice-changing-feature.md`](voice-changing-feature.md). LADSPA effects, model management, HuggingFace, calibration recording, and the GUI are all live on v3, verified against a real device. RVC (AI voice conversion) is the one thing still missing — it needs the inference engine ([E10-S6a]/[E10-S6b]).
 
 | Feature | V2 | V3 |
 |---|---|---|
@@ -180,7 +180,7 @@ Tracked as epic **[E10]** in [`v3-backlog.md`](v3-backlog.md); target architectu
 | GPU detection | `ai_deps.py` | **Missing** ([E10-S6a] execution-provider selection) |
 | AI deps install (pip in venv, with progress signal) | `InstallAIDeps`, `InstallProgress/Complete` | **N/A** — Rust daemon has no runtime Python deps to install |
 | Mic priority arbitration (VC output takes precedence over NC) | `MicRouter` | **Done** — `mic_router.rs` now tracks both candidate sources and resolves VC > NC > teardown independently of call order (previously whichever of NC/VC's D-Bus handler ran last won outright) |
-| GUI wired to the V3 interface | — | **Missing** ([E10-S5b]) |
+| GUI wired to the V3 interface | — | **Done** — live-verified against a real device |
 
 ---
 
