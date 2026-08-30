@@ -157,16 +157,33 @@ async fn find_existing_module() -> Option<u32> {
         .await
         .ok()
         .filter(|o| o.status.success())?;
+    parse_existing_module(&String::from_utf8_lossy(&out.stdout))
+}
 
-    let json: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
-    for source in json.as_array()? {
+/// Pure parse of `pactl -f json list sources` output, looking for `owner_module`
+/// of the source named [`MIC_NAME`]. `owner_module` is a JSON number on some
+/// PipeWire versions and a quoted string on others — both are accepted.
+///
+/// A source whose name is missing, or a different name, is skipped rather
+/// than aborting the whole scan — the previous version used `?` inside the
+/// loop, so a single non-matching or malformed entry anywhere in the list
+/// made the function return `None` even when a real match followed later,
+/// silently leaking a duplicate `Arctis_Manager_Mic` module on every restart.
+fn parse_existing_module(json: &str) -> Option<u32> {
+    let sources: serde_json::Value = serde_json::from_str(json).ok()?;
+    for source in sources.as_array()? {
         let name = source["properties"]["node.name"]
             .as_str()
-            .or_else(|| source["name"].as_str())?;
-        if name == MIC_NAME {
-            // `owner_module` is a string in pactl JSON output.
-            let mod_str = source["owner_module"].as_str()?;
-            return mod_str.parse().ok();
+            .or_else(|| source["name"].as_str());
+        if name != Some(MIC_NAME) {
+            continue;
+        }
+        let owner = &source["owner_module"];
+        if let Some(id) = owner.as_u64() {
+            return Some(id as u32);
+        }
+        if let Some(id) = owner.as_str().and_then(|s| s.parse().ok()) {
+            return Some(id);
         }
     }
     None
@@ -183,6 +200,49 @@ mod tests {
         let s = MicRouterState::new();
         assert!(s.module_id.is_none());
         assert!(s.current_master.is_none());
+    }
+
+    // ── parse_existing_module (pure) ────────────────────────────────────
+
+    #[test]
+    fn parse_existing_module_accepts_numeric_owner_module() {
+        // Real PipeWire 1.6.8 `pactl -f json list sources` shape: owner_module
+        // is a JSON number here, not a string.
+        let json = r#"[{"name": "Arctis_Manager_Mic", "owner_module": 536870921,
+            "properties": {"node.name": "Arctis_Manager_Mic"}}]"#;
+        assert_eq!(parse_existing_module(json), Some(536870921));
+    }
+
+    #[test]
+    fn parse_existing_module_accepts_string_owner_module() {
+        let json = r#"[{"name": "Arctis_Manager_Mic", "owner_module": "42",
+            "properties": {"node.name": "Arctis_Manager_Mic"}}]"#;
+        assert_eq!(parse_existing_module(json), Some(42));
+    }
+
+    #[test]
+    fn parse_existing_module_skips_non_matching_entries_instead_of_aborting() {
+        // A source with neither `properties.node.name` nor a top-level `name`
+        // (or simply a different name) must not abort the scan before it
+        // reaches the real Arctis_Manager_Mic entry later in the array.
+        let json = r#"[
+            {"properties": {}},
+            {"name": "some_other_source", "owner_module": 1, "properties": {}},
+            {"name": "Arctis_Manager_Mic", "owner_module": 99,
+             "properties": {"node.name": "Arctis_Manager_Mic"}}
+        ]"#;
+        assert_eq!(parse_existing_module(json), Some(99));
+    }
+
+    #[test]
+    fn parse_existing_module_none_when_absent() {
+        let json = r#"[{"name": "something_else", "owner_module": 1, "properties": {}}]"#;
+        assert_eq!(parse_existing_module(json), None);
+    }
+
+    #[test]
+    fn parse_existing_module_none_on_bad_json() {
+        assert_eq!(parse_existing_module("not json"), None);
     }
 
     // ── resolve_master priority (pure) ──────────────────────────────────
