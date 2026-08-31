@@ -1,0 +1,9 @@
+Your distribution wasn't specifically recognized, but it uses dnf like Fedora does — the same package name is likely to work:
+
+    sudo dnf install onnxruntime
+
+If that package isn't found on your distribution's repositories, install it via pip instead (asks you to confirm the exact command before running it — this is not a system package, so review it like you would any other download):
+
+    pip install --user onnxruntime
+
+After installing either, click "Verify" below.

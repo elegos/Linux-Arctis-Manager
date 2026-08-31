@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QGroupBox,
                                QStackedWidget, QVBoxLayout, QWidget)
 
 from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
+from linux_arctis_manager.gui.onnxruntime_install_dialog import OnnxRuntimeInstallDialog
 from linux_arctis_manager.i18n import I18n
 
 logger = logging.getLogger('QVCWidget')
@@ -76,7 +77,6 @@ class QVCWidget(QWidget):
     sig_vc_capabilities  = Signal(object)
     sig_vc_settings      = Signal(object)
     sig_rvc_models       = Signal(object)
-    sig_gpu_detected     = Signal(object)
     sig_hf_results       = Signal(object)
     sig_hf_repo_files    = Signal(object)
     sig_delete_result    = Signal(object)
@@ -100,7 +100,6 @@ class QVCWidget(QWidget):
         self.sig_vc_capabilities.connect(self._on_vc_capabilities)
         self.sig_vc_settings.connect(self._on_vc_settings)
         self.sig_rvc_models.connect(self._on_rvc_models)
-        self.sig_gpu_detected.connect(self._on_gpu_detected)
         self.sig_hf_results.connect(self._on_hf_results)
         self.sig_hf_repo_files.connect(self._on_hf_repo_files)
         self.sig_delete_result.connect(self._on_delete_result)
@@ -475,31 +474,10 @@ class QVCWidget(QWidget):
         self._rvc_no_backend_lbl.setWordWrap(True)
         nb.addWidget(self._rvc_no_backend_lbl)
 
-        gpu_row = QHBoxLayout()
-        self._rvc_gpu_lbl = QLabel(_T('ui', 'vc_rvc_gpu_none'))
-        self._rvc_gpu_lbl.setWordWrap(True)
-        gpu_row.addWidget(self._rvc_gpu_lbl, 1)
-        self._rvc_detect_btn = QPushButton(_T('ui', 'vc_rvc_detect_gpu'))
-        self._rvc_detect_btn.clicked.connect(self._detect_gpu)
-        gpu_row.addWidget(self._rvc_detect_btn)
-        nb.addLayout(gpu_row)
-
         install_row = QHBoxLayout()
-        inst_lbl = QLabel(_T('ui', 'vc_rvc_select_backend'))
-        inst_lbl.setFixedWidth(110)
-        install_row.addWidget(inst_lbl)
-        self._rvc_install_combo = QComboBox()
-        for _key, _i18n in [
-            ('auto',   'vc_rvc_backend_auto'),
-            ('nvidia', 'vc_rvc_backend_nvidia'),
-            ('amd',    'vc_rvc_backend_amd'),
-            ('intel',  'vc_rvc_backend_intel'),
-            ('cpu',    'vc_rvc_backend_cpu'),
-        ]:
-            self._rvc_install_combo.addItem(_T('ui', _i18n), _key)
-        install_row.addWidget(self._rvc_install_combo, 1)
+        install_row.addStretch(1)
         self._rvc_install_btn = QPushButton(_T('ui', 'vc_rvc_install_ai'))
-        self._rvc_install_btn.clicked.connect(self._install_ai_deps)
+        self._rvc_install_btn.clicked.connect(self._open_onnxruntime_install_dialog)
         install_row.addWidget(self._rvc_install_btn)
         nb.addLayout(install_row)
 
@@ -893,25 +871,10 @@ class QVCWidget(QWidget):
 
         # RVC panel — AI backend
         rvc_avail      = bool(self._rvc_caps.get('available', False))
-        ai_env_exists  = bool(self._rvc_caps.get('ai_env_exists', False))
         backends       = self._rvc_caps.get('backends', [])
         self._rvc_no_backend_frame.setVisible(not rvc_avail)
-        # DetectGPU/InstallAIDeps aren't in the v3 daemon's VcInterface yet
-        # ([E10-S6a] — inference engine not built) — clicking either would
-        # silently hang forever (no reply ever comes). Keep them visibly
-        # disabled with an explanation instead of a dead click.
-        no_engine_tip = _T('ui', 'vc_rvc_v3_no_engine')
-        self._rvc_detect_btn.setEnabled(False)
-        self._rvc_detect_btn.setToolTip(no_engine_tip)
-        self._rvc_install_btn.setEnabled(False)
-        self._rvc_install_btn.setToolTip(no_engine_tip)
         if not rvc_avail:
-            if ai_env_exists:
-                self._rvc_no_backend_lbl.setText(_T('ui', 'vc_rvc_ai_incomplete'))
-                self._rvc_install_btn.setText(_T('ui', 'vc_rvc_repair_ai'))
-            else:
-                self._rvc_no_backend_lbl.setText(_T('ui', 'vc_rvc_no_backend'))
-                self._rvc_install_btn.setText(_T('ui', 'vc_rvc_install_ai'))
+            self._rvc_no_backend_lbl.setText(_T('ui', 'vc_rvc_no_backend'))
         self._rvc_backend_lbl.setText(
             _T('ui', 'vc_rvc_backend') + ': ' + (', '.join(backends) if backends else '—')
         )
@@ -1419,20 +1382,13 @@ class QVCWidget(QWidget):
             self._hf_token_hint.setText(_T('ui', 'vc_rvc_hf_token_saved'))
             QTimer.singleShot(3000, lambda: self._hf_token_hint.setText(_T('ui', 'vc_rvc_hf_token_hint')))
 
-    def _detect_gpu(self) -> None:
-        self._rvc_gpu_lbl.setText(_T('ui', 'vc_rvc_detecting'))
-        DbusWrapper.detect_gpu(self.sig_gpu_detected)
-
-    def _on_gpu_detected(self, info: dict) -> None:
-        gtype = info.get('type')
-        name  = info.get('name', '')
-        if gtype:
-            self._rvc_gpu_lbl.setText(f"{_T('ui', 'vc_rvc_gpu_detected')} {name or gtype}")
-            idx = self._rvc_install_combo.findData(gtype)
-            if idx >= 0:
-                self._rvc_install_combo.setCurrentIndex(idx)
-        else:
-            self._rvc_gpu_lbl.setText(_T('ui', 'vc_rvc_gpu_none'))
+    def _open_onnxruntime_install_dialog(self) -> None:
+        dialog = OnnxRuntimeInstallDialog(self)
+        dialog.exec()
+        # The user may have installed it and clicked "Verify" inside the
+        # dialog, or installed it and just closed the dialog — either way,
+        # re-check capabilities so the panel updates without a manual retry.
+        DbusWrapper.request_vc_capabilities(self.sig_vc_capabilities)
 
     def _download_base_models(self) -> None:
         reply = QMessageBox.question(
@@ -1454,11 +1410,6 @@ class QVCWidget(QWidget):
             DbusWrapper.request_vc_capabilities(self.sig_vc_capabilities)
         else:
             self._rvc_base_download_btn.setEnabled(True)
-
-    def _install_ai_deps(self) -> None:
-        backend = self._rvc_install_combo.currentData() or 'auto'
-        self._rvc_install_btn.setEnabled(False)
-        DbusWrapper.install_ai_deps(backend)
 
     def _retry_check(self) -> None:
         DbusWrapper.request_vc_capabilities(self.sig_vc_capabilities)

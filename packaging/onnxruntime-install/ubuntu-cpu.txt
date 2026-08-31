@@ -1,0 +1,15 @@
+Ubuntu ships ONNX Runtime in the "universe" component (community-maintained, not "main" — usually already enabled on desktop installs):
+
+    sudo apt install libonnxruntime1
+
+If that fails with "unable to locate package", enable universe first:
+
+    sudo add-apt-repository universe
+    sudo apt update
+    sudo apt install libonnxruntime1
+
+If it's still not found, your Ubuntu release may not carry it — install it via pip instead (asks you to confirm the exact command before running it — this is not a system package, so review it like you would any other download):
+
+    pip install --user onnxruntime
+
+After installing, click "Verify" below.

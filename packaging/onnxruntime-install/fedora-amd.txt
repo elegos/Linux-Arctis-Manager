@@ -1,0 +1,9 @@
+Fedora ships an AMD ROCm-accelerated build of ONNX Runtime as an official package — no extra repositories needed:
+
+    sudo dnf install onnxruntime-rocm
+
+This installs alongside (not instead of) the plain CPU package, so it's safe to have both. After installing, click "Verify" below.
+
+If your GPU isn't ROCm-supported, or you'd rather not install it, the CPU-only package also works:
+
+    sudo dnf install onnxruntime

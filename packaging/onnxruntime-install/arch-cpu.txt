@@ -1,0 +1,5 @@
+Arch ships ONNX Runtime in the official "extra" repository. This installs the CPU backend, which always works regardless of your graphics card:
+
+    sudo pacman -S onnxruntime
+
+After installing, click "Verify" below.
