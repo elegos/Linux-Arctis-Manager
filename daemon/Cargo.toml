@@ -51,6 +51,12 @@ realfft = "3"
 # of them present. cuda/rocm/openvino only add the Rust-side EP option types;
 # whether each is actually usable is decided at runtime by is_available()/
 # register(), with automatic fallback to the CPU provider.
+# RNG for the synthesizer's externalised VITS/NSF noise inputs — added in E10-S6a.
+# Pinned to match rand_distr 0.6's own rand_core 0.10 requirement — rand 0.9
+# resolves to an incompatible rand_core 0.9, so its Distribution trait
+# doesn't line up with rand_distr's despite both nominally being "rand ecosystem".
+rand = "0.10"
+rand_distr = "0.6"
 ort = { version = "2.0.0-rc.13", default-features = false, features = [
     "std",
     "ndarray",

@@ -33,6 +33,8 @@ zip = { workspace = true }
 flate2 = { workspace = true }
 realfft = { workspace = true }
 ort = { workspace = true }
+rand = { workspace = true }
+rand_distr = { workspace = true }
 
 [dev-dependencies]
 lam-hidraw-helper = { workspace = true }

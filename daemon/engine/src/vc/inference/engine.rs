@@ -1,14 +1,17 @@
-// The `ort`-based ONNX inference engine ([E10-S6a]): loads ContentVec and
-// RMVPE sessions and runs them on real windows of audio/mel input.
+// The `ort`-based ONNX inference engine ([E10-S6a]): loads ContentVec,
+// RMVPE, and per-model synthesizer sessions and runs them on real windows of
+// audio/mel/feature input.
 //
-// The synthesizer (VITS-style, per-user `.pth` -> ONNX) is **not** wired up
-// yet — the one-shot Python export tool it needs (`ExportableSynth`, see
-// docs/voice-changer-rvc-pipeline.md) was prototyped and numerically
-// verified in an earlier session but never committed as a durable script,
-// so there is currently no `.onnx` synthesizer to load. ContentVec and
-// RMVPE, by contrast, are published pre-converted in the project's own
+// ContentVec and RMVPE are published pre-converted in the project's own
 // `elegos/Linux-Arctis-Manager-AI-Models` release and downloaded by
-// `vc_base_models.rs`, so both are fully wired and live-verified here.
+// `vc_base_models.rs`. The synthesizer (VITS-style) is per-user — converted
+// locally, once, by the one-shot offline tool at
+// `voice_changer/rvc/export_onnx.py` (the "one Python piece that stays") —
+// and takes three externalised-randomness inputs (`prior_noise`,
+// `rand_phase`, `source_noise`) that `SynthSession::infer` draws fresh per
+// call, matching `SynthesizerTrnMs768NSFsid.infer()`'s own internal
+// `torch.randn_like`/`torch.rand` draws. All three sessions are live-verified
+// against real `onnxruntime` output in this module's `#[ignore]`d tests.
 //
 // Runtime dependency: this crate is built with `ort`'s `load-dynamic`
 // feature (see daemon/Cargo.toml), so `libonnxruntime.so` is *not* bundled
@@ -23,6 +26,7 @@ use std::path::Path;
 
 use ort::session::Session;
 use ort::value::Tensor;
+use rand::RngExt;
 
 use super::providers;
 
@@ -141,6 +145,172 @@ impl RmvpeSession {
         let flat: Vec<f32> = arr.iter().copied().collect();
         let trimmed: Vec<f32> = flat[..n_frames * 360].to_vec();
         Ok((trimmed, n_frames))
+    }
+}
+
+// ── Synthesizer ──────────────────────────────────────────────────────────
+
+/// Read the size of a named input's `dim_index`-th dimension from a
+/// session's static-shape graph metadata (as exported by
+/// `export_onnx.py` — every synthesizer input has a concrete, non-dynamic
+/// shape, since the model was exported for exactly this application's fixed
+/// windowing).
+fn static_input_dim(session: &Session, name: &str, dim_index: usize) -> Result<usize, EngineError> {
+    let outlet = session
+        .inputs()
+        .iter()
+        .find(|o| o.name() == name)
+        .ok_or_else(|| EngineError(format!("model has no input named {name:?}")))?;
+    match outlet.dtype() {
+        ort::value::ValueType::Tensor { shape, .. } => {
+            let dim = shape.get(dim_index).copied().ok_or_else(|| {
+                EngineError(format!(
+                    "{name}: dimension {dim_index} out of range in shape {shape:?}"
+                ))
+            })?;
+            if dim < 0 {
+                return Err(EngineError(format!(
+                    "{name}: dimension {dim_index} is dynamic ({dim}) — expected a static shape"
+                )));
+            }
+            Ok(dim as usize)
+        }
+        other => Err(EngineError(format!(
+            "{name}: expected a tensor input, got {other:?}"
+        ))),
+    }
+}
+
+/// A per-voice-model synthesizer session (VITS-style: TextEncoder +
+/// normalizing-flow + NSF-HiFiGAN generator), exported by
+/// `voice_changer/rvc/export_onnx.py`. `inter_channels`/`t_audio` are read
+/// from the model's own static input shapes at load time rather than
+/// hardcoded, since they vary per model (`inter_channels` is conventionally
+/// 192 for the RVC v2/768 family, but `t_audio` depends on the model's
+/// native sample rate — e.g. 24960 for a 48kHz model, 20800 for 40kHz).
+pub struct SynthSession {
+    session: Session,
+    inter_channels: usize,
+    t_audio: usize,
+}
+
+impl SynthSession {
+    pub fn load(path: &Path) -> Result<Self, EngineError> {
+        let session = load_session(path)?;
+        let inter_channels = static_input_dim(&session, "prior_noise", 1)?;
+        let t_audio = static_input_dim(&session, "source_noise", 1)?;
+        Ok(Self {
+            session,
+            inter_channels,
+            t_audio,
+        })
+    }
+
+    pub fn t_audio(&self) -> usize {
+        self.t_audio
+    }
+
+    /// `phone`: `[n_feat, 768]` row-major (ContentVec features). `pitch`:
+    /// coarse F0 indices (0-255, port of `pipeline.py::_f0_to_coarse`).
+    /// `pitchf`: F0 in Hz. `sid`: speaker id (0 for single-speaker models).
+    /// Draws fresh `prior_noise`/`rand_phase`/`source_noise` from `rng` each
+    /// call — matching `SynthesizerTrnMs768NSFsid.infer()`'s own internal
+    /// `torch.randn_like`/`torch.rand` draws, which is *why* two calls with
+    /// identical (phone, pitch, pitchf) inputs produce audibly-similar but
+    /// not identical output (by VITS design, not a bug — see
+    /// `docs/voice-changer-rvc-pipeline.md`). Returns the waveform at the
+    /// model's native sample rate, length [`Self::t_audio`].
+    pub fn infer(
+        &mut self,
+        phone: &[f32],
+        n_feat: usize,
+        pitch: &[i64],
+        pitchf: &[f32],
+        sid: i64,
+        rng: &mut impl rand::Rng,
+    ) -> Result<Vec<f32>, EngineError> {
+        let standard_normal = rand_distr::StandardNormal;
+        let prior_noise: Vec<f32> = (0..self.inter_channels * n_feat)
+            .map(|_| rng.sample::<f32, _>(standard_normal))
+            .collect();
+        let rand_phase = vec![rng.random::<f32>()];
+        let source_noise: Vec<f32> = (0..self.t_audio)
+            .map(|_| rng.sample::<f32, _>(standard_normal))
+            .collect();
+        self.infer_with_noise(
+            phone,
+            n_feat,
+            pitch,
+            pitchf,
+            sid,
+            &prior_noise,
+            &rand_phase,
+            &source_noise,
+        )
+    }
+
+    /// Lower-level entry point taking the three externalised-randomness
+    /// tensors explicitly instead of drawing them — [`Self::infer`]'s real
+    /// implementation, split out so tests can supply fixed, reproducible
+    /// noise and assert an exact match against a Python/`onnxruntime`
+    /// reference (matching this crate's usual verification style).
+    #[allow(clippy::too_many_arguments)]
+    pub fn infer_with_noise(
+        &mut self,
+        phone: &[f32],
+        n_feat: usize,
+        pitch: &[i64],
+        pitchf: &[f32],
+        sid: i64,
+        prior_noise: &[f32],
+        rand_phase: &[f32],
+        source_noise: &[f32],
+    ) -> Result<Vec<f32>, EngineError> {
+        assert_eq!(phone.len(), n_feat * 768);
+        assert_eq!(pitch.len(), n_feat);
+        assert_eq!(pitchf.len(), n_feat);
+        assert_eq!(prior_noise.len(), self.inter_channels * n_feat);
+        assert_eq!(rand_phase.len(), 1);
+        assert_eq!(source_noise.len(), self.t_audio);
+
+        let prior_noise = prior_noise.to_vec();
+        let rand_phase = rand_phase.to_vec();
+        let source_noise = source_noise.to_vec();
+
+        let phone_t = Tensor::from_array((vec![1i64, n_feat as i64, 768i64], phone.to_vec()))?;
+        let pitch_t = Tensor::from_array((vec![1i64, n_feat as i64], pitch.to_vec()))?;
+        let pitchf_t = Tensor::from_array((vec![1i64, n_feat as i64], pitchf.to_vec()))?;
+        let sid_t = Tensor::from_array((vec![1i64], vec![sid]))?;
+        let prior_t = Tensor::from_array((
+            vec![1i64, self.inter_channels as i64, n_feat as i64],
+            prior_noise,
+        ))?;
+        let phase_t = Tensor::from_array((vec![1i64, 1i64, 1i64], rand_phase))?;
+        let noise_t = Tensor::from_array((vec![1i64, self.t_audio as i64, 1i64], source_noise))?;
+
+        // export_onnx.py's static-shape export lets the tracer prove
+        // phone_lengths is dead code (always == n_feat) and drop it from
+        // the graph — only feed inputs the graph actually declares.
+        let candidates: Vec<(&str, ort::session::SessionInputValue)> = vec![
+            ("phone", phone_t.into()),
+            ("pitch", pitch_t.into()),
+            ("pitchf", pitchf_t.into()),
+            ("sid", sid_t.into()),
+            ("prior_noise", prior_t.into()),
+            ("rand_phase", phase_t.into()),
+            ("source_noise", noise_t.into()),
+        ];
+        let declared: std::collections::HashSet<&str> =
+            self.session.inputs().iter().map(|o| o.name()).collect();
+        let feed: Vec<(std::borrow::Cow<str>, ort::session::SessionInputValue)> = candidates
+            .into_iter()
+            .filter(|(name, _)| declared.contains(name))
+            .map(|(name, v)| (std::borrow::Cow::Borrowed(name), v))
+            .collect();
+
+        let outputs = self.session.run(ort::session::SessionInputs::from(feed))?;
+        let arr = outputs["audio"].try_extract_array::<f32>()?;
+        Ok(arr.iter().copied().collect())
     }
 }
 
@@ -351,6 +521,128 @@ mod tests {
         let frame64 = &salience[64 * 360..64 * 360 + 10];
         for (got, want) in frame64.iter().zip(frame64_expected.iter()) {
             assert!((got - want).abs() < 1e-4, "frame 64: {got} vs {want}");
+        }
+    }
+
+    /// Not run by default — needs a real onnxruntime shared library and a
+    /// real synthesizer `.onnx` exported by `export_onnx.py` from a real RVC
+    /// v2 voice model. Run manually with
+    /// `LAM_ORT_DYLIB_PATH=... LAM_TEST_SYNTH_ONNX_PATH=... cargo test --bin lam-daemon -- --ignored live_synth_matches_python_reference --nocapture`
+    /// All inputs are closed-form (no RNG), reproduced bit-for-bit from
+    /// `gen_synth_reference.py`; reference output values captured from the
+    /// real `onnxruntime` Python package running the same exported model
+    /// (`DvaOverwatch_350e.onnx`: RVC v2, 48kHz, inter_channels=192,
+    /// t_audio=24960 for a 52-frame window).
+    #[test]
+    #[ignore]
+    fn live_synth_matches_python_reference() {
+        init_runtime(&dylib_path()).expect("init_runtime");
+        let onnx_path = std::env::var("LAM_TEST_SYNTH_ONNX_PATH").unwrap_or_else(|_| {
+            format!(
+                "{}/.config/arctis_manager/rvc_models/DvaOverwatch_350e.onnx",
+                std::env::var("HOME").expect("HOME not set")
+            )
+        });
+        let mut session = SynthSession::load(std::path::Path::new(&onnx_path))
+            .unwrap_or_else(|e| panic!("failed to load {onnx_path}: {e}"));
+        assert_eq!(session.inter_channels, 192);
+        assert_eq!(session.t_audio(), 24960);
+
+        const T: usize = 52;
+        const INTER: usize = 192;
+        const T_AUDIO: usize = 24960;
+
+        let mut phone = vec![0.0f32; T * 768];
+        for t in 0..T {
+            for c in 0..768 {
+                let (cf, tf) = (c as f32, t as f32);
+                phone[t * 768 + c] =
+                    0.3 * (cf * 0.02 + tf * 0.15).sin() + 0.05 * (cf * 0.01 - tf * 0.05).cos();
+            }
+        }
+        let pitch: Vec<i64> = (0..T).map(|t| ((t as i64 * 7) % 254) + 1).collect();
+        let pitchf: Vec<f32> = (0..T)
+            .map(|t| 150.0 + 50.0 * (t as f32 * 0.3).sin())
+            .collect();
+        let sid = 0i64;
+
+        let mut prior_noise = vec![0.0f32; INTER * T];
+        for c in 0..INTER {
+            for t in 0..T {
+                let (cf, tf) = (c as f32, t as f32);
+                prior_noise[c * T + t] = 0.2 * (cf * 0.07 + tf * 0.11).sin();
+            }
+        }
+        let rand_phase = [0.37f32];
+        let source_noise: Vec<f32> = (0..T_AUDIO)
+            .map(|a| 0.15 * (a as f32 * 0.0031).sin())
+            .collect();
+
+        // Python reference generator lays prior_noise out as [INTER, T]
+        // row-major (matching the ONNX tensor's [1, INTER, T] shape)
+        // directly — no transpose needed here.
+        let audio = session
+            .infer_with_noise(
+                &phone,
+                T,
+                &pitch,
+                &pitchf,
+                sid,
+                &prior_noise,
+                &rand_phase,
+                &source_noise,
+            )
+            .expect("infer_with_noise");
+        assert_eq!(audio.len(), T_AUDIO);
+
+        let head_expected = [
+            -0.09433904f32,
+            -0.09637739,
+            -0.09785487,
+            -0.09753442,
+            -0.10288999,
+            -0.11087673,
+            -0.11297990,
+            -0.10696650,
+            -0.09466293,
+            -0.07942743,
+        ];
+        for (got, want) in audio[..10].iter().zip(head_expected.iter()) {
+            assert!((got - want).abs() < 1e-2, "head: {got} vs {want}");
+        }
+
+        let mid_expected = [
+            -0.01957435f32,
+            -0.02473807,
+            -0.02307505,
+            -0.01485125,
+            -0.01143346,
+            -0.01497765,
+            -0.02232895,
+            -0.03171851,
+            -0.04702130,
+            -0.06882887,
+        ];
+        let mid = &audio[12480..12490];
+        for (got, want) in mid.iter().zip(mid_expected.iter()) {
+            assert!((got - want).abs() < 1e-2, "mid: {got} vs {want}");
+        }
+
+        let tail_expected = [
+            -0.05417576f32,
+            -0.05305578,
+            -0.05017732,
+            -0.04683389,
+            -0.04469912,
+            -0.04222867,
+            -0.03917906,
+            -0.03738729,
+            -0.03639905,
+            -0.03565915,
+        ];
+        let tail = &audio[T_AUDIO - 10..];
+        for (got, want) in tail.iter().zip(tail_expected.iter()) {
+            assert!((got - want).abs() < 1e-2, "tail: {got} vs {want}");
         }
     }
 }
