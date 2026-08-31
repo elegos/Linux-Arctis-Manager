@@ -100,7 +100,7 @@ pub fn downmix_stereo_f32_to_mono(buf: &[u8]) -> (Vec<i16>, f32) {
     let usable = buf.len() - (buf.len() % BYTES_PER_FRAME as usize);
     let mut peak = 0.0f32;
     let mut mono = Vec::with_capacity(usable / BYTES_PER_FRAME as usize);
-    for frame in buf[..usable].chunks_exact(BYTES_PER_FRAME as usize) {
+    for frame in buf[..usable].as_chunks::<{ BYTES_PER_FRAME as usize }>().0 {
         let l = f32::from_le_bytes([frame[0], frame[1], frame[2], frame[3]]);
         let r = f32::from_le_bytes([frame[4], frame[5], frame[6], frame[7]]);
         let l = if l.is_finite() { l } else { 0.0 };

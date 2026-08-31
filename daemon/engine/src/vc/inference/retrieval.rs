@@ -123,8 +123,10 @@ impl<'a> Reader<'a> {
     fn f32_vec(&mut self, n: usize) -> Result<Vec<f32>, RetrievalError> {
         let bytes = self.take(n * 4)?;
         Ok(bytes
-            .chunks_exact(4)
-            .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| f32::from_le_bytes(*c))
             .collect())
     }
 }
