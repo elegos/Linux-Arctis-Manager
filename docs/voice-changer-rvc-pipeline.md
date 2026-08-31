@@ -173,7 +173,7 @@ flowchart TB
     subgraph new["Target — [E10-S6a]"]
         direction TB
         PROV["vc/inference/providers.rs ✅\nExecution-provider selection\nCUDA / ROCm / OpenVINO / CPU"]
-        ENGINE["vc/inference/engine.rs 🔶\nContentVec + RMVPE ort::Session loading\n+ inference, live-verified against real\nonnxruntime output — Synth session +\nstreaming state machine still to come"]
+        ENGINE["vc/inference/engine.rs 🔶\nContentVec + RMVPE + Synth ort::Session\nloading + inference, all live-verified\nagainst real onnxruntime output —\nstreaming state machine still to come"]
         DSP["vc_dsp.rs ✅\nported DSP glue: F0 post-processing,\nVTLN, SOLA, envelope gate, soft limiter,\nRMS mix — pure, unit-tested functions"]
         RETR["vc/inference/retrieval.rs ✅\nbrute-force weighted k-NN\nover the model's .index vectors\n(hand-parsed IndexIVFFlat format)"]
         MEL["vc/inference/mel.rs ✅\nnative mel-spectrogram (rustfft/realfft)\n+ computed filterbank, checked against\ntorchaudio's real source"]
