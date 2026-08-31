@@ -1,4 +1,6 @@
 #[allow(dead_code)]
+pub mod engine;
+#[allow(dead_code)]
 pub mod mel;
 #[allow(dead_code)]
 pub mod providers;
