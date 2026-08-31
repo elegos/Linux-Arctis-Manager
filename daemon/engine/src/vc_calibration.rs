@@ -531,6 +531,18 @@ fn render_blocking(
         INPUT_NORMALIZE_TARGET_RMS,
         INPUT_NORMALIZE_MAX_GAIN,
     );
+    // `vc_dsp::detect_leading_noise_floor`/`calibrate_gate_from_noise_floor`
+    // exist and are unit-tested, but are deliberately NOT wired in here yet:
+    // live-verified (then reverted before commit) that stacking a
+    // noise-floor-derived `knee_floor` on top of `normalize_input_level`'s
+    // gain overshoots — the margin is computed against the *already
+    // boosted* signal, so the resulting floor sits above real (also
+    // boosted) quiet trailing speech, worse than the fixed default this
+    // was meant to improve on. Needs a real design decision (measure
+    // against the pre-gain recording instead? make the two mutually
+    // exclusive rather than additive? smaller margins?) before it's safe
+    // to combine with the gain above — tracked as a follow-up, not solved
+    // here.
 
     std::fs::create_dir_all(out_dir).map_err(|e| format!("create output dir: {e}"))?;
 
