@@ -239,6 +239,48 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    /// Not run by default (`cargo test`) — real network call against the
+    /// live `elegos/Linux-Arctis-Manager-AI-Models` repo. Run manually with
+    /// `cargo test --bin lam-daemon -- --ignored live_latest_release_resolves_known_models`
+    /// after publishing a new release, to sanity-check resolution end to end
+    /// without downloading the full multi-hundred-MB model files.
+    #[tokio::test]
+    #[ignore]
+    async fn live_latest_release_resolves_known_models() {
+        let release = fetch_latest_release().await.expect("fetch latest release");
+        let manifest_asset = release
+            .assets
+            .iter()
+            .find(|a| a.name == MANIFEST_ASSET_NAME)
+            .expect("release has checksum.onnx.sha256");
+        let manifest_text = String::from_utf8(
+            get_bytes(&manifest_asset.browser_download_url)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        let manifest = parse_manifest(&manifest_text);
+
+        for filename in [RMVPE_FILENAME, CONTENTVEC_FILENAME] {
+            let hash = manifest
+                .get(filename)
+                .unwrap_or_else(|| panic!("{filename} missing from manifest"));
+            assert_eq!(
+                hash.len(),
+                64,
+                "{filename}: hash isn't 64 hex chars: {hash}"
+            );
+            assert!(
+                hash.chars().all(|c| c.is_ascii_hexdigit()),
+                "{filename}: hash isn't hex: {hash}"
+            );
+            assert!(
+                release.assets.iter().any(|a| a.name == filename),
+                "{filename} listed in manifest but no matching release asset"
+            );
+        }
+    }
+
     #[test]
     fn sha256_hex_of_empty_file() {
         let dir = tempdir().unwrap();
