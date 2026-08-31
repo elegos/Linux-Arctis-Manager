@@ -175,9 +175,7 @@ impl Pipeline {
                 && chunk_rms >= VAD_RMS
                 && voicedness(&new_chunk, sr) >= VOICED_MIN;
 
-            let gate_open;
-            let hangover_hop;
-            if level_ok || voiced_ok {
+            let (gate_open, hangover_hop) = if level_ok || voiced_ok {
                 if level_ok {
                     let cur = chunk_rms.max(la_rms);
                     if cur > self.speech_rms {
@@ -188,16 +186,13 @@ impl Pipeline {
                     }
                 }
                 self.vad_hang = VAD_HANG_HOPS;
-                gate_open = true;
-                hangover_hop = false;
+                (true, false)
             } else if self.vad_hang > 0 {
                 self.vad_hang -= 1;
-                gate_open = true;
-                hangover_hop = true;
+                (true, true)
             } else {
-                gate_open = false;
-                hangover_hop = false;
-            }
+                (false, false)
+            };
 
             if !gate_open {
                 self.handle_silence_hop(sr, n_out);
