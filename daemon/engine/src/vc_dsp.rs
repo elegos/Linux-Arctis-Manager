@@ -215,6 +215,99 @@ pub fn normalize_input_level(samples: &[f32], target_active_rms: f32, max_gain: 
     samples.iter().map(|&s| s * gain).collect()
 }
 
+/// Estimate a recording's ambient noise-floor RMS from its *leading* quiet
+/// segment — the moment after the mic opens but before the speaker starts
+/// talking, present at the start of nearly every real take, rather than
+/// from the whole file (which would be dominated by actual speech).
+///
+/// Scans 20 ms windows forward from the very start. The first
+/// [`BASELINE_WINDOWS`] windows set an initial baseline (their median, not
+/// their minimum — one anomalously quiet window, e.g. a mic connecting
+/// mid-silence, shouldn't set the reference on its own); every window
+/// after that either lets the baseline drift *down* a little further (the
+/// room settling) or, once a window's level jumps past `onset_ratio` times
+/// the current baseline, is treated as the onset of real speech — an edge,
+/// not an absolute level, so this works regardless of how loud or quiet
+/// the room happens to be. Returns the RMS of everything before that
+/// onset.
+///
+/// `None` when there's nothing meaningful to measure: the recording is too
+/// short to judge, speech (or loud noise) starts almost immediately with
+/// no real leading quiet stretch, or that stretch is exact digital
+/// silence (a synthetic/muted input, not a real ambient-noise sample).
+pub fn detect_leading_noise_floor(samples: &[f32], sr: u32) -> Option<f32> {
+    const WINDOW_MS: f32 = 20.0;
+    const MAX_SCAN_SECS: f32 = 2.0;
+    const ONSET_RATIO: f32 = 4.0;
+    const BASELINE_WINDOWS: usize = 5; // first 100ms
+                                       // Sanity ceiling for what "quiet room tone" can plausibly look like —
+                                       // a real mic's self-noise/ambient room tone essentially never reaches
+                                       // this; a recording that never dips below it (uniformly loud from the
+                                       // very start, so the relative onset check below never fires) isn't a
+                                       // genuine leading-silence case, not "2 seconds of unusually loud room
+                                       // tone".
+    const MAX_PLAUSIBLE_FLOOR: f32 = 0.02;
+
+    let window = ((WINDOW_MS / 1000.0) * sr as f32).round() as usize;
+    if window == 0 {
+        return None;
+    }
+    let max_windows = (((MAX_SCAN_SECS * sr as f32) as usize) / window).max(BASELINE_WINDOWS + 1);
+    let n_windows = (samples.len() / window).min(max_windows);
+    if n_windows <= BASELINE_WINDOWS {
+        return None;
+    }
+
+    let window_rms: Vec<f32> = (0..n_windows)
+        .map(|i| rms(&samples[i * window..(i + 1) * window]))
+        .collect();
+
+    let mut initial: Vec<f32> = window_rms[..BASELINE_WINDOWS].to_vec();
+    initial.sort_by(f32::total_cmp);
+    let mut baseline = initial[initial.len() / 2];
+
+    let mut onset = n_windows;
+    for (i, &r) in window_rms.iter().enumerate().skip(BASELINE_WINDOWS) {
+        if baseline > 1e-6 && r > baseline * ONSET_RATIO {
+            onset = i;
+            break;
+        }
+        if r < baseline {
+            baseline = 0.8 * baseline + 0.2 * r;
+        }
+    }
+    if onset <= BASELINE_WINDOWS {
+        return None; // no real leading quiet stretch to measure
+    }
+
+    let floor = rms(&samples[..onset * window]);
+    (floor > 1e-6 && floor <= MAX_PLAUSIBLE_FLOOR).then_some(floor)
+}
+
+/// `Pipeline`-facing VAD/output-gate level thresholds derived from a
+/// measured ambient noise-floor RMS (see [`detect_leading_noise_floor`]),
+/// with margin above it so real quiet speech still clears them — same
+/// purpose as `pipeline.rs`'s hardcoded `VAD_RMS`/gentle-knee-floor
+/// constants (tuned once, by ear, on one particular mic/room), but
+/// tailored to *this* recording's actual setup instead of assuming it
+/// matches whatever that tuning session's setup happened to be. Maps
+/// directly onto `vc::inference::pipeline::GateCalibration`'s fields —
+/// kept as a separate type here rather than depending on that module, so
+/// this stays a pure, dependency-free DSP function; callers convert.
+pub struct NoiseFloorCalibration {
+    pub vad_rms: f32,
+    pub knee_floor: f32,
+}
+
+pub fn calibrate_gate_from_noise_floor(noise_floor_rms: f32) -> NoiseFloorCalibration {
+    const VAD_MARGIN: f32 = 3.0;
+    const KNEE_MARGIN: f32 = 4.0;
+    NoiseFloorCalibration {
+        vad_rms: noise_floor_rms * VAD_MARGIN,
+        knee_floor: noise_floor_rms * KNEE_MARGIN,
+    }
+}
+
 /// Per-hop soft limiter: linear below `threshold`, tanh-compressed above,
 /// bounded to `[-1, 1]`. Inline math from `pipeline.py::convert`'s limiter stage.
 pub fn soft_limit(samples: &mut [f32], threshold: f32) {
@@ -960,6 +1053,74 @@ mod tests {
     fn normalize_input_level_short_buffer_is_a_noop() {
         let tiny = vec![0.01f32; 50]; // shorter than one 160-sample frame
         assert_eq!(normalize_input_level(&tiny, 0.06, 8.0), tiny);
+    }
+
+    // ── detect_leading_noise_floor / calibrate_gate_from_noise_floor ─────
+
+    /// Deterministic pseudo-noise (xorshift32) in `[-amplitude, amplitude]`
+    /// — a flat tone would have zero variance frame-to-frame and isn't a
+    /// realistic stand-in for room tone/mic self-noise.
+    fn noise(n: usize, amplitude: f32, mut seed: u32) -> Vec<f32> {
+        (0..n)
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                let unit = (seed as f32 / u32::MAX as f32) * 2.0 - 1.0;
+                unit * amplitude
+            })
+            .collect()
+    }
+
+    #[test]
+    fn detect_leading_noise_floor_measures_the_quiet_prefix_not_the_speech() {
+        let sr = 16000;
+        let mut samples = noise(sr, 0.0008, 1); // 1s of quiet room tone
+        samples.extend(noise(sr, 0.15, 2)); // 1s of "speech"
+        let floor = detect_leading_noise_floor(&samples, sr as u32)
+            .expect("should find a leading quiet stretch");
+        // Should track the quiet segment's own level, not be dragged up by
+        // the loud segment that follows.
+        assert!(floor < 0.005, "floor={floor}");
+        assert!(floor > 0.0001, "floor={floor}");
+    }
+
+    #[test]
+    fn detect_leading_noise_floor_none_when_loud_from_the_start() {
+        let sr = 16000;
+        let samples = noise(sr, 0.2, 3); // loud immediately, no quiet prefix
+        assert!(detect_leading_noise_floor(&samples, sr as u32).is_none());
+    }
+
+    #[test]
+    fn detect_leading_noise_floor_none_for_true_silence() {
+        let samples = vec![0.0f32; 16000];
+        assert!(detect_leading_noise_floor(&samples, 16000).is_none());
+    }
+
+    #[test]
+    fn detect_leading_noise_floor_none_for_a_too_short_recording() {
+        let samples = noise(50, 0.001, 4); // well under one 20ms window
+        assert!(detect_leading_noise_floor(&samples, 16000).is_none());
+    }
+
+    #[test]
+    fn calibrate_gate_from_noise_floor_applies_margins_above_the_floor() {
+        let cal = calibrate_gate_from_noise_floor(0.001);
+        assert!(
+            (cal.vad_rms - 0.003).abs() < 1e-6,
+            "vad_rms={}",
+            cal.vad_rms
+        );
+        assert!(
+            (cal.knee_floor - 0.004).abs() < 1e-6,
+            "knee_floor={}",
+            cal.knee_floor
+        );
+        assert!(
+            cal.knee_floor > cal.vad_rms,
+            "knee should sit above vad_rms"
+        );
     }
 
     // ── soft_limit ───────────────────────────────────────────────────────

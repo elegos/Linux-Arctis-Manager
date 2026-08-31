@@ -53,6 +53,34 @@ const VAD_REL: f32 = 0.2;
 const SPEECH_RMS_RELEASE: f32 = 0.9;
 const VOICED_MIN: f32 = 0.45;
 const GATE_RELEASE_S: f32 = 0.060;
+const GENTLE_KNEE: f32 = 0.002;
+
+/// The absolute level thresholds the VAD gate and output-gate mask compare
+/// real audio against — [`Default`] matches this module's own hardcoded
+/// constants (`VAD_RMS`/`GENTLE_KNEE`, tuned once by ear on one particular
+/// mic/room), but a real session can override them via
+/// [`Pipeline::with_gate_calibration`] with values derived from *that*
+/// session's own measured ambient noise floor instead (see
+/// `vc_dsp::detect_leading_noise_floor`/`vc_dsp::calibrate_gate_from_noise_floor`)
+/// — a much quieter or noisier setup than whatever these defaults were
+/// tuned on shouldn't silently misbehave (a quiet recording sitting close
+/// enough to a floor tuned for a louder one crushes real trailing speech;
+/// see the `vc_dsp::normalize_input_level` follow-up this directly builds
+/// on, in `vc_calibration.rs`'s render pipeline).
+#[derive(Debug, Clone, Copy)]
+pub struct GateCalibration {
+    pub vad_rms: f32,
+    pub knee_floor: f32,
+}
+
+impl Default for GateCalibration {
+    fn default() -> Self {
+        GateCalibration {
+            vad_rms: VAD_RMS,
+            knee_floor: GENTLE_KNEE,
+        }
+    }
+}
 
 const RMVPE_THRESHOLD: f32 = 0.022;
 const MEL_N_MELS: usize = 128;
@@ -72,6 +100,7 @@ pub struct Pipeline {
     retrieval: Option<RetrievalIndex>,
     model_sr: u32,
     params: RvcParams,
+    gate: GateCalibration,
     mel_basis: Vec<f32>,
     rng: rand::rngs::ThreadRng,
 
@@ -106,6 +135,7 @@ impl Pipeline {
             retrieval,
             model_sr,
             params,
+            gate: GateCalibration::default(),
             mel_basis: mel_filterbank(
                 MEL_N_FFT / 2 + 1,
                 MEL_F_MIN,
@@ -129,6 +159,17 @@ impl Pipeline {
             env_tail: vec![0.0; env_tail_len],
             ctx_frozen: false,
         }
+    }
+
+    /// Override the VAD/output-gate level thresholds — `Default`
+    /// (`GateCalibration::default()`) matches this module's own
+    /// hardcoded constants; pass real per-session values from
+    /// `vc_dsp::calibrate_gate_from_noise_floor` to match a specific
+    /// recording's actual ambient noise floor instead. Builder-style so
+    /// existing callers that don't need this are unaffected.
+    pub fn with_gate_calibration(mut self, gate: GateCalibration) -> Self {
+        self.gate = gate;
+        self
     }
 
     /// `audio`: mono float32 `[-1,1]` at `sr` (always 16kHz in this
@@ -172,11 +213,11 @@ impl Pipeline {
 
             let chunk_rms = rms(&new_chunk);
             let la_rms = rms(&look_ahead);
-            let vad_thr = VAD_RMS.max(VAD_REL * self.speech_rms);
+            let vad_thr = self.gate.vad_rms.max(VAD_REL * self.speech_rms);
             let level_ok = chunk_rms >= vad_thr || la_rms >= vad_thr;
             let voiced_ok = !level_ok
                 && self.gate_was_open
-                && chunk_rms >= VAD_RMS
+                && chunk_rms >= self.gate.vad_rms
                 && voicedness(&new_chunk, sr) >= VOICED_MIN;
 
             let (gate_open, hangover_hop) = if level_ok || voiced_ok {
@@ -269,9 +310,9 @@ impl Pipeline {
             let first_hang = hangover_hop && self.vad_hang >= VAD_HANG_HOPS - 1;
             let harsh = hangover_hop && !first_hang;
             let knee = if harsh {
-                (0.5 * self.speech_rms).max(0.002)
+                (0.5 * self.speech_rms).max(self.gate.knee_floor)
             } else {
-                0.002
+                self.gate.knee_floor
             };
             let mask: Vec<f32> = env_shifted
                 .iter()
