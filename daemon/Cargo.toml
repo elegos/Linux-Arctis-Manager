@@ -42,6 +42,8 @@ sha2 = "0.10"
 # deflate via flate2's pure-Rust backend, no system zlib required
 zip = { version = "2", default-features = false, features = ["deflate"] }
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+# real FFT, for the VTLN formant warp (frequency-domain resample) — added in E10-S6a
+realfft = "3"
 # internal crates
 device-config = { path = "device-config" }
 hid-transport = { path = "hid-transport" }
