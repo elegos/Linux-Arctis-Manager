@@ -1,0 +1,5 @@
+Fedora ships ONNX Runtime as an official package. This installs the CPU backend, which always works regardless of your graphics card:
+
+    sudo dnf install onnxruntime
+
+That's it — no extra repositories needed. After installing, click "Verify" below.

@@ -666,12 +666,14 @@ class DbusWrapper(QObject):
         Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async('CalibrationGetStatus', '', [], qt_signal, is_json=True))).start()
 
     @staticmethod
-    def detect_gpu(qt_signal: SignalInstance) -> None:
-        Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async('DetectGPU', '', [], qt_signal, is_json=True))).start()
+    def get_onnxruntime_install_instructions(qt_signal: SignalInstance) -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async(
+            'GetOnnxRuntimeInstallInstructions', '', [], qt_signal, is_json=True))).start()
 
     @staticmethod
-    def install_ai_deps(backend: str) -> None:
-        Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async('InstallAIDeps', 's', [backend]))).start()
+    def detect_onnxruntime(qt_signal: SignalInstance) -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async(
+            'DetectOnnxRuntime', '', [], qt_signal, is_json=True))).start()
 
     @staticmethod
     def search_hf_models(query: str, sort_by: str, qt_signal: SignalInstance) -> None:
