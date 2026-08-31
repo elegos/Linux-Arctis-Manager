@@ -130,6 +130,16 @@ pub fn mix_rms(source: &[f32], target: &[f32], rate: f32) -> Vec<f32> {
         .collect()
 }
 
+/// Root-mean-square level of a chunk. Trivial, but used at several call
+/// sites in the streaming pipeline (VAD level checks) that all need exactly
+/// this and nothing more.
+pub fn rms(x: &[f32]) -> f32 {
+    if x.is_empty() {
+        return 0.0;
+    }
+    (x.iter().map(|&v| v * v).sum::<f32>() / x.len() as f32).sqrt()
+}
+
 /// Per-hop soft limiter: linear below `threshold`, tanh-compressed above,
 /// bounded to `[-1, 1]`. Inline math from `pipeline.py::convert`'s limiter stage.
 pub fn soft_limit(samples: &mut [f32], threshold: f32) {
@@ -356,6 +366,159 @@ fn boxcar_smooth_same(x: &[f32], kernel_len: usize) -> Vec<f32> {
     }
     let start = (kernel_len - 1) / 2;
     full[start..start + n].to_vec()
+}
+
+/// Linear resize with PyTorch's `F.interpolate(..., mode='linear',
+/// align_corners=True)` semantics: `out[i]` samples input position
+/// `i * (src_len-1) / (target_len-1)` (or `0` when `target_len == 1`).
+/// Port of `pipeline.py::_resize1d`.
+pub fn resize1d(src: &[f32], target_len: usize) -> Vec<f32> {
+    if src.len() == target_len {
+        return src.to_vec();
+    }
+    if target_len == 1 {
+        return vec![src[0]];
+    }
+    (0..target_len)
+        .map(|i| {
+            let pos = i as f32 / (target_len - 1) as f32 * (src.len() - 1) as f32;
+            let lo = pos.floor() as usize;
+            let hi = (lo + 1).min(src.len() - 1);
+            let frac = pos - lo as f32;
+            src[lo] * (1.0 - frac) + src[hi] * frac
+        })
+        .collect()
+}
+
+/// RVC WebUI's `filter_radius`: a sliding-window median filter that kills
+/// single-frame pitch spikes (glottal bursts / crackle in the NSF source).
+/// `radius < 3` is a no-op (matches `pipeline.py`'s `if radius >= 3` guard);
+/// an even radius is rounded up to odd, matching `radius |= 1`. Never smears
+/// voiced F0 into unvoiced (zero) frames.
+pub fn f0_median_filter(f0: &mut [f32], radius: i32) {
+    if radius < 3 || f0.len() < radius as usize {
+        return;
+    }
+    let radius = (radius as usize) | 1;
+    let pad = radius / 2;
+    let n = f0.len();
+
+    // numpy.pad(f0, pad, mode='edge')
+    let mut padded = vec![0.0f32; n + 2 * pad];
+    padded[pad..pad + n].copy_from_slice(f0);
+    for p in &mut padded[..pad] {
+        *p = f0[0];
+    }
+    for p in &mut padded[pad + n..] {
+        *p = f0[n - 1];
+    }
+
+    let mut smooth = vec![0.0f32; n];
+    let mut window: Vec<f32> = Vec::with_capacity(radius);
+    for (i, s) in smooth.iter_mut().enumerate() {
+        window.clear();
+        window.extend_from_slice(&padded[i..i + radius]);
+        window.sort_by(|a, b| a.total_cmp(b));
+        *s = window[radius / 2]; // radius is always odd, so this is the true median
+    }
+
+    for i in 0..n {
+        if f0[i] > 0.0 {
+            f0[i] = if smooth[i] > 0.0 { smooth[i] } else { f0[i] };
+        }
+    }
+}
+
+/// Pitch-continuity clamp: any voiced frame further than half an octave
+/// (`|log2(f0/ref)| > 0.5`) from the running reference is pulled back to it
+/// — real pitch never jumps that far in one 10ms frame, so this catches
+/// phrase-final creak/octave-tracking errors that would otherwise render as
+/// random vocals in the NSF source. `ref_f0` carries across calls
+/// (`None` after a VAD gate close, matching `pipeline.py`'s
+/// `self._f0_ref = None` on silence) and is updated in place (80/20 EMA
+/// toward each accepted frame). Port of the continuity-clamp block in
+/// `pipeline.py::_run_inference`.
+pub fn f0_continuity_clamp(f0: &mut [f32], ref_f0: &mut Option<f32>) {
+    let mut r = *ref_f0;
+    for v in f0.iter_mut() {
+        if *v <= 0.0 {
+            continue;
+        }
+        match r {
+            None => r = Some(*v),
+            Some(rf) => {
+                if ((*v / rf).log2()).abs() > 0.5 {
+                    *v = rf;
+                }
+            }
+        }
+        r = Some(0.8 * r.unwrap() + 0.2 * *v);
+    }
+    *ref_f0 = r;
+}
+
+/// Speaker-relative F0 floor for phrase-final fry/creak: frames whose
+/// tracked F0 falls below `0.8×` the running modal-pitch anchor (median of
+/// the last 15 strongly-voiced windows' medians, `f0_meds`) *and* whose
+/// RMVPE confidence is weak, are floored — but only within the trailing
+/// voiced run when the window ends in enough unvoiced tail (phrase-final
+/// position), never a sustained low note mid-phrase. Port of the floor
+/// block in `pipeline.py::_extract_f0`. `f0_meds` is a bounded history
+/// (caller maintains the `maxlen = 15` truncation, matching Python's
+/// `collections.deque(maxlen=15)`); only windows with `>= 20` voiced frames
+/// contribute a new median, matching the "don't let a transient poison the
+/// anchor" rationale in the Python comment.
+pub fn f0_phrase_final_floor(f0: &mut [f32], f0_conf: Option<&[f32]>, f0_meds: &mut Vec<f32>) {
+    let voiced: Vec<f32> = f0.iter().copied().filter(|&v| v > 0.0).collect();
+    if voiced.len() >= 20 {
+        f0_meds.push(median(&voiced));
+    }
+    if voiced.is_empty() || f0_meds.len() < 5 {
+        return;
+    }
+
+    let anchor = median(f0_meds);
+    let floor = (0.8 * anchor).max(55.0);
+
+    let n = f0.len();
+    let mut apply = vec![false; n];
+    if let Some(conf) = f0_conf {
+        if conf.len() == n {
+            for i in 0..n {
+                apply[i] = conf[i] < 0.10;
+            }
+        }
+    }
+
+    if let Some(run_end) = (0..n).rev().find(|&i| f0[i] > 0.0) {
+        if n - 1 - run_end >= 10 {
+            let mut run_start = run_end;
+            while run_start > 0 && f0[run_start - 1] > 0.0 {
+                run_start -= 1;
+            }
+            run_start = run_start.max(run_end.saturating_sub(30));
+            for a in &mut apply[run_start..=run_end] {
+                *a = true;
+            }
+        }
+    }
+
+    for i in 0..n {
+        if f0[i] > 0.0 && f0[i] < floor && apply[i] {
+            f0[i] = floor;
+        }
+    }
+}
+
+fn median(values: &[f32]) -> f32 {
+    let mut sorted = values.to_vec();
+    sorted.sort_by(|a, b| a.total_cmp(b));
+    let mid = sorted.len() / 2;
+    if sorted.len().is_multiple_of(2) {
+        (sorted[mid - 1] + sorted[mid]) / 2.0
+    } else {
+        sorted[mid]
+    }
 }
 
 #[cfg(test)]
@@ -962,5 +1125,145 @@ mod tests {
             );
         }
         assert!((env_last - 0.05866462).abs() < 1e-3, "{env_last}");
+    }
+
+    // ── resize1d — reference values from mix_rms's identical align_corners=True formula
+
+    #[test]
+    fn resize1d_same_length_is_passthrough() {
+        let src = [1.0f32, 2.0, 3.0];
+        assert_eq!(resize1d(&src, 3), src);
+    }
+
+    #[test]
+    fn resize1d_single_output_takes_first_sample() {
+        assert_eq!(resize1d(&[5.0f32, 9.0, 2.0], 1), vec![5.0]);
+    }
+
+    #[test]
+    fn resize1d_upsamples_with_align_corners() {
+        // align_corners=True: endpoints map exactly, interior linearly interpolated.
+        let src = [0.0f32, 10.0];
+        let out = resize1d(&src, 3);
+        assert_eq!(out, vec![0.0, 5.0, 10.0]);
+    }
+
+    // ── f0_median_filter — reference values from gen_f0_postproc_vectors.py
+
+    #[test]
+    fn f0_median_filter_radius3_matches_python_reference() {
+        let mut f0 = [
+            0.0f32, 100.0, 500.0, 105.0, 110.0, 0.0, 200.0, 210.0, 90.0, 220.0, 0.0, 0.0, 300.0,
+        ];
+        f0_median_filter(&mut f0, 3);
+        let expected = [
+            0.0f32, 100.0, 105.0, 110.0, 105.0, 0.0, 200.0, 200.0, 210.0, 90.0, 0.0, 0.0, 300.0,
+        ];
+        assert_eq!(f0, expected);
+    }
+
+    #[test]
+    fn f0_median_filter_radius5_matches_python_reference() {
+        let mut f0 = [
+            0.0f32, 100.0, 500.0, 105.0, 110.0, 0.0, 200.0, 210.0, 90.0, 220.0, 0.0, 0.0, 300.0,
+        ];
+        f0_median_filter(&mut f0, 5);
+        let expected = [
+            0.0f32, 100.0, 105.0, 105.0, 110.0, 0.0, 110.0, 200.0, 200.0, 90.0, 0.0, 0.0, 300.0,
+        ];
+        assert_eq!(f0, expected);
+    }
+
+    #[test]
+    fn f0_median_filter_radius_below_3_is_noop() {
+        let mut f0 = [100.0f32, 500.0, 105.0];
+        let before = f0;
+        f0_median_filter(&mut f0, 1);
+        assert_eq!(f0, before);
+    }
+
+    // ── f0_continuity_clamp — reference values from gen_f0_postproc_vectors.py
+
+    #[test]
+    fn f0_continuity_clamp_matches_python_reference() {
+        let mut f0 = [150.0f32, 155.0, 0.0, 400.0, 160.0, 165.0, 40.0];
+        let mut ref_f0 = None;
+        f0_continuity_clamp(&mut f0, &mut ref_f0);
+        let expected = [150.0f32, 155.0, 0.0, 151.0, 160.0, 165.0, 155.24];
+        for (got, want) in f0.iter().zip(expected.iter()) {
+            assert!((got - want).abs() < 1e-2, "{got} vs {want}");
+        }
+        assert!((ref_f0.unwrap() - 155.24).abs() < 1e-2);
+    }
+
+    #[test]
+    fn f0_continuity_clamp_carries_ref_across_calls() {
+        let mut f0 = [170.0f32, 0.0, 500.0];
+        let mut ref_f0 = Some(158.61417995392074f32);
+        f0_continuity_clamp(&mut f0, &mut ref_f0);
+        let expected = [170.0f32, 0.0, 160.89134396];
+        for (got, want) in f0.iter().zip(expected.iter()) {
+            assert!((got - want).abs() < 1e-2, "{got} vs {want}");
+        }
+        assert!((ref_f0.unwrap() - 160.8913439631366).abs() < 1e-2);
+    }
+
+    // ── f0_phrase_final_floor — reference values from gen_f0_postproc_vectors.py
+
+    #[test]
+    fn f0_phrase_final_floor_matches_python_reference() {
+        // Same fixture construction as gen_f0_postproc_vectors.py: 50 voiced
+        // frames around ~180Hz (seeded with numpy RandomState(5)), then a
+        // 15-frame decaying, low-confidence tail — hand-transcribed input
+        // values from the reference script's own printed dump so this test
+        // doesn't need to reproduce numpy's RNG.
+        const N: usize = 65;
+        let mut f0 = vec![0.0f32; N];
+        #[rustfmt::skip]
+        let f0_45_65 = [
+            182.58392677f32, 182.27868596, 180.98888080, 179.32732748, 179.79877131,
+            150.0, 142.14285714, 134.28571429, 126.42857143, 118.57142857,
+            110.71428571, 102.85714286, 95.0, 87.14285714, 79.28571429,
+            71.42857143, 63.57142857, 55.71428571, 47.85714286, 40.0,
+        ];
+        f0[45..65].copy_from_slice(&f0_45_65);
+        // Frames 0..45 just need to be voiced (>=20 frames triggers the
+        // anchor-update push) with a known median — set to a single
+        // constant so the median of 45 identical (odd count) values is
+        // exactly that constant, matching the Python fixture's actual
+        // noisy-data median (179.38829395766675) bit-for-bit, so the
+        // appended f0_meds entry — and thus the floor — matches exactly.
+        for v in f0.iter_mut().take(45) {
+            *v = 179.38829395766675;
+        }
+
+        let mut f0_conf = vec![0.5f32; N];
+        for c in f0_conf.iter_mut().take(65).skip(50) {
+            *c = 0.05;
+        }
+
+        let mut f0_meds = vec![180.0f32, 182.0, 178.0, 181.0, 179.0];
+        f0_phrase_final_floor(&mut f0, Some(&f0_conf), &mut f0_meds);
+
+        // The floor plateau (frames 51..65) is insensitive to the exact
+        // frame-0..45 values (only f0_meds' median drives it), so assert it
+        // exactly; frames 45..51 (untouched, above the floor) are skipped
+        // since this test's frames 0..45 deliberately diverge from the
+        // Python fixture's noisy ones.
+        let expected_floor = 143.75531758f32;
+        for &v in &f0[51..65] {
+            assert!((v - expected_floor).abs() < 1e-2, "{v} vs {expected_floor}");
+        }
+        assert_eq!(f0_meds.len(), 6, "a new median should have been appended");
+    }
+
+    #[test]
+    fn f0_phrase_final_floor_noop_with_few_voiced_frames() {
+        let mut f0 = vec![0.0f32; 10];
+        f0[0] = 100.0;
+        let before = f0.clone();
+        let mut f0_meds = vec![100.0f32; 5];
+        f0_phrase_final_floor(&mut f0, None, &mut f0_meds);
+        assert_eq!(f0, before);
     }
 }

@@ -51,6 +51,12 @@ realfft = "3"
 # of them present. cuda/rocm/openvino only add the Rust-side EP option types;
 # whether each is actually usable is decided at runtime by is_available()/
 # register(), with automatic fallback to the CPU provider.
+# Resampling model_sr -> the fixed 48kHz output rate — added in E10-S6a.
+# Replaces torchaudio.functional.resample; not a bit-exact port (a
+# windowed-sinc kernel resampler's exact quality isn't behavior this
+# application's tuned constants depend on, unlike the DSP in vc_dsp.rs).
+rubato = "5"
+audioadapter-buffers = "5"
 # RNG for the synthesizer's externalised VITS/NSF noise inputs — added in E10-S6a.
 # Pinned to match rand_distr 0.6's own rand_core 0.10 requirement — rand 0.9
 # resolves to an incompatible rand_core 0.9, so its Distribution trait
