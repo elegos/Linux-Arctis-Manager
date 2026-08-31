@@ -94,8 +94,8 @@ flowchart LR
         direction TB
         B1["rmvpe.pt / content_vec_best.bin\n(PyTorch checkpoints)"] --> B2["Static-shape ONNX export\n(this project's export scripts)"]
         B2 --> B3["Numeric verification\nvs PyTorch, same input"]
-        B3 --> B4["Hosted as .onnx in\nelegos/Linux-Arctis-Manager-AI-Models"]
-        B4 --> B5["vc_base_models.rs downloads\n.onnx directly — no local conversion"]
+        B3 --> B4["Published as .onnx in\nelegos/Linux-Arctis-Manager-AI-Models\nrelease v2 (not a pre-release)"]
+        B4 --> B5["vc_base_models.rs resolves the\n*latest* release dynamically (GitHub API),\nreads checksum.onnx.sha256, downloads by name"]
     end
 
     subgraph peruser["Per-user RVC voice models (community, unbounded set)"]
@@ -108,7 +108,9 @@ flowchart LR
     U3 --> ENGINE
 ```
 
-**Base models** (RMVPE, ContentVec) are identical for every user — converted **once**, verified, and hosted pre-converted in the same GitHub release repo the daemon already downloads `rmvpe.pt`/`content_vec_best.bin` from today (`vc_base_models.rs`). This removes any ONNX conversion step from the daemon's runtime entirely for these two.
+**Base models** (RMVPE, ContentVec) are identical for every user — converted **once**, verified, and published pre-converted in the same GitHub release repo the daemon already downloads `rmvpe.pt`/`content_vec_best.bin` from today (`elegos/Linux-Arctis-Manager-AI-Models`, release `v2`). This removes any ONNX conversion step from the daemon's runtime entirely for these two.
+
+`vc_base_models.rs` doesn't hardcode that release's tag, URL, or checksums — it resolves the repo's **latest** release dynamically via the GitHub API, reads `checksum.onnx.sha256` from that release's assets, and looks up `rmvpe.onnx`/`content_vec_best.onnx` by name against it. The release itself is the single source of truth: publishing a new one (e.g. re-exporting for a newer ONNX opset) is all a future update needs, no daemon rebuild. The legacy Python daemon is unaffected either way — it stays pinned to the `v1` tag with checksums hardcoded in its own source, and never requests anything from a release newer than that.
 
 **Per-user voice models** are community-trained `.pth` files from HuggingFace — there is no fixed catalogue to pre-convert, so conversion happens locally, once, the first time a model is used (mirroring how OpenVINO model conversion already worked in the Python reference's design). This is the **one Python piece that stays** (see [`voice-changing-feature.md`](voice-changing-feature.md#the-one-python-piece-that-stays-pth--onnx-conversion)) — an offline tool invoked per-model, not a daemon runtime dependency.
 

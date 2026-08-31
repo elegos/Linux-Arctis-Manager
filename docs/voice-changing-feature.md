@@ -52,7 +52,7 @@ Flat files (`vc_*.rs`), matching the project's existing convention for single/fe
 | `ladspa_util.rs` | Shared LADSPA plugin discovery (extracted from `nc_manager.rs`) | — | — | Done |
 | `vc_models.rs` | Local `.pth`/`.index` scan, delete | `voice_changer/rvc/model_manager.py` | — | Done |
 | `vc_hf_client.rs` | HuggingFace search/repo-listing/download over `reqwest`, `.pth` and `.zip` (`zip`/`flate2`) | `voice_changer/rvc/hf_search.py` | — | Done |
-| `vc_base_models.rs` | RMVPE/ContentVec download + SHA-256 verification | `voice_changer/rvc/model_downloader.py` | — | Done |
+| `vc_base_models.rs` | RMVPE/ContentVec ONNX download, resolved dynamically from the AI-Models repo's latest GitHub release (`checksum.onnx.sha256`) + SHA-256 verification | `voice_changer/rvc/model_downloader.py` (which uses hardcoded `.pt`/`.bin` URLs — this is a deliberate design change, not just a straight port) | — | Done |
 | `vc_calibration.rs` | Guided calibration: recording (`pw-record`, downmix, WAV) + variant proposal | `voice_changer/rvc/calibration.py` | — | Recording done — rendering needs `vc/inference/` |
 | `vc_rvc_config.rs` | `RvcParams` — per-model inference tuning | `voice_changer/rvc/backend.py` | — | Done |
 | `vc_dsp.rs` | Deterministic DSP glue: F0 coarse quantisation, gap filling, RMS envelope mix, soft limiter (more to come: VAD, VTLN, SOLA, RMVPE decode) | `pipeline.py` (pure-numpy parts) | — | In progress — 4 of ~10 functions ported, each verified against fixed Python-computed test vectors |
