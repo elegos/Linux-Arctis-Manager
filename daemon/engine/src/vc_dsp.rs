@@ -146,6 +146,218 @@ pub fn soft_limit(samples: &mut [f32], threshold: f32) {
     }
 }
 
+/// VTLN formant warp applied to the HuBERT input only: multiplies the
+/// apparent frequency of all spectral content by `1/alpha` without changing
+/// array length or sample rate (`alpha < 1` shifts formants upward —
+/// male→female). Port of `pipeline.py::_vtln_warp`.
+pub fn vtln_warp(audio: &[f32], alpha: f32) -> Vec<f32> {
+    if (alpha - 1.0).abs() < 0.001 {
+        return audio.to_vec();
+    }
+    let n = audio.len();
+    let mut planner = realfft::RealFftPlanner::<f32>::new();
+
+    let fwd = planner.plan_fft_forward(n);
+    let mut input = audio.to_vec();
+    let mut spectrum = fwd.make_output_vec();
+    fwd.process(&mut input, &mut spectrum)
+        .expect("vtln_warp: forward FFT length mismatch");
+
+    let n_bins = spectrum.len();
+    let mut warped = vec![realfft::num_complex::Complex::new(0.0f32, 0.0f32); n_bins];
+    for (k, w) in warped.iter_mut().enumerate() {
+        let k_src = (k as f32 * alpha).clamp(0.0, (n_bins - 1) as f32);
+        let lo = k_src.floor() as usize;
+        let hi = (lo + 1).min(n_bins - 1);
+        let frac = k_src - lo as f32;
+        *w = spectrum[lo] * (1.0 - frac) + spectrum[hi] * frac;
+    }
+    // numpy's irfft silently discards the imaginary part of the DC and (for
+    // even n) Nyquist bins — there's no valid negative-frequency counterpart
+    // to pair them with, so only the real part can contribute to a real
+    // output. realfft's C2R planner instead hard-asserts they're already
+    // real, so zero them explicitly to match numpy's behaviour bit-for-bit.
+    warped[0].im = 0.0;
+    if n.is_multiple_of(2) {
+        let nyquist = n_bins - 1;
+        warped[nyquist].im = 0.0;
+    }
+
+    let inv = planner.plan_fft_inverse(n);
+    let mut out = inv.make_output_vec();
+    inv.process(&mut warped, &mut out)
+        .expect("vtln_warp: inverse FFT length mismatch");
+    let scale = 1.0 / n as f32;
+    out.iter().map(|v| v * scale).collect()
+}
+
+/// Normalized autocorrelation peak in the 50-400 Hz pitch band (0..1) — a
+/// rough "is this periodic" score used to rescue quiet-but-voiced phrase-final
+/// vowels from the relative VAD threshold. Port of `pipeline.py::_voicedness`,
+/// computed directly in the time domain (the Python reference uses an
+/// FFT-based circular convolution zero-padded to `2n`, which is numerically
+/// equivalent to direct linear autocorrelation for lags `< n`).
+pub fn voicedness(chunk: &[f32], sr: u32) -> f32 {
+    let n = chunk.len();
+    if n < (sr / 25) as usize {
+        return 0.0;
+    }
+    let mean = chunk.iter().sum::<f32>() / n as f32;
+    let x: Vec<f64> = chunk.iter().map(|&v| (v - mean) as f64).collect();
+    let energy: f64 = x.iter().map(|&v| v * v).sum();
+    if energy < 1e-8 {
+        return 0.0;
+    }
+    let lo = (sr / 400) as usize;
+    let hi = ((sr / 50) as usize).min(n - 1);
+    if hi <= lo {
+        return 0.0;
+    }
+    let mut ac_max = f64::MIN;
+    for lag in lo..hi {
+        let s: f64 = (0..n - lag).map(|i| x[i] * x[i + lag]).sum();
+        if s > ac_max {
+            ac_max = s;
+        }
+    }
+    (ac_max / (energy + 1e-9)) as f32
+}
+
+/// SOLA alignment search: the offset (`0..=seg.len()-tail.len()`) where
+/// `seg`'s waveform best correlates (normalized, loudness-independent) with
+/// `tail` — the un-drained reserve of the previous hop. Port of the SOLA
+/// block in `pipeline.py::convert`.
+pub fn sola_offset(seg: &[f32], tail: &[f32]) -> usize {
+    let xfade = tail.len();
+    assert!(seg.len() >= xfade, "seg must be at least as long as tail");
+    let search_len = seg.len() - xfade + 1;
+    let mut best_k = 0usize;
+    let mut best_val = f64::MIN;
+    for k in 0..search_len {
+        let mut corr = 0.0f64;
+        let mut energy = 0.0f64;
+        for i in 0..xfade {
+            let s = seg[k + i] as f64;
+            corr += s * tail[i] as f64;
+            energy += s * s;
+        }
+        let val = corr / (energy + 1e-8).sqrt();
+        if val > best_val {
+            best_val = val;
+            best_k = k;
+        }
+    }
+    best_k
+}
+
+/// Decode RMVPE's per-frame 360-bin salience into (F0 Hz, confidence).
+/// `salience` is row-major `[n_frames, n_bins]` (n_bins = 360 in practice).
+/// Port of `rmvpe.py::RMVPE._decode`, including the backward-only onset
+/// backfill that rescues weak-salience vowel onsets from being marked
+/// unvoiced.
+#[allow(clippy::excessive_precision)] // matches rmvpe.py's cents formula verbatim
+pub fn rmvpe_decode(
+    salience: &[f32],
+    n_frames: usize,
+    n_bins: usize,
+    threshold: f32,
+) -> (Vec<f32>, Vec<f32>) {
+    assert_eq!(salience.len(), n_frames * n_bins);
+
+    let mut cents_pad = vec![0.0f32; n_bins + 8];
+    for (i, c) in cents_pad.iter_mut().skip(4).take(n_bins).enumerate() {
+        *c = 20.0 * i as f32 + 1997.3794084376191;
+    }
+
+    let mut f0 = vec![0.0f32; n_frames];
+    let mut peak = vec![0.0f32; n_frames];
+
+    for t in 0..n_frames {
+        let row = &salience[t * n_bins..(t + 1) * n_bins];
+        let (center_idx, &max_val) = row.iter().enumerate().fold(
+            (0usize, &row[0]),
+            |acc, (i, v)| if v > acc.1 { (i, v) } else { acc },
+        );
+        peak[t] = max_val;
+
+        let mut num = 0.0f64;
+        let mut den = 0.0f64;
+        for d in 0..9usize {
+            let idx = center_idx + d; // offset into the (n_bins+8)-padded window
+            let sal = if idx >= 4 && idx - 4 < n_bins {
+                row[idx - 4]
+            } else {
+                0.0
+            };
+            num += sal as f64 * cents_pad[idx] as f64;
+            den += sal as f64;
+        }
+        let cents = if max_val <= threshold {
+            0.0
+        } else {
+            (num / (den + 1e-10)) as f32
+        };
+        let f0v = 10.0 * 2f32.powf(cents / 1200.0);
+        f0[t] = if f0v == 10.0 { 0.0 } else { f0v };
+    }
+
+    let weak: Vec<bool> = peak.iter().map(|&p| p > threshold / 3.0).collect();
+    for i in 1..n_frames {
+        if f0[i] > 0.0 && f0[i - 1] == 0.0 {
+            let mut j = i as isize - 1;
+            while j >= 0 && (i as isize - j) <= 5 && weak[j as usize] && f0[j as usize] == 0.0 {
+                f0[j as usize] = f0[i];
+                j -= 1;
+            }
+        }
+    }
+
+    (f0, peak)
+}
+
+/// Input-envelope output-gate mask, at sample resolution: fast attack,
+/// `gate_release_s` release, carried across hops via `env_last`. Silences the
+/// model's out-of-distribution noise floor on true silence while riding
+/// through intra-word plosive closures. Port of the gate block in
+/// `pipeline.py::convert` (`env_rel[i] = max(env[j]·decay^(i−j))`, expressed
+/// there as a cumulative-max trick and here as the equivalent direct
+/// recursion `level[i] = max(env[i], level[i-1]·decay)`).
+/// Returns `(env_rel, new_env_last)`.
+pub fn gate_envelope(
+    chunk: &[f32],
+    env_last: f32,
+    gate_release_s: f32,
+    sr: u32,
+) -> (Vec<f32>, f32) {
+    const BOXCAR: usize = 160;
+    let env = boxcar_smooth_same(chunk, BOXCAR);
+    let decay = (-1.0f64 / (gate_release_s as f64 * sr as f64)).exp() as f32;
+    let mut level = env_last;
+    let mut out = Vec::with_capacity(env.len());
+    for e in env {
+        level = e.max(level * decay);
+        out.push(level);
+    }
+    let last = out.last().copied().unwrap_or(env_last);
+    (out, last)
+}
+
+/// `numpy.convolve(abs(x), ones(kernel_len) / kernel_len, 'same')`.
+fn boxcar_smooth_same(x: &[f32], kernel_len: usize) -> Vec<f32> {
+    let n = x.len();
+    let weight = 1.0 / kernel_len as f32;
+    let full_len = n + kernel_len - 1;
+    let mut full = vec![0.0f32; full_len];
+    for (i, &xi) in x.iter().enumerate() {
+        let xi = xi.abs() * weight;
+        for j in 0..kernel_len {
+            full[i + j] += xi;
+        }
+    }
+    let start = (kernel_len - 1) / 2;
+    full[start..start + n].to_vec()
+}
+
 #[cfg(test)]
 #[allow(clippy::excessive_precision)] // fixture values pasted verbatim from the Python reference
 mod tests {
@@ -420,5 +632,335 @@ mod tests {
             assert!(v.abs() > 0.8, "{v} should still carry through the knee");
         }
         assert!(s[0] > 0.0 && s[1] < 0.0);
+    }
+
+    // ── vtln_warp — reference values from gen_dsp_vectors2.py::vtln_warp ───
+
+    #[test]
+    fn vtln_warp_alpha_one_is_passthrough() {
+        let audio = [0.1f32, -0.2, 0.3, -0.4];
+        assert_eq!(vtln_warp(&audio, 1.0), audio);
+        assert_eq!(vtln_warp(&audio, 1.0004), audio); // within the 0.001 no-op band
+    }
+
+    fn vtln_input_fixture() -> Vec<f32> {
+        vec![
+            0.16905257,
+            -0.04659374,
+            0.00328202,
+            0.04075163,
+            -0.07889231,
+            0.00020656,
+            -0.00008904,
+            -0.17547242,
+            0.10176580,
+            0.06004985,
+            -0.06254290,
+            -0.01715483,
+            0.05052994,
+            -0.02613564,
+            -0.02427491,
+            -0.14532416,
+            0.05545804,
+            0.01238809,
+            0.02744599,
+            -0.15265246,
+            0.16506998,
+            0.01543355,
+            -0.03871400,
+            0.20290723,
+            -0.00453860,
+            -0.14506787,
+            -0.04052279,
+            -0.22883151,
+            0.10493965,
+            -0.04164743,
+            -0.07425535,
+            0.10724702,
+        ]
+    }
+
+    #[test]
+    fn vtln_warp_alpha_point_nine_matches_python_reference() {
+        let audio = vtln_input_fixture();
+        let expected = [
+            0.15874134f32,
+            -0.04547187,
+            0.02190168,
+            0.00523577,
+            -0.08551087,
+            0.06086430,
+            -0.15480708,
+            0.02029343,
+            0.08780135,
+            -0.07001247,
+            -0.00344816,
+            0.02941220,
+            -0.01198159,
+            -0.05788241,
+            -0.01933928,
+            0.03428645,
+            -0.03587975,
+            -0.05558585,
+            0.05140277,
+            0.01944261,
+            -0.07530718,
+            0.07374760,
+            0.04934485,
+            -0.06565049,
+            0.19644985,
+            -0.09138960,
+            -0.06166558,
+            -0.15937456,
+            -0.05487300,
+            0.06661205,
+            -0.13648918,
+            0.12295064,
+        ];
+        let out = vtln_warp(&audio, 0.9);
+        for (got, want) in out.iter().zip(expected.iter()) {
+            assert!((got - want).abs() < 1e-4, "{got} vs {want}");
+        }
+    }
+
+    #[test]
+    fn vtln_warp_alpha_one_point_one_five_matches_python_reference() {
+        let audio = vtln_input_fixture();
+        let expected = [
+            0.26360670f32,
+            -0.12843288,
+            0.06408871,
+            -0.04636750,
+            0.05176250,
+            -0.10372966,
+            0.05543928,
+            -0.04265054,
+            -0.13865748,
+            0.06535684,
+            0.05260114,
+            0.00073313,
+            -0.09979769,
+            0.00547247,
+            0.04277946,
+            -0.00622636,
+            0.00204725,
+            -0.13561140,
+            0.05646693,
+            0.08668885,
+            -0.06333721,
+            0.06101104,
+            0.07709470,
+            -0.00087060,
+            -0.09428741,
+            -0.04463105,
+            -0.14150153,
+            -0.04983757,
+            0.14917275,
+            -0.19406426,
+            0.07623603,
+            -0.00673660,
+        ];
+        let out = vtln_warp(&audio, 1.15);
+        for (got, want) in out.iter().zip(expected.iter()) {
+            assert!((got - want).abs() < 1e-4, "{got} vs {want}");
+        }
+    }
+
+    // ── voicedness — reference values from gen_dsp_vectors2.py::voicedness ─
+
+    #[test]
+    fn voicedness_periodic_tone_scores_near_one() {
+        let sr = 16000u32;
+        let t: Vec<f32> = (0..2048).map(|i| i as f32 / sr as f32).collect();
+        let chunk: Vec<f32> = t
+            .iter()
+            .map(|&t| {
+                0.3 * (2.0 * std::f32::consts::PI * 150.0 * t).sin()
+                    + 0.05 * (2.0 * std::f32::consts::PI * 450.0 * t).sin()
+            })
+            .collect();
+        let v = voicedness(&chunk, sr);
+        assert!((v - 0.94750148).abs() < 1e-3, "{v}");
+    }
+
+    #[test]
+    fn voicedness_silence_is_zero() {
+        assert_eq!(voicedness(&[0.0f32; 2048], 16000), 0.0);
+    }
+
+    #[test]
+    fn voicedness_below_min_length_is_zero() {
+        assert_eq!(voicedness(&[0.5f32; 10], 16000), 0.0);
+    }
+
+    // ── sola_offset — reference values from gen_dsp_vectors2.py::sola_offset
+
+    #[test]
+    fn sola_offset_finds_true_shift_matching_python_reference() {
+        let tail = [
+            0.0f32,
+            0.35355338,
+            0.50000000,
+            0.35355338,
+            0.0,
+            -0.35355338,
+            -0.50000000,
+            -0.35355338,
+            -0.0,
+            0.35355338,
+            0.50000000,
+            0.35355338,
+            0.0,
+            -0.35355338,
+            -0.50000000,
+            -0.35355338,
+        ];
+        let seg = [
+            -0.01387343f32,
+            -0.01856902,
+            -0.02136979,
+            -0.00411033,
+            0.02333992,
+            0.00207338,
+            -0.01221086,
+            0.00329900,
+            -0.00310424,
+            0.00162806,
+            0.31360394,
+            0.43698111,
+            0.31281957,
+            0.00708862,
+            -0.31519863,
+            -0.43781257,
+            -0.32892582,
+            0.01048861,
+            0.31883061,
+            0.45197394,
+            0.33072990,
+            -0.00122468,
+            -0.31554535,
+            -0.44348010,
+            -0.31157756,
+            0.00829843,
+            0.01309398,
+            0.00549974,
+            -0.00417853,
+            0.02472352,
+            -0.00004873,
+            0.00405693,
+            -0.00717232,
+            -0.02151596,
+            -0.00745983,
+            0.00097575,
+            0.00564315,
+            0.00062019,
+            0.00829163,
+            0.01026050,
+        ];
+        assert_eq!(sola_offset(&seg, &tail), 9);
+    }
+
+    // ── rmvpe_decode — reference values from gen_dsp_vectors2.py::rmvpe_decode
+
+    #[test]
+    fn rmvpe_decode_matches_python_reference() {
+        // Same fixture construction as gen_dsp_vectors2.py: RandomState(3),
+        // frames 0-1 unvoiced, frame 2 weak onset (backfilled from frame 3
+        // territory but self-decoded since its own peak clears threshold/3),
+        // frames 3-6 a confident voiced run drifting across bins 100-104,
+        // frames 7-9 unvoiced. Regenerated here bit-for-bit isn't practical
+        // in Rust, so this test hand-builds an equivalent salience grid.
+        const T: usize = 10;
+        const BINS: usize = 360;
+        let mut salience = vec![0.0f32; T * BINS];
+        // Deterministic low-noise floor (doesn't need to match Python's RNG
+        // exactly — only the peak bin and its magnitude drive the outcome).
+        for v in salience.iter_mut() {
+            *v = 0.005;
+        }
+        salience[2 * BINS + 100] = 0.06;
+        for (t, b) in [(3, 100usize), (4, 102), (5, 104), (6, 103)] {
+            salience[t * BINS + b] = 0.8;
+        }
+        let (f0, conf) = rmvpe_decode(&salience, T, BINS, 0.05);
+
+        assert_eq!(f0[0], 0.0);
+        assert_eq!(f0[1], 0.0);
+        assert!(
+            f0[2] > 0.0,
+            "frame 2 should self-decode (peak 0.06 > thred 0.05)"
+        );
+        assert!((conf[2] - 0.06).abs() < 1e-6);
+        for t in 3..=6 {
+            assert!(f0[t] > 0.0, "frame {t} should be voiced");
+            assert!((conf[t] - 0.8).abs() < 1e-6);
+        }
+        assert_eq!(f0[7], 0.0);
+        assert_eq!(f0[8], 0.0);
+        assert_eq!(f0[9], 0.0);
+        // F0 rises with the drifting peak bin (100 -> 102 -> 104), matching
+        // the Python reference's 100.79 / 100.61 / 103.02 / 105.35 / 104.12 trend.
+        assert!(f0[4] > f0[3]);
+        assert!(f0[5] > f0[4]);
+    }
+
+    #[test]
+    fn rmvpe_decode_onset_backfill_matches_python_reference() {
+        // Isolated, exact port of gen_dsp_vectors2.py's fixture (no RNG noise
+        // needed: onset backfill only depends on peak/weak/zero booleans).
+        const T: usize = 4;
+        const BINS: usize = 16;
+        let mut salience = vec![0.0f32; T * BINS];
+        salience[5] = 0.01; // frame 0, below thred/3 (0.0167): stays unvoiced
+        salience[BINS + 5] = 0.03; // frame 1, above thred/3: eligible for backfill
+        salience[2 * BINS + 5] = 0.9; // confident onset
+        salience[3 * BINS + 5] = 0.9;
+        let (f0, _conf) = rmvpe_decode(&salience, T, BINS, 0.05);
+        assert_eq!(f0[0], 0.0, "below weak threshold: not backfilled");
+        assert!(
+            f0[1] > 0.0,
+            "weak frame directly preceding onset: backfilled"
+        );
+        assert_eq!(f0[1], f0[2], "backfill copies the onset's own F0 value");
+        assert!(f0[2] > 0.0 && f0[3] > 0.0);
+    }
+
+    // ── gate_envelope — reference values from gen_dsp_vectors2.py::gate_envelope
+
+    #[test]
+    fn gate_envelope_matches_python_reference() {
+        let mut chunk = vec![0.0f32; 512];
+        for s in chunk.iter_mut().take(220).skip(200) {
+            *s = 0.5;
+        }
+        let (env_rel, env_last) = gate_envelope(&chunk, 0.1, 0.060, 16000);
+        assert_eq!(env_rel.len(), 512);
+        let expected_every_32nd = [
+            0.09989589f32,
+            0.09662091,
+            0.09345330,
+            0.09038953,
+            0.08742622,
+            0.08456004,
+            0.08178783,
+            0.07910651,
+            0.07651309,
+            0.07400469,
+            0.07157853,
+            0.06923191,
+            0.06696221,
+            0.06476694,
+            0.06264362,
+            0.06058992,
+        ];
+        for (i, &want) in expected_every_32nd.iter().enumerate() {
+            let got = env_rel[i * 32];
+            assert!(
+                (got - want).abs() < 1e-3,
+                "index {}: {got} vs {want}",
+                i * 32
+            );
+        }
+        assert!((env_last - 0.05866462).abs() < 1e-3, "{env_last}");
     }
 }
