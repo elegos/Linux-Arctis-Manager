@@ -8,6 +8,11 @@ url="https://github.com/elegos/Linux-Arctis-Manager"
 license=('MIT')
 depends=('python' 'libcap')
 makedepends=('rust' 'cargo' 'uv' 'python')
+# python-pytorch: only for the AI voice changer's one-shot .pth -> ONNX
+# conversion tool (E10-S6a/S7); optdepends is informational only on Arch
+# (pacman never auto-installs it), so runtime detection with a
+# consent-gated pip fallback is the primary mechanism here, not this line.
+optdepends=('python-pytorch: AI voice changer model conversion')
 provides=('linux-arctis-manager')
 conflicts=('linux-arctis-manager-git')
 install=lam.install
