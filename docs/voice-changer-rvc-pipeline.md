@@ -172,7 +172,7 @@ flowchart TB
         PROV["vc/inference/providers.rs ✅\nExecution-provider selection\nCUDA / ROCm / OpenVINO / CPU"]
         ENGINE["vc/inference/engine.rs\n3× ort::Session (ContentVec, RMVPE, Synth)\nowns the sliding-window state machine"]
         DSP["vc_dsp.rs ✅\nported DSP glue: F0 post-processing,\nVTLN, SOLA, envelope gate, soft limiter,\nRMS mix — pure, unit-tested functions"]
-        RETR["vc_retrieval.rs\nbrute-force weighted k-NN\nover the model's .index vectors"]
+        RETR["vc/inference/retrieval.rs ✅\nbrute-force weighted k-NN\nover the model's .index vectors\n(hand-parsed IndexIVFFlat format)"]
         MEL["vc/inference/mel.rs ✅\nnative mel-spectrogram (rustfft/realfft)\n+ computed filterbank, checked against\ntorchaudio's real source"]
     end
 
@@ -194,7 +194,7 @@ Crate/dependency choices, validated against prior art before committing to them:
 | ONNX inference | [`ort`](https://github.com/pykeio/ort) | Already used in this daemon's design (Phase 2 decision); confirmed in production real-time-audio use elsewhere (Murmure/SilentKeys STT with NVIDIA Parakeet + Silero VAD, sbv2-api TTS) |
 | Resampling (model_sr → 48 kHz) | [`rubato`](https://docs.rs/rubato) | Real-time-safe (no allocation in the hot path), replaces `torchaudio.functional.resample` |
 | Mel-spectrogram STFT | [`realfft`](https://docs.rs/realfft) (built on `rustfft`) | `torch.stft` inside the ONNX graph is exporter-finicky, so the STFT + HTK mel filterbank are done natively instead (`vc/inference/mel.rs`, done) — the filterbank is *computed* from the same formulas as `torchaudio.functional.melscale_fbanks` (checked against its real source, not memory) rather than embedded as a 65k-value literal blob |
-| FAISS retrieval replacement | brute-force weighted k-NN (own code) | Community `.index` files are small enough (few hundred thousand 256-dim vectors) that brute force is cheap and avoids a `libfaiss` C++ dependency — decided in [Phase 3](voice-changing-feature.md) planning |
+| FAISS retrieval replacement | brute-force weighted k-NN (own code) | Community `.index` files are small enough (few hundred thousand 768-dim vectors) that brute force is cheap and avoids a `libfaiss` C++ dependency — decided in [Phase 3](voice-changing-feature.md) planning. `vc/inference/retrieval.rs` (done) parses `.index`'s `IndexIVFFlat` binary format directly (reverse-engineered from `faiss`'s real source, verified byte-exact against four real downloaded models) rather than linking `libfaiss` just to read it |
 
 A from-scratch Rust real-time RVC engine with an almost identical crate split (`vc-core`/`vc-signal`/`vc-inference`/`vc-audio`) already exists as a hobby project ([HaruSameee/Rust-VoiceConversion](https://github.com/HaruSameee/Rust-VoiceConversion)) — no license, so **not a code source**, but independent confirmation that this architecture shape is a proven, tractable way to structure the problem, not a novel risk.
 
