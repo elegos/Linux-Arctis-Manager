@@ -785,6 +785,7 @@ dependencies = [
  "futures",
  "hid-transport",
  "lam-hidraw-helper",
+ "libloading",
  "nix",
  "ort",
  "rand",

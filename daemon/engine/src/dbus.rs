@@ -1211,15 +1211,28 @@ impl VcInterface {
     /// which can only ever be initialised once per process, so trying
     /// multiple candidates that way from inside a live daemon isn't safe —
     /// see `vc_onnxruntime_detect::find_onnxruntime_dylib`'s doc comment).
+    ///
+    /// When the found library is CUDA-capable, also reports whether cuDNN
+    /// is findable — `engine::init_runtime` self-heals the common "pip
+    /// installed but not on the loader's search path" case, but a genuinely
+    /// missing cuDNN still needs the same guided-install treatment
+    /// `libonnxruntime` itself gets (see `CUDNN_PIP_HINT`'s doc comment for
+    /// why that's a single command rather than a per-distro tutorial set).
     #[zbus(name = "DetectOnnxRuntime")]
     async fn detect_onnxruntime(&self) -> String {
         let vendor = crate::vc_onnxruntime_detect::detect_gpu_vendor();
         let found = crate::vc_onnxruntime_detect::find_onnxruntime_dylib(vendor);
+        let needs_cudnn = found
+            .as_ref()
+            .is_some_and(|(_, c)| *c == crate::vc_onnxruntime_detect::OnnxRuntimeCapability::Cuda);
+        let cudnn_found = needs_cudnn.then(crate::vc_onnxruntime_detect::find_libcudnn);
         serde_json::json!({
             "found": found.is_some(),
             "path": found.as_ref().map(|(p, _)| p.display().to_string()),
             "capability": found.as_ref().map(|(_, c)| c.display_name()),
             "accelerated": found.as_ref().is_some_and(|(_, c)| c.matches(vendor)),
+            "cudnn_missing": needs_cudnn && cudnn_found.flatten().is_none(),
+            "cudnn_hint": crate::vc_onnxruntime_detect::CUDNN_PIP_HINT,
         })
         .to_string()
     }

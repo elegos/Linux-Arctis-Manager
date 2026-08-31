@@ -84,8 +84,14 @@ class OnnxRuntimeInstallDialog(QDialog):
         self._verify_btn.setEnabled(True)
         if data.get('found'):
             path = data.get('path', '')
-            self._verify_status.setText(f"{_T('ui', 'onnxrt_found')} {path}")
-            self._verify_status.setStyleSheet('color: green;')
+            text = f"{_T('ui', 'onnxrt_found')} {path}"
+            color = 'green'
+            if data.get('cudnn_missing'):
+                hint = data.get('cudnn_hint', '')
+                text += '\n' + _T('ui', 'onnxrt_cudnn_missing').format(hint=hint)
+                color = 'orange'
+            self._verify_status.setText(text)
+            self._verify_status.setStyleSheet(f'color: {color};')
         else:
             self._verify_status.setText(_T('ui', 'onnxrt_not_found'))
             self._verify_status.setStyleSheet('color: red;')

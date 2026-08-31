@@ -57,10 +57,63 @@ impl From<ort::LoadDynamicError> for EngineError {
 /// once is harmless (the second call is a silent no-op — see `ort::init`'s
 /// `commit()` docs).
 pub fn init_runtime(dylib_path: &Path) -> Result<(), EngineError> {
+    if crate::vc_onnxruntime_detect::classify_capability(dylib_path)
+        == crate::vc_onnxruntime_detect::OnnxRuntimeCapability::Cuda
+    {
+        preload_cudnn();
+    }
     ort::init_from(dylib_path)?
         .with_execution_providers(providers::build_providers(&providers::PRIORITY_ORDER))
         .commit();
     Ok(())
+}
+
+/// Best-effort: makes a `pip install --user nvidia-cudnn-cuXX`'d cuDNN
+/// discoverable to the CUDA execution provider's own internal `dlopen`
+/// call. That call only follows the standard dynamic-loader search order
+/// (`LD_LIBRARY_PATH`, `ld.so` cache, rpath) — none of which cover pip's
+/// `site-packages` layout — so a CUDA-capable `onnxruntime` with the
+/// NVIDIA driver present but no *findable* cuDNN registers its CUDA
+/// provider successfully, then hard-fails the first time a session
+/// actually tries to run a kernel (reproduced live) instead of the clean
+/// registration-time fallback to CPU a genuinely absent provider gets.
+///
+/// If cuDNN is already resolvable via the standard search (a system
+/// package, or `LD_LIBRARY_PATH` already covering it), the initial probe
+/// below succeeds and this is a silent no-op. If nothing is found on disk
+/// at all, this is also a silent no-op — the CUDA EP's own error is clear
+/// enough, and `DetectOnnxRuntime` surfaces the gap proactively for the
+/// install-helper dialog (see `vc_onnxruntime_detect::CUDNN_PIP_HINT`).
+///
+/// The loaded library is deliberately leaked (never `drop`ped): once
+/// preloaded, it needs to stay resident for as long as any CUDA session
+/// might run, which for this daemon is its entire remaining lifetime.
+fn preload_cudnn() {
+    // SAFETY: loading a system/pip-distributed cuDNN shared library and
+    // running its static initializers, same trust boundary as `ort` itself
+    // loading `libonnxruntime.so` (and, transitively, this same cuDNN) a few
+    // lines below.
+    if unsafe { libloading::Library::new("libcudnn.so.9") }.is_ok() {
+        return; // already resolvable via the standard search — nothing to do
+    }
+    let Some(path) = crate::vc_onnxruntime_detect::find_libcudnn() else {
+        return;
+    };
+    match unsafe { libloading::Library::new(&path) } {
+        Ok(lib) => {
+            tracing::info!(
+                "preloaded cuDNN from {} for the CUDA execution provider",
+                path.display()
+            );
+            std::mem::forget(lib);
+        }
+        Err(e) => {
+            tracing::warn!(
+                "found cuDNN at {} but failed to preload it: {e}",
+                path.display()
+            );
+        }
+    }
 }
 
 fn load_session(path: &Path) -> Result<Session, EngineError> {

@@ -33,6 +33,7 @@ zip = { workspace = true }
 flate2 = { workspace = true }
 realfft = { workspace = true }
 ort = { workspace = true }
+libloading = { workspace = true }
 rand = { workspace = true }
 rand_distr = { workspace = true }
 rubato = { workspace = true }
