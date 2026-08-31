@@ -277,7 +277,7 @@ impl OnnxRuntimeCapability {
     }
 }
 
-fn classify_capability(dylib_path: &Path) -> OnnxRuntimeCapability {
+pub fn classify_capability(dylib_path: &Path) -> OnnxRuntimeCapability {
     let Some(dir) = dylib_path.parent() else {
         return OnnxRuntimeCapability::CpuOnly;
     };
@@ -307,25 +307,36 @@ fn system_candidate_paths() -> Vec<PathBuf> {
     ]
 }
 
-/// `pip install --user`'s install location. Every variant (`onnxruntime`,
-/// `onnxruntime-gpu`, `onnxruntime-rocm`) installs to the same
-/// `onnxruntime/capi/` layout under site-packages — indistinguishable by
-/// path alone, which is exactly why [`classify_capability`] looks at
-/// sibling files instead. Scans every `~/.local/lib/pythonX.Y/` found,
-/// since the Python version `pip` targeted isn't known ahead of time.
-fn pip_candidate_paths() -> Vec<PathBuf> {
+/// Scans every `~/.local/lib/pythonX.Y/site-packages/<rel_subdir>/` found
+/// (the Python version `pip install --user` targeted isn't known ahead of
+/// time) for files whose name starts with `file_prefix` — the common shape
+/// of a pip-installed native shared library, shared between `onnxruntime`'s
+/// `onnxruntime/capi/libonnxruntime.so*` and cuDNN's
+/// `nvidia/cudnn/lib/libcudnn.so*` layouts.
+fn scan_pip_site_packages(rel_subdir: &str, file_prefix: &str) -> Vec<PathBuf> {
     let Some(home) = std::env::var_os("HOME") else {
         return Vec::new();
     };
-    let lib_dir = PathBuf::from(home).join(".local/lib");
-    let Ok(entries) = std::fs::read_dir(&lib_dir) else {
+    scan_pip_site_packages_under(
+        &PathBuf::from(home).join(".local/lib"),
+        rel_subdir,
+        file_prefix,
+    )
+}
+
+fn scan_pip_site_packages_under(
+    lib_dir: &Path,
+    rel_subdir: &str,
+    file_prefix: &str,
+) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(lib_dir) else {
         return Vec::new();
     };
     entries
         .flatten()
         .filter(|e| e.file_name().to_string_lossy().starts_with("python"))
         .flat_map(|e| {
-            std::fs::read_dir(e.path().join("site-packages/onnxruntime/capi"))
+            std::fs::read_dir(e.path().join("site-packages").join(rel_subdir))
                 .into_iter()
                 .flatten()
                 .flatten()
@@ -334,9 +345,18 @@ fn pip_candidate_paths() -> Vec<PathBuf> {
         .filter(|p| {
             p.file_name()
                 .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with("libonnxruntime.so"))
+                .is_some_and(|n| n.starts_with(file_prefix))
         })
         .collect()
+}
+
+/// `pip install --user`'s install location. Every variant (`onnxruntime`,
+/// `onnxruntime-gpu`, `onnxruntime-rocm`) installs to the same
+/// `onnxruntime/capi/` layout under site-packages — indistinguishable by
+/// path alone, which is exactly why [`classify_capability`] looks at
+/// sibling files instead.
+fn pip_candidate_paths() -> Vec<PathBuf> {
+    scan_pip_site_packages("onnxruntime/capi", "libonnxruntime.so")
 }
 
 fn all_candidate_paths() -> Vec<PathBuf> {
@@ -375,6 +395,44 @@ pub fn find_onnxruntime_dylib(vendor: GpuVendor) -> Option<(PathBuf, OnnxRuntime
         .find(|(_, cap)| cap.matches(vendor))
         .cloned()
         .or_else(|| classified.into_iter().next())
+}
+
+// ── cuDNN detection ──────────────────────────────────────────────────────
+//
+// A CUDA-capable `libonnxruntime.so` (system package or `pip install --user
+// onnxruntime-gpu`) still needs `libcudnn.so` to actually run anything on
+// the GPU — its CUDA execution provider registers successfully either way,
+// then hard-fails the first time a real session tries to run a kernel if
+// cuDNN isn't resolvable (reproduced live: NVIDIA driver present, no system
+// cuDNN — session creation throws instead of falling back to CPU like a
+// provider that fails to *register* does). Unlike `libonnxruntime`, cuDNN's
+// proprietary NVIDIA license means no mainstream distro packages it
+// reliably, so there's no per-distro tutorial set here — just the one `pip`
+// command, matching this project's dependency-acquisition philosophy for
+// libraries with no reliable system package (same reasoning already applied
+// to `torch`).
+
+/// The one relevant install command for cuDNN — see the module-level note
+/// above for why this doesn't need per-distro branching like
+/// [`pick_tutorial`] does.
+pub const CUDNN_PIP_HINT: &str = "pip install --user nvidia-cudnn-cu12";
+
+/// Finds an already-installed `libcudnn.so*`: common system/CUDA-toolkit
+/// locations, plus `pip install --user nvidia-cudnn-cuXX`'s
+/// `nvidia/cudnn/lib/` layout under site-packages (pip's cuDNN wheels are
+/// versioned by CUDA major version, e.g. `nvidia-cudnn-cu12`, but always
+/// install to that same subpath regardless of which one).
+pub fn find_libcudnn() -> Option<PathBuf> {
+    let mut candidates = vec![
+        PathBuf::from("/usr/lib64/libcudnn.so.9"),
+        PathBuf::from("/usr/lib64/libcudnn.so"),
+        PathBuf::from("/usr/lib/x86_64-linux-gnu/libcudnn.so.9"),
+        PathBuf::from("/usr/lib/x86_64-linux-gnu/libcudnn.so"),
+        PathBuf::from("/usr/local/cuda/lib64/libcudnn.so.9"),
+        PathBuf::from("/usr/local/cuda/lib64/libcudnn.so"),
+    ];
+    candidates.extend(scan_pip_site_packages("nvidia/cudnn/lib", "libcudnn.so"));
+    candidates.into_iter().find(|p| p.is_file())
 }
 
 #[cfg(test)]
@@ -506,6 +564,54 @@ mod tests {
         assert_eq!(classify_capability(&dylib), OnnxRuntimeCapability::Rocm);
     }
 
+    // ── scan_pip_site_packages_under / find_libcudnn ────────────────────
+
+    #[test]
+    fn scan_pip_site_packages_under_finds_matching_file_across_python_versions() {
+        let lib_dir = tempfile::tempdir().unwrap();
+        let site_pkgs = lib_dir
+            .path()
+            .join("python3.12/site-packages/nvidia/cudnn/lib");
+        std::fs::create_dir_all(&site_pkgs).unwrap();
+        std::fs::write(site_pkgs.join("libcudnn.so.9"), b"").unwrap();
+        std::fs::write(site_pkgs.join("libcudnn_ops.so.9"), b"").unwrap(); // sibling, not a match
+
+        let found = scan_pip_site_packages_under(lib_dir.path(), "nvidia/cudnn/lib", "libcudnn.so");
+        assert_eq!(found, vec![site_pkgs.join("libcudnn.so.9")]);
+    }
+
+    #[test]
+    fn scan_pip_site_packages_under_ignores_non_python_dirs_and_missing_subdir() {
+        let lib_dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(
+            lib_dir
+                .path()
+                .join("not-python/site-packages/nvidia/cudnn/lib"),
+        )
+        .unwrap();
+        std::fs::write(
+            lib_dir
+                .path()
+                .join("not-python/site-packages/nvidia/cudnn/lib/libcudnn.so.9"),
+            b"",
+        )
+        .unwrap();
+        std::fs::create_dir_all(lib_dir.path().join("python3.12/site-packages")).unwrap(); // no cudnn subdir
+
+        let found = scan_pip_site_packages_under(lib_dir.path(), "nvidia/cudnn/lib", "libcudnn.so");
+        assert!(found.is_empty());
+    }
+
+    #[test]
+    fn scan_pip_site_packages_under_missing_lib_dir_returns_empty() {
+        let found = scan_pip_site_packages_under(
+            std::path::Path::new("/nonexistent/for/real"),
+            "nvidia/cudnn/lib",
+            "libcudnn.so",
+        );
+        assert!(found.is_empty());
+    }
+
     // ── live: real system detection (not #[ignore] — safe on any machine,
     // just asserts internal consistency rather than an exact platform) ──
 
@@ -515,5 +621,6 @@ mod tests {
         let _ = detect_distro_id();
         let _ = detect_package_manager();
         let _ = find_onnxruntime_dylib(vendor);
+        let _ = find_libcudnn();
     }
 }

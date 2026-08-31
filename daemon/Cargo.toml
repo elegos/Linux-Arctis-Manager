@@ -73,6 +73,10 @@ ort = { version = "2.0.0-rc.13", default-features = false, features = [
     "tracing",
     "api-27",
 ] }
+# Already pulled in transitively by ort's own load-dynamic feature; declared
+# directly too so the RVC engine can preload a pip-installed cuDNN itself
+# (see vc/inference/engine.rs::preload_cudnn) — added in E10-S6a.
+libloading = "0.9"
 # internal crates
 device-config = { path = "device-config" }
 hid-transport = { path = "hid-transport" }
