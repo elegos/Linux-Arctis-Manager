@@ -917,12 +917,31 @@ impl VcInterface {
         let (rmvpe, contentvec) = crate::vc_base_models::base_models_status(&base_models_dir);
         let models = crate::vc_models::list_models(&self.settings_base_dir);
         let models_folder = crate::vc_models::models_dir(&self.settings_base_dir);
+
+        // `available` gates whether the RVC panel shows as usable at all —
+        // tied specifically to a working `libonnxruntime.so` being found
+        // (what actually lets the [E10-S6a] engine run), not to base model
+        // downloads (tracked separately via `base_models` below) or a
+        // GPU-accelerated one being found specifically: a CPU-only install
+        // is still a real, usable backend, just a slower one — this was
+        // hardcoded `false` before [E10-S7] gave the daemon a real way to
+        // check, which silently made the panel always claim "no compatible
+        // AI backend found" even when a perfectly usable CPU backend was
+        // already installed.
+        let vendor = crate::vc_onnxruntime_detect::detect_gpu_vendor();
+        let onnxruntime = crate::vc_onnxruntime_detect::find_onnxruntime_dylib(vendor);
+        let available = onnxruntime.is_some();
+        let backends: Vec<&str> = onnxruntime
+            .as_ref()
+            .map(|(_, cap)| vec![cap.display_name()])
+            .unwrap_or_default();
+
         serde_json::json!({
             "ladspa": ladspa,
             "rvc": {
-                "available": false,
-                "backends": Vec::<String>::new(),
-                "ai_env_exists": false,
+                "available": available,
+                "backends": backends,
+                "gpu_vendor": vendor.display_name(),
                 "base_models": { "rmvpe": rmvpe, "contentvec": contentvec },
                 "models": models,
                 "models_folder": models_folder.display().to_string(),
@@ -1187,16 +1206,20 @@ impl VcInterface {
 
     /// The "Verify" button: re-probes known install locations for a real
     /// `libonnxruntime.so` after the user has (supposedly) followed the
-    /// tutorial. Only checks the file exists — it does not attempt to load
-    /// it (that needs an `ort` environment, which this cheap read-only
-    /// check deliberately avoids initialising just to answer "is it there
-    /// now").
+    /// tutorial. Only checks files exist and their provider siblings — it
+    /// does not attempt to load anything (that needs an `ort` environment,
+    /// which can only ever be initialised once per process, so trying
+    /// multiple candidates that way from inside a live daemon isn't safe —
+    /// see `vc_onnxruntime_detect::find_onnxruntime_dylib`'s doc comment).
     #[zbus(name = "DetectOnnxRuntime")]
     async fn detect_onnxruntime(&self) -> String {
-        let path = crate::vc_onnxruntime_detect::find_onnxruntime_dylib();
+        let vendor = crate::vc_onnxruntime_detect::detect_gpu_vendor();
+        let found = crate::vc_onnxruntime_detect::find_onnxruntime_dylib(vendor);
         serde_json::json!({
-            "found": path.is_some(),
-            "path": path.map(|p| p.display().to_string()),
+            "found": found.is_some(),
+            "path": found.as_ref().map(|(p, _)| p.display().to_string()),
+            "capability": found.as_ref().map(|(_, c)| c.display_name()),
+            "accelerated": found.as_ref().is_some_and(|(_, c)| c.matches(vendor)),
         })
         .to_string()
     }

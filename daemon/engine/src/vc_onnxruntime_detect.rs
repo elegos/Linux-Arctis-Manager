@@ -18,7 +18,7 @@
 // asking before running a shell command) — see `daemon/Cargo.toml`'s and
 // `packaging/{fedora,debian,arch}`'s dependency-acquisition philosophy note.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // ── GPU vendor detection ─────────────────────────────────────────────────
 
@@ -244,11 +244,55 @@ pub fn pick_tutorial(
 
 // ── Finding an already-installed libonnxruntime.so ───────────────────────
 
-/// Known install locations across the distros/package managers this module
-/// has tutorials for. Checked in order; the first that exists wins. This
-/// only checks the file is *present* — actually loading it (`ort::init_from`)
-/// is the real test, done by the caller (this just narrows candidates).
-fn candidate_dylib_paths() -> Vec<PathBuf> {
+/// What acceleration a found `libonnxruntime.so` actually provides.
+/// Determined from sibling `libonnxruntime_providers_*.so` files next to
+/// it — both the system packages and the pip wheels use that same
+/// directory layout (confirmed empirically: `pip install --user
+/// onnxruntime-gpu` drops `libonnxruntime_providers_cuda.so` right next to
+/// `libonnxruntime.so.*` in `onnxruntime/capi/`) — rather than loading the
+/// library, which this module deliberately avoids (see
+/// [`find_onnxruntime_dylib`]'s doc comment for why).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OnnxRuntimeCapability {
+    Cuda,
+    Rocm,
+    CpuOnly,
+}
+
+impl OnnxRuntimeCapability {
+    pub fn display_name(self) -> &'static str {
+        match self {
+            OnnxRuntimeCapability::Cuda => "CUDA",
+            OnnxRuntimeCapability::Rocm => "ROCm",
+            OnnxRuntimeCapability::CpuOnly => "CPU-only",
+        }
+    }
+
+    pub fn matches(self, vendor: GpuVendor) -> bool {
+        matches!(
+            (self, vendor),
+            (OnnxRuntimeCapability::Cuda, GpuVendor::Nvidia)
+                | (OnnxRuntimeCapability::Rocm, GpuVendor::Amd)
+        )
+    }
+}
+
+fn classify_capability(dylib_path: &Path) -> OnnxRuntimeCapability {
+    let Some(dir) = dylib_path.parent() else {
+        return OnnxRuntimeCapability::CpuOnly;
+    };
+    if dir.join("libonnxruntime_providers_cuda.so").is_file() {
+        OnnxRuntimeCapability::Cuda
+    } else if dir.join("libonnxruntime_providers_rocm.so").is_file() {
+        OnnxRuntimeCapability::Rocm
+    } else {
+        OnnxRuntimeCapability::CpuOnly
+    }
+}
+
+/// System package install locations across the distros/package managers
+/// this module has tutorials for.
+fn system_candidate_paths() -> Vec<PathBuf> {
     vec![
         // Fedora / RPM-based, x86_64
         PathBuf::from("/usr/lib64/libonnxruntime.so.1"),
@@ -263,16 +307,74 @@ fn candidate_dylib_paths() -> Vec<PathBuf> {
     ]
 }
 
-/// The first candidate path that exists on disk, if any. Does not attempt
-/// to load it — a caller wanting to know if it's actually *usable* should
-/// try `ort::init_from()` on the result and fall back to the next candidate
-/// (not implemented here — this module has no `ort` dependency) on failure.
-pub fn find_onnxruntime_dylib() -> Option<PathBuf> {
-    find_first_existing(&candidate_dylib_paths())
+/// `pip install --user`'s install location. Every variant (`onnxruntime`,
+/// `onnxruntime-gpu`, `onnxruntime-rocm`) installs to the same
+/// `onnxruntime/capi/` layout under site-packages — indistinguishable by
+/// path alone, which is exactly why [`classify_capability`] looks at
+/// sibling files instead. Scans every `~/.local/lib/pythonX.Y/` found,
+/// since the Python version `pip` targeted isn't known ahead of time.
+fn pip_candidate_paths() -> Vec<PathBuf> {
+    let Some(home) = std::env::var_os("HOME") else {
+        return Vec::new();
+    };
+    let lib_dir = PathBuf::from(home).join(".local/lib");
+    let Ok(entries) = std::fs::read_dir(&lib_dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with("python"))
+        .flat_map(|e| {
+            std::fs::read_dir(e.path().join("site-packages/onnxruntime/capi"))
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|f| f.path())
+        })
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("libonnxruntime.so"))
+        })
+        .collect()
 }
 
-fn find_first_existing(paths: &[PathBuf]) -> Option<PathBuf> {
-    paths.iter().find(|p| p.is_file()).cloned()
+fn all_candidate_paths() -> Vec<PathBuf> {
+    let mut paths = system_candidate_paths();
+    paths.extend(pip_candidate_paths());
+    paths
+}
+
+/// Finds the best already-installed `libonnxruntime.so` for `vendor`:
+/// among every candidate that actually exists, prefers one whose sibling
+/// provider files indicate acceleration matching the detected GPU vendor
+/// over one that doesn't (falling back to the first existing candidate,
+/// accelerated or not, if none matches) — a `pip install --user
+/// onnxruntime-gpu` the user ran specifically because the system package
+/// lacked CUDA support must win over that system CPU-only package, not the
+/// reverse.
+///
+/// Deliberately file-based rather than actually loading each candidate:
+/// `ort`'s environment can only be initialised once per process
+/// (`ort::init_from` commits to a global once-cell), so trying several
+/// candidates via a real load from inside a live daemon would permanently
+/// commit it to whichever one happened to be tried, even just to answer
+/// "which is best" — not safe to do here.
+pub fn find_onnxruntime_dylib(vendor: GpuVendor) -> Option<(PathBuf, OnnxRuntimeCapability)> {
+    let classified: Vec<(PathBuf, OnnxRuntimeCapability)> = all_candidate_paths()
+        .into_iter()
+        .filter(|p| p.is_file())
+        .map(|p| {
+            let cap = classify_capability(&p);
+            (p, cap)
+        })
+        .collect();
+
+    classified
+        .iter()
+        .find(|(_, cap)| cap.matches(vendor))
+        .cloned()
+        .or_else(|| classified.into_iter().next())
 }
 
 #[cfg(test)]
@@ -376,23 +478,32 @@ mod tests {
         assert!(t.contains("conflicts"));
     }
 
-    // ── find_first_existing ─────────────────────────────────────────────
+    // ── classify_capability ──────────────────────────────────────────────
 
     #[test]
-    fn find_first_existing_returns_none_for_all_missing() {
-        let paths = vec![
-            PathBuf::from("/nonexistent/a.so"),
-            PathBuf::from("/nonexistent/b.so"),
-        ];
-        assert_eq!(find_first_existing(&paths), None);
+    fn classify_capability_cpu_only_when_no_provider_siblings() {
+        let dir = tempfile::tempdir().unwrap();
+        let dylib = dir.path().join("libonnxruntime.so.1");
+        std::fs::write(&dylib, b"").unwrap();
+        assert_eq!(classify_capability(&dylib), OnnxRuntimeCapability::CpuOnly);
     }
 
     #[test]
-    fn find_first_existing_skips_missing_entries() {
-        // Cargo.toml always exists in the crate root at test time.
-        let real = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
-        let paths = vec![PathBuf::from("/nonexistent/a.so"), real.clone()];
-        assert_eq!(find_first_existing(&paths), Some(real));
+    fn classify_capability_cuda_when_cuda_provider_sibling_present() {
+        let dir = tempfile::tempdir().unwrap();
+        let dylib = dir.path().join("libonnxruntime.so.1");
+        std::fs::write(&dylib, b"").unwrap();
+        std::fs::write(dir.path().join("libonnxruntime_providers_cuda.so"), b"").unwrap();
+        assert_eq!(classify_capability(&dylib), OnnxRuntimeCapability::Cuda);
+    }
+
+    #[test]
+    fn classify_capability_rocm_when_rocm_provider_sibling_present() {
+        let dir = tempfile::tempdir().unwrap();
+        let dylib = dir.path().join("libonnxruntime.so.1");
+        std::fs::write(&dylib, b"").unwrap();
+        std::fs::write(dir.path().join("libonnxruntime_providers_rocm.so"), b"").unwrap();
+        assert_eq!(classify_capability(&dylib), OnnxRuntimeCapability::Rocm);
     }
 
     // ── live: real system detection (not #[ignore] — safe on any machine,
@@ -400,9 +511,9 @@ mod tests {
 
     #[test]
     fn detect_functions_run_without_panicking_on_this_machine() {
-        let _ = detect_gpu_vendor();
+        let vendor = detect_gpu_vendor();
         let _ = detect_distro_id();
         let _ = detect_package_manager();
-        let _ = find_onnxruntime_dylib();
+        let _ = find_onnxruntime_dylib(vendor);
     }
 }
