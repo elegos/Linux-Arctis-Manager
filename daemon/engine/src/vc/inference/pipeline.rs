@@ -598,4 +598,105 @@ mod tests {
         );
         assert!(all_finite, "output must never contain NaN/Inf");
     }
+
+    /// Offline acoustic-verification harness — see this module's header
+    /// comment on "faithful-but-unheard": every other `#[ignore]`d test
+    /// above checks shape/finiteness/silence, none of which a person can
+    /// judge by ear. This one runs a real WAV recording through the exact
+    /// same hop-by-hop `convert` loop the live D-Bus path will use once
+    /// wired up, and writes the result to a WAV file for a human to
+    /// actually listen to. Not run by default — needs a real onnxruntime
+    /// shared library, the real published base models, a real synthesizer,
+    /// and a real input WAV recording. Run manually with
+    /// `LAM_ORT_DYLIB_PATH=... LAM_TEST_INPUT_WAV=/path/to/recording.wav \
+    ///  LAM_TEST_OUTPUT_WAV=/path/to/output.wav \
+    ///  cargo test --bin lam-daemon -- --ignored live_offline_convert_wav_file --nocapture`
+    /// `LAM_TEST_PITCH_OFFSET` (semitones, default 0) is also read.
+    /// `LAM_TEST_INDEX_PATH` (optional) points at a real `.index` file to
+    /// enable FAISS-style retrieval blend, with `LAM_TEST_INDEX_RATE`
+    /// (default 0.5) controlling the blend strength — off (`RvcParams`'s own
+    /// default) unless `LAM_TEST_INDEX_PATH` is set.
+    #[test]
+    #[ignore]
+    fn live_offline_convert_wav_file() {
+        use crate::vc::wav_io::{read_mono_f32, write_mono_pcm16};
+
+        let input_path = std::env::var("LAM_TEST_INPUT_WAV")
+            .expect("set LAM_TEST_INPUT_WAV to a real mono/stereo PCM16 WAV recording");
+        let output_path = std::env::var("LAM_TEST_OUTPUT_WAV")
+            .unwrap_or_else(|_| "/tmp/lam_rvc_offline_output.wav".to_owned());
+        let pitch_offset: f32 = std::env::var("LAM_TEST_PITCH_OFFSET")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.0);
+
+        let (input_samples, input_sr) =
+            read_mono_f32(std::path::Path::new(&input_path)).expect("read input WAV");
+        eprintln!(
+            "read {} samples @ {input_sr}Hz from {input_path}",
+            input_samples.len()
+        );
+        let input_16k = resample(&input_samples, input_sr, HUBERT_SR);
+
+        let mut pipeline = {
+            init_runtime(&dylib_path()).expect("init_runtime");
+            let models = base_models_dir();
+            let hubert = ContentVecSession::load(&models.join("content_vec_best.onnx"))
+                .expect("load content_vec_best.onnx");
+            let rmvpe = RmvpeSession::load(&models.join("rmvpe.onnx")).expect("load rmvpe.onnx");
+            let synth_path = synth_onnx_path();
+            let synth = SynthSession::load(&synth_path)
+                .unwrap_or_else(|e| panic!("failed to load {}: {e}", synth_path.display()));
+
+            let (retrieval, index_rate) = match std::env::var("LAM_TEST_INDEX_PATH") {
+                Ok(index_path) => {
+                    let idx = RetrievalIndex::load(std::path::Path::new(&index_path))
+                        .unwrap_or_else(|e| panic!("failed to load {index_path}: {e}"));
+                    eprintln!(
+                        "loaded retrieval index {index_path}: dim={} n_vectors={}",
+                        idx.dim, idx.n_vectors
+                    );
+                    let rate: f32 = std::env::var("LAM_TEST_INDEX_RATE")
+                        .ok()
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0.5);
+                    (Some(idx), rate)
+                }
+                Err(_) => (None, 0.0),
+            };
+            let params = RvcParams {
+                index_rate,
+                ..RvcParams::default()
+            };
+            Pipeline::new(hubert, rmvpe, synth, 48000, params, retrieval)
+        };
+        let mut out_all: Vec<f32> = Vec::new();
+        let mut pos = 0usize;
+        while pos < input_16k.len() {
+            let end = (pos + HOP_FRAMES).min(input_16k.len());
+            let mut hop = input_16k[pos..end].to_vec();
+            hop.resize(HOP_FRAMES, 0.0);
+            let out = pipeline
+                .convert(&hop, HUBERT_SR, pitch_offset)
+                .expect("convert");
+            out_all.extend_from_slice(&out);
+            pos = end;
+        }
+        // A handful of trailing silence hops to let the SOLA/xfade/look-ahead
+        // buffering (which lags real input by a few hops) drain fully.
+        for _ in 0..8 {
+            let hop = vec![0.0f32; HOP_FRAMES];
+            let out = pipeline
+                .convert(&hop, HUBERT_SR, pitch_offset)
+                .expect("convert");
+            out_all.extend_from_slice(&out);
+        }
+
+        write_mono_pcm16(std::path::Path::new(&output_path), &out_all, OUTPUT_SR)
+            .expect("write output WAV");
+        eprintln!(
+            "wrote {} samples @ {OUTPUT_SR}Hz to {output_path}",
+            out_all.len()
+        );
+    }
 }
