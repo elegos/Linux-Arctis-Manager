@@ -140,6 +140,81 @@ pub fn rms(x: &[f32]) -> f32 {
     (x.iter().map(|&v| v * v).sum::<f32>() / x.len() as f32).sqrt()
 }
 
+/// One static gain, computed once from the whole recording's own
+/// *active-speech* level and applied uniformly — not a real-time/dynamic
+/// compressor (unnecessary for an offline calibration render, where the
+/// whole file is available upfront), and not naive peak normalization
+/// either. Same "active-frame RMS" approach `pipeline.py`/`pipeline.rs`'s
+/// own `run_inference` already uses per-window (160-sample frames, only
+/// those at ≥20% of the loudest frame's level count toward the reference),
+/// just computed once over the full recording instead of per-window —
+/// where it can actually help, since the per-window version only ever
+/// normalizes windows the VAD gate already let through. A brief loud
+/// transient within the file's normal dynamic range (roughly under 5x the
+/// quiet baseline — a plosive, a stressed syllable) doesn't skew the
+/// reference the way it would skew naive single-sample peak-normalization;
+/// one loud enough to exceed that ratio can still dominate it, same known
+/// limitation the existing per-window version already has — not full
+/// immunity, just a real reduction (see this function's own tests for
+/// both the normal case and this documented edge).
+///
+/// A single global gain never changes the recording's signal-to-noise
+/// ratio: genuine silence stays silence (`0 × gain == 0`), and any
+/// background noise mixed with real speech is scaled by the exact same
+/// factor as the speech itself — it is not a substitute for a noise
+/// gate/expander if the problem is audible background noise, only for a
+/// recording that is quiet *overall*. What it does fix: several of the
+/// pipeline's *absolute* level thresholds (the VAD's `VAD_RMS` floor, the
+/// output-gate mask's harsh-knee floor) don't scale with the recording's
+/// own loudness, so a quiet recording sits closer to them even during
+/// genuine (if quiet) speech — closing the VAD gate, or crushing the
+/// output envelope mask, on passages a human would still hear as normal.
+///
+/// Only ever raises the level (never attenuates an already-healthy
+/// recording) and never pushes the true peak sample past 0.98, so a
+/// recording that's already loud enough — or one whose peak is already
+/// near full-scale — is returned unchanged.
+pub fn normalize_input_level(samples: &[f32], target_active_rms: f32, max_gain: f32) -> Vec<f32> {
+    const FRAME: usize = 160; // matches run_inference's own active-frame convention
+    if samples.len() < FRAME {
+        return samples.to_vec();
+    }
+
+    let n_frames = samples.len() / FRAME;
+    let frame_rms: Vec<f32> = (0..n_frames)
+        .map(|i| rms(&samples[i * FRAME..(i + 1) * FRAME]))
+        .collect();
+    let max_frame = frame_rms.iter().cloned().fold(0.0f32, f32::max);
+    if max_frame < 1e-6 {
+        return samples.to_vec(); // true digital silence throughout
+    }
+
+    let active_threshold = max_frame * 0.2;
+    let active: Vec<f32> = frame_rms
+        .iter()
+        .cloned()
+        .filter(|&v| v >= active_threshold)
+        .collect();
+    let active_rms = if active.is_empty() {
+        max_frame
+    } else {
+        active.iter().sum::<f32>() / active.len() as f32
+    };
+    if active_rms < 1e-6 {
+        return samples.to_vec();
+    }
+
+    let peak = samples.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
+    let gain = (target_active_rms / active_rms)
+        .clamp(1.0, max_gain)
+        .min(0.98 / peak);
+
+    if gain <= 1.0 {
+        return samples.to_vec();
+    }
+    samples.iter().map(|&s| s * gain).collect()
+}
+
 /// Per-hop soft limiter: linear below `threshold`, tanh-compressed above,
 /// bounded to `[-1, 1]`. Inline math from `pipeline.py::convert`'s limiter stage.
 pub fn soft_limit(samples: &mut [f32], threshold: f32) {
@@ -768,6 +843,123 @@ mod tests {
     #[test]
     fn mix_rms_empty_inputs_return_target() {
         assert_eq!(mix_rms(&[], &[1.0, 2.0], 0.5), vec![1.0, 2.0]);
+    }
+
+    // ── normalize_input_level ────────────────────────────────────────────
+
+    fn tone(n: usize, amplitude: f32) -> Vec<f32> {
+        (0..n)
+            .map(|i| amplitude * (2.0 * std::f32::consts::PI * 220.0 * i as f32 / 16000.0).sin())
+            .collect()
+    }
+
+    #[test]
+    fn normalize_input_level_boosts_a_quiet_recording() {
+        let quiet = tone(16000, 0.02); // active RMS ~0.014, well under target
+        let out = normalize_input_level(&quiet, 0.06, 8.0);
+        let boosted_rms = rms(&out);
+        let original_rms = rms(&quiet);
+        assert!(
+            boosted_rms > original_rms * 1.5,
+            "boosted={boosted_rms} original={original_rms}"
+        );
+    }
+
+    #[test]
+    fn normalize_input_level_leaves_an_already_loud_recording_unchanged() {
+        let loud = tone(16000, 0.5); // active RMS ~0.35, already well above target
+        let out = normalize_input_level(&loud, 0.06, 8.0);
+        assert_eq!(out, loud);
+    }
+
+    #[test]
+    fn normalize_input_level_leaves_true_silence_unchanged() {
+        let silence = vec![0.0f32; 16000];
+        let out = normalize_input_level(&silence, 0.06, 8.0);
+        assert_eq!(out, silence);
+    }
+
+    #[test]
+    fn normalize_input_level_never_amplifies_signal_to_noise_ratio() {
+        // A quiet "speech" tone plus a constant quiet "noise" floor: after
+        // normalization both must have grown by exactly the same factor —
+        // a single global gain cannot improve SNR, only raise everything.
+        let mut with_noise = tone(16000, 0.02);
+        for s in with_noise.iter_mut() {
+            *s += 0.001;
+        }
+        let out = normalize_input_level(&with_noise, 0.06, 8.0);
+        let implied_gain = out[100] / with_noise[100];
+        for i in [0usize, 4000, 8000, 12000] {
+            let g = out[i] / with_noise[i];
+            assert!(
+                (g - implied_gain).abs() < 1e-4,
+                "gain must be uniform: {g} vs {implied_gain} at sample {i}"
+            );
+        }
+    }
+
+    #[test]
+    fn normalize_input_level_a_moderate_transient_does_not_suppress_the_boost() {
+        // A brief, moderately loud burst (a consonant/plosive — within the
+        // 20%-of-loudest active-frame tolerance, i.e. under ~5x the quiet
+        // baseline) still lets the quiet majority set the reference and
+        // get boosted normally.
+        let mut samples = tone(16000, 0.02);
+        for s in samples.iter_mut().take(200) {
+            *s = 0.04; // 2x the quiet tone's amplitude — a normal loud syllable
+        }
+        let out = normalize_input_level(&samples, 0.06, 8.0);
+        let gain_on_tail = out[10000] / samples[10000];
+        assert!(gain_on_tail > 2.0, "gain_on_tail={gain_on_tail}");
+    }
+
+    #[test]
+    fn normalize_input_level_documents_the_known_limit_on_extreme_transients() {
+        // Known, accepted limitation (inherited from the same fixed
+        // 20%-of-loudest-frame threshold `pipeline.rs::run_inference`
+        // already uses per-window): a transient loud enough to push the
+        // quiet majority under that ratio (here 4x — over the ~5x
+        // tolerance) gets excluded from the active set same as the quiet
+        // content is, so the reference (and thus the gain) ends up set by
+        // the transient instead. This is *still* less severe than naive
+        // peak-normalization would be here (which references the single
+        // loudest *sample*, not an already-averaged frame), but it is not
+        // full immunity — documented via this test rather than silently
+        // relied upon.
+        let mut samples = tone(16000, 0.02);
+        for s in samples.iter_mut().take(200) {
+            *s = 0.08; // 4x the quiet tone's amplitude
+        }
+        let out = normalize_input_level(&samples, 0.06, 8.0);
+        let gain_on_tail = out[10000] / samples[10000];
+        assert!(
+            (0.9..=1.1).contains(&gain_on_tail),
+            "expected ~no boost (reference dominated by the transient), got gain_on_tail={gain_on_tail}"
+        );
+    }
+
+    #[test]
+    fn normalize_input_level_never_exceeds_peak_safety() {
+        let mut samples = tone(16000, 0.02);
+        samples[500] = 0.9; // one sample near full-scale
+        let out = normalize_input_level(&samples, 0.06, 8.0);
+        let peak = out.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
+        assert!(peak <= 0.98 + 1e-6, "peak={peak}");
+    }
+
+    #[test]
+    fn normalize_input_level_respects_max_gain_cap() {
+        let very_quiet = tone(16000, 0.001);
+        let out = normalize_input_level(&very_quiet, 0.06, 3.0);
+        let implied_gain = out[100] / very_quiet[100];
+        assert!(implied_gain <= 3.0 + 1e-3, "implied_gain={implied_gain}");
+    }
+
+    #[test]
+    fn normalize_input_level_short_buffer_is_a_noop() {
+        let tiny = vec![0.01f32; 50]; // shorter than one 160-sample frame
+        assert_eq!(normalize_input_level(&tiny, 0.06, 8.0), tiny);
     }
 
     // ── soft_limit ───────────────────────────────────────────────────────
