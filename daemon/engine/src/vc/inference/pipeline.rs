@@ -34,9 +34,13 @@ use super::resample::resample;
 use super::retrieval::{retrieval_blend, RetrievalIndex};
 
 const HUBERT_SR: u32 = 16000; // parec capture rate / RMVPE+ContentVec input rate
-const OUTPUT_SR: u32 = 48000; // fixed downstream output rate
+pub(crate) const OUTPUT_SR: u32 = 48000; // fixed downstream output rate
 const WINDOW_FRAMES: usize = 8192; // 512ms @ 16kHz — full inference window
-const HOP_FRAMES: usize = 2048; // 128ms @ 16kHz — new audio consumed per inference
+                                   // 128ms @ 16kHz — new audio consumed per inference. `pub(crate)` so
+                                   // `vc_calibration.rs`'s render loop can feed hops at the exact same
+                                   // cadence the live chain will use, matching `calibration.py`'s own
+                                   // `_HOP = 2048  # 128 ms — must match the live chain cadence`.
+pub(crate) const HOP_FRAMES: usize = 2048;
 const CONTEXT_FRAMES: usize = WINDOW_FRAMES - HOP_FRAMES; // 6144 = 384ms real previous audio
 const HUBERT_EXTRA_PAD: usize = 320; // forces HuBERT to emit 26 frames instead of 25 for an 8192-sample window
 

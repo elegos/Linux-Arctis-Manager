@@ -1,20 +1,33 @@
-// Guided voice calibration — recording half.
+// Guided voice calibration.
 //
-// Direct port of `voice_changer/rvc/calibration.py`'s `CalibrationSession`
-// (record_start/record_stop, the f32-stereo→mono downmix, peak detection,
-// and `propose_variants`).
+// Direct port of `voice_changer/rvc/calibration.py`'s `CalibrationSession`:
+// record_start/record_stop (the f32-stereo→mono downmix, peak detection),
+// `propose_variants`, and — since [E10-S6b] — render_start/_render, now that
+// the [E10-S6a] inference engine exists in Rust to run them through.
 //
-// `render_start`/`_render` are NOT ported here: they require the actual RVC
-// inference pipeline (ContentVec → RMVPE → synthesizer) to convert the
-// recording through candidate parameter sets, and that pipeline does not
-// exist in Rust yet — see [E10-S6a]/[E10-S6b] in docs/v3-backlog.md.
-// `CalibrationState::Rendering`/`Done` and `RenderResult` are declared for
-// that eventual full D-Bus contract shape, but nothing constructs them yet
-// — this module can only ever produce `Idle`/`Recording`/`Recorded`/`Error`
-// until [E10-S6b] wires rendering in.
-#![allow(dead_code)] // RenderResult, CalibrationState::{Rendering,Done}: see above.
+// `render_start`'s known open gap: the caller must supply the synthesizer's
+// native sample rate (`RenderModel::sample_rate`) explicitly — nothing in
+// this engine can derive it from a `.onnx` file today (unlike
+// `inter_channels`/`t_audio`, which `SynthSession::load` reads from the
+// model's own static input shapes). The Python reference reads it from the
+// original `.pth` checkpoint's `sr`/`config[-1]` field at load time, which
+// this Rust daemon has no path to (no PyTorch pickle reading here by
+// design). The clean fix — have `export_onnx.py` write it into the
+// exported `.onnx`'s `metadata_props` and read it back here via `ort`'s
+// `Session::metadata()` — is a real follow-up, not done here; existing
+// already-exported `.onnx` files wouldn't have it anyway without a
+// re-export. This same gap blocks the eventual live-chain D-Bus wiring too,
+// not just calibration.
+//
+// `render_start`/`propose_pitch_variants`/`RenderModel` are not yet called
+// from `dbus.rs` — `CalibrationStartRender` still only exercises
+// record_start/record_stop today. D-Bus wiring (plus the not-yet-existing
+// persisted RVC settings — model selection, pitch, tuning — it would read
+// from) is tracked as the immediate next step, not done here.
+#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::Serialize;
@@ -23,6 +36,12 @@ use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
+use crate::vc::inference::engine::{init_runtime, ContentVecSession, RmvpeSession, SynthSession};
+use crate::vc::inference::pipeline::{Pipeline, HOP_FRAMES, OUTPUT_SR};
+use crate::vc::inference::resample::resample;
+use crate::vc::inference::retrieval::RetrievalIndex;
+use crate::vc::wav_io::write_mono_pcm16;
+use crate::vc_base_models::{CONTENTVEC_FILENAME, RMVPE_FILENAME};
 use crate::vc_rvc_config::RvcParams;
 
 pub const RECORD_SAMPLE_RATE: u32 = 16000;
@@ -88,6 +107,37 @@ pub fn propose_variants(
         ("B".to_owned(), faithful),
         ("C".to_owned(), forward),
     ]
+}
+
+/// Wide, evenly-spaced pitch-offset (semitone) candidates for a register
+/// pre-scan round — meant to run *before* [`propose_variants`]'s dynamics
+/// round, picking the right octave before fine-tuning drive/envelope.
+/// RVC's pitch shift is a pure multiplicative transposition of the F0 curve
+/// fed to the synthesizer (see `pipeline.rs::run_inference`: applied after
+/// RMVPE extraction, before the synthesizer call — content features from
+/// ContentVec are never shifted), so unlike dynamics tuning there's no
+/// small local step that reliably brackets a good value: a source voice a
+/// full register away from the model's trained target (e.g. bass-baritone
+/// against a soprano-trained model) needs a full octave-plus shift, not a
+/// few semitones — confirmed live: ±the model's own trained register span
+/// mattered far more than any dynamics parameter for perceived quality.
+/// `refine` mirrors `propose_variants`' first-round/refine-round split:
+/// `false` for a first wide pass centered on `anchor` (typically 0), `true`
+/// for narrow half-step brackets around a previously-picked value.
+pub fn propose_pitch_variants(anchor: f32, refine: bool) -> Vec<(String, f32)> {
+    let steps: &[f32] = if refine {
+        &[-3.0, -1.5, 0.0, 1.5, 3.0]
+    } else {
+        &[-12.0, -5.0, 0.0, 7.0, 12.0, 19.0]
+    };
+    steps
+        .iter()
+        .enumerate()
+        .map(|(i, &step)| {
+            let label = char::from(b'A' + i as u8).to_string();
+            (label, anchor + step)
+        })
+        .collect()
 }
 
 // ── Audio helpers (pure) ─────────────────────────────────────────────────────
@@ -157,6 +207,10 @@ pub enum CalibrationState {
 pub struct RenderResult {
     pub label: String,
     pub params: RvcParams,
+    /// Semitones. Not part of [`RvcParams`] — a dynamics round holds this
+    /// fixed across every variant, a pitch pre-scan round (`propose_pitch_variants`)
+    /// holds `params` fixed and varies this instead.
+    pub pitch_offset: f32,
     pub path: String,
 }
 
@@ -337,6 +391,203 @@ impl CalibrationSession {
         );
         Some(path)
     }
+
+    /// Start rendering `variants` through the recording in a background
+    /// task and return immediately — `true` if a render was actually
+    /// started (the session was `Recorded`/`Done`/`Error` and has a
+    /// recording), `false` otherwise. Poll [`Self::status`] for progress;
+    /// state transitions to `Done` (with `results` populated) or `Error`
+    /// (with `error` set) when the background task finishes.
+    ///
+    /// An associated function taking `Arc<Mutex<Self>>` rather than a
+    /// `&mut self` method: the background task needs to write the result
+    /// back into the *same* shared session once rendering finishes, not
+    /// just the borrow this call received — mirrors how `record_start`'s
+    /// drain task already holds its own `Arc` clones (`rec_proc`/`rec_buf`)
+    /// rather than borrowing `self`.
+    pub async fn render_start(
+        session: Arc<Mutex<CalibrationSession>>,
+        model: RenderModel,
+        base_models_dir: PathBuf,
+        dylib_path: PathBuf,
+        out_dir: PathBuf,
+        variants: Vec<RenderVariant>,
+    ) -> bool {
+        let recording_path = {
+            let mut s = session.lock().await;
+            if !matches!(
+                s.state,
+                CalibrationState::Recorded | CalibrationState::Done | CalibrationState::Error
+            ) {
+                return false;
+            }
+            let Some(p) = s.recording_path.clone() else {
+                return false;
+            };
+            s.state = CalibrationState::Rendering;
+            s.error.clear();
+            s.results.clear();
+            p
+        };
+
+        info!(
+            "calibration render started: {} variant(s) from {}",
+            variants.len(),
+            recording_path.display()
+        );
+
+        tokio::spawn(async move {
+            let outcome = tokio::task::spawn_blocking(move || {
+                render_blocking(
+                    &recording_path,
+                    &model,
+                    &base_models_dir,
+                    &dylib_path,
+                    &out_dir,
+                    &variants,
+                )
+            })
+            .await;
+
+            let mut s = session.lock().await;
+            match outcome {
+                Ok(Ok(results)) => {
+                    info!("calibration render done: {} variant(s)", results.len());
+                    s.results = results;
+                    s.state = CalibrationState::Done;
+                }
+                Ok(Err(e)) => {
+                    error!("calibration render failed: {e}");
+                    s.state = CalibrationState::Error;
+                    s.error = e;
+                }
+                Err(join_err) => {
+                    error!("calibration render task panicked: {join_err}");
+                    s.state = CalibrationState::Error;
+                    s.error = format!("render task panicked: {join_err}");
+                }
+            }
+        });
+
+        true
+    }
+}
+
+/// Everything [`CalibrationSession::render_start`] needs to load the RVC
+/// inference engine for a render, beyond the base models (ContentVec/RMVPE,
+/// resolved from `base_models_dir` by their well-known filenames — see
+/// `vc_base_models.rs`) and the `libonnxruntime.so` to run them on
+/// (resolved by the caller via `vc_onnxruntime_detect::find_onnxruntime_dylib`,
+/// same as `DetectOnnxRuntime` does).
+pub struct RenderModel {
+    pub path: PathBuf,
+    /// The synthesizer's native sample rate — see this module's header
+    /// comment for why the caller must supply this explicitly today.
+    pub sample_rate: u32,
+    pub index_path: Option<PathBuf>,
+}
+
+/// One labeled render candidate: parameter tuning + pitch shift together,
+/// so the same rendering machinery below serves both a dynamics round
+/// (`propose_variants`: pitch fixed, params varying) and a pitch pre-scan
+/// round (`propose_pitch_variants`: params fixed, pitch varying).
+pub type RenderVariant = (String, RvcParams, f32);
+
+/// Runs on a blocking-pool thread ([`CalibrationSession::render_start`]) —
+/// real ONNX inference is synchronous, CPU/GPU-bound work, not
+/// async-runtime-friendly. Port of `calibration.py`'s `_render`: for each
+/// variant, a *fresh* `Pipeline` (ContentVec + RMVPE + synthesizer reloaded
+/// from scratch) converts the whole recording hop by hop at the live
+/// chain's exact 128 ms cadence, writes `variant_<label>.wav`, and moves on
+/// — matching the Python reference's own per-variant reload rather than
+/// sharing sessions across variants (simpler, and this module's own doc
+/// comment already accepts "occasional latency hiccup" for calibration
+/// renders; the sessions' *weights* don't vary across variants, but
+/// `Pipeline` owns them outright and isn't designed to hand them back).
+fn render_blocking(
+    recording_path: &Path,
+    model: &RenderModel,
+    base_models_dir: &Path,
+    dylib_path: &Path,
+    out_dir: &Path,
+    variants: &[RenderVariant],
+) -> Result<Vec<RenderResult>, String> {
+    init_runtime(dylib_path).map_err(|e| e.to_string())?;
+
+    let (raw, sr) = crate::vc::wav_io::read_mono_f32(recording_path)
+        .map_err(|e| format!("read recording: {e}"))?;
+    let input_16k = resample(&raw, sr, RECORD_SAMPLE_RATE);
+
+    std::fs::create_dir_all(out_dir).map_err(|e| format!("create output dir: {e}"))?;
+
+    let mut results = Vec::with_capacity(variants.len());
+    for (label, params, pitch_offset) in variants {
+        let hubert = ContentVecSession::load(&base_models_dir.join(CONTENTVEC_FILENAME))
+            .map_err(|e| format!("variant {label}: load ContentVec: {e}"))?;
+        let rmvpe = RmvpeSession::load(&base_models_dir.join(RMVPE_FILENAME))
+            .map_err(|e| format!("variant {label}: load RMVPE: {e}"))?;
+        let synth = SynthSession::load(&model.path)
+            .map_err(|e| format!("variant {label}: load synthesizer: {e}"))?;
+        // Retrieval blend is a real, known performance problem for anything
+        // but a tiny `.index` (brute-force k-NN over the full vector set —
+        // see the [E10-S6a] retrieval.rs follow-up in CHANGELOG.md), so it's
+        // only loaded for a variant that actually turns it on, not eagerly
+        // for every render.
+        let retrieval = if params.index_rate > 0.0 {
+            match &model.index_path {
+                Some(p) => Some(
+                    RetrievalIndex::load(p)
+                        .map_err(|e| format!("variant {label}: load retrieval index: {e}"))?,
+                ),
+                None => None,
+            }
+        } else {
+            None
+        };
+
+        let mut pipeline = Pipeline::new(
+            hubert,
+            rmvpe,
+            synth,
+            model.sample_rate,
+            params.clone(),
+            retrieval,
+        );
+
+        let mut out_all: Vec<f32> = Vec::new();
+        let mut pos = 0usize;
+        while pos < input_16k.len() {
+            let end = (pos + HOP_FRAMES).min(input_16k.len());
+            let mut hop = input_16k[pos..end].to_vec();
+            hop.resize(HOP_FRAMES, 0.0);
+            let out = pipeline
+                .convert(&hop, RECORD_SAMPLE_RATE, *pitch_offset)
+                .map_err(|e| format!("variant {label}: convert: {e}"))?;
+            out_all.extend_from_slice(&out);
+            pos = end;
+        }
+        // A handful of trailing silence hops to let the SOLA/xfade/look-ahead
+        // buffering (which lags real input by a few hops) drain fully —
+        // matches pipeline.rs's own offline harness and Python's `_render`.
+        for _ in 0..8 {
+            let out = pipeline
+                .convert(&[0.0f32; HOP_FRAMES], RECORD_SAMPLE_RATE, *pitch_offset)
+                .map_err(|e| format!("variant {label}: convert (flush): {e}"))?;
+            out_all.extend_from_slice(&out);
+        }
+
+        let out_path = out_dir.join(format!("variant_{}.wav", label.to_lowercase()));
+        write_mono_pcm16(&out_path, &out_all, OUTPUT_SR)
+            .map_err(|e| format!("variant {label}: write wav: {e}"))?;
+
+        results.push(RenderResult {
+            label: label.clone(),
+            params: params.clone(),
+            pitch_offset: *pitch_offset,
+            path: out_path.display().to_string(),
+        });
+    }
+    Ok(results)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -428,6 +679,41 @@ mod tests {
         };
         let variants = propose_variants(&RvcParams::default(), Some(&picked));
         assert_eq!(variants[1].1.target_rms, 0.04);
+    }
+
+    // ── propose_pitch_variants ───────────────────────────────────────────
+
+    #[test]
+    fn propose_pitch_variants_first_pass_is_wide_and_labeled() {
+        let variants = propose_pitch_variants(0.0, false);
+        assert_eq!(variants.len(), 6);
+        let labels: Vec<&str> = variants.iter().map(|(l, _)| l.as_str()).collect();
+        assert_eq!(labels, vec!["A", "B", "C", "D", "E", "F"]);
+        let offsets: Vec<f32> = variants.iter().map(|(_, o)| *o).collect();
+        assert_eq!(offsets, vec![-12.0, -5.0, 0.0, 7.0, 12.0, 19.0]);
+        // strictly increasing — the GUI lists them in a stable, meaningful order
+        assert!(offsets.windows(2).all(|w| w[0] < w[1]));
+    }
+
+    #[test]
+    fn propose_pitch_variants_refine_is_narrow_and_centered_on_anchor() {
+        let variants = propose_pitch_variants(12.0, true);
+        assert_eq!(variants.len(), 5);
+        let offsets: Vec<f32> = variants.iter().map(|(_, o)| *o).collect();
+        assert_eq!(offsets, vec![9.0, 10.5, 12.0, 13.5, 15.0]);
+        assert!(
+            offsets.contains(&12.0),
+            "anchor itself must be one candidate"
+        );
+    }
+
+    #[test]
+    fn propose_pitch_variants_first_pass_always_includes_zero() {
+        // Zero-shift (no correction) must always be an option, even off-anchor,
+        // so a user whose voice already matches the model isn't forced to pick
+        // a shifted candidate.
+        let variants = propose_pitch_variants(0.0, false);
+        assert!(variants.iter().any(|(_, o)| *o == 0.0));
     }
 
     // ── downmix_stereo_f32_to_mono ───────────────────────────────────────
@@ -529,5 +815,114 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         assert!(session.record_stop(dir.path()).await.is_none());
         assert_eq!(session.status().state, CalibrationState::Idle);
+    }
+
+    // ── live: real end-to-end render ([E10-S6b]) ─────────────────────────
+    // Needs a real onnxruntime shared library, the real published base
+    // models, a real synthesizer exported by `export_onnx.py`, and a real
+    // input recording — same live-testing pattern as pipeline.rs's own
+    // `#[ignore]`d tests. Constructs the session directly in `Recorded`
+    // state (private-field access from this child module) rather than
+    // driving a real `pw-record` capture, since only the render half is
+    // under test here.
+
+    /// Not run by default. Run manually with
+    /// `LAM_ORT_DYLIB_PATH=... LAM_TEST_INPUT_WAV=/path/to/recording.wav \
+    ///  [LAM_TEST_SYNTH_ONNX_PATH=...] [LAM_TEST_SYNTH_SR=48000] \
+    ///  cargo test --bin lam-daemon -- --ignored live_render_start_produces_variant_wavs --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn live_render_start_produces_variant_wavs() {
+        let dylib_path = std::env::var("LAM_ORT_DYLIB_PATH").expect(
+            "set LAM_ORT_DYLIB_PATH to a real onnxruntime shared library \
+             (e.g. `pip install onnxruntime` then point at its \
+             onnxruntime/capi/libonnxruntime.so.*)",
+        );
+        let input_wav = std::env::var("LAM_TEST_INPUT_WAV")
+            .expect("set LAM_TEST_INPUT_WAV to a real mono/stereo PCM16 WAV recording");
+        let synth_path = std::env::var("LAM_TEST_SYNTH_ONNX_PATH").unwrap_or_else(|_| {
+            format!(
+                "{}/.config/arctis_manager/rvc_models/DvaOverwatch_350e.onnx",
+                std::env::var("HOME").expect("HOME not set")
+            )
+        });
+        let synth_sr: u32 = std::env::var("LAM_TEST_SYNTH_SR")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(48000);
+        let base_models_dir = std::env::var("LAM_TEST_MODELS_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                PathBuf::from(std::env::var("HOME").expect("HOME not set"))
+                    .join(".config/arctis_manager/models")
+            });
+
+        let mut session = CalibrationSession::new();
+        session.state = CalibrationState::Recorded;
+        session.recording_path = Some(PathBuf::from(&input_wav));
+        let session = Arc::new(Mutex::new(session));
+
+        let out_dir = tempfile::tempdir().unwrap();
+        let variants: Vec<RenderVariant> = vec![
+            ("A".to_owned(), RvcParams::default(), 12.0),
+            ("B".to_owned(), RvcParams::default(), 19.0),
+        ];
+
+        let started = CalibrationSession::render_start(
+            Arc::clone(&session),
+            RenderModel {
+                path: PathBuf::from(&synth_path),
+                sample_rate: synth_sr,
+                index_path: None,
+            },
+            base_models_dir,
+            PathBuf::from(&dylib_path),
+            out_dir.path().to_path_buf(),
+            variants,
+        )
+        .await;
+        assert!(started, "render_start should accept a Recorded session");
+
+        let status = tokio::time::timeout(Duration::from_secs(120), async {
+            loop {
+                let s = session.lock().await.status();
+                if matches!(s.state, CalibrationState::Done | CalibrationState::Error) {
+                    return s;
+                }
+                drop(s);
+                tokio::time::sleep(Duration::from_millis(300)).await;
+            }
+        })
+        .await
+        .expect("render did not finish within 120s");
+
+        assert_eq!(
+            status.state,
+            CalibrationState::Done,
+            "render error: {}",
+            status.error
+        );
+        assert_eq!(status.results.len(), 2);
+        for (result, expected_label, expected_pitch) in [
+            (&status.results[0], "A", 12.0f32),
+            (&status.results[1], "B", 19.0f32),
+        ] {
+            assert_eq!(result.label, expected_label);
+            assert_eq!(result.pitch_offset, expected_pitch);
+            let path = std::path::Path::new(&result.path);
+            assert!(path.is_file(), "{} should exist", result.path);
+            let meta = std::fs::metadata(path).unwrap();
+            assert!(
+                meta.len() > 44,
+                "{} should contain real audio, not just a WAV header",
+                result.path
+            );
+            eprintln!(
+                "variant {}: {} ({} bytes)",
+                result.label,
+                result.path,
+                meta.len()
+            );
+        }
     }
 }
