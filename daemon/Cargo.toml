@@ -44,6 +44,23 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 # real FFT, for the VTLN formant warp (frequency-domain resample) — added in E10-S6a
 realfft = "3"
+# ONNX Runtime bindings for the RVC inference engine — added in E10-S6a.
+# `load-dynamic` defers loading libonnxruntime.so to runtime (ort::init_from),
+# so the build has no dependency on any vendor SDK (CUDA/ROCm/OpenVINO) being
+# installed on the build machine — confirmed by a clean build here with none
+# of them present. cuda/rocm/openvino only add the Rust-side EP option types;
+# whether each is actually usable is decided at runtime by is_available()/
+# register(), with automatic fallback to the CPU provider.
+ort = { version = "2.0.0-rc.13", default-features = false, features = [
+    "std",
+    "ndarray",
+    "load-dynamic",
+    "cuda",
+    "rocm",
+    "openvino",
+    "tracing",
+    "api-27",
+] }
 # internal crates
 device-config = { path = "device-config" }
 hid-transport = { path = "hid-transport" }

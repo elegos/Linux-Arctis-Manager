@@ -169,11 +169,11 @@ flowchart TB
 
     subgraph new["Target — [E10-S6a]"]
         direction TB
-        PROV["vc/inference/providers.rs\nExecution-provider selection\nCUDA / ROCm / OpenVINO / CPU"]
+        PROV["vc/inference/providers.rs ✅\nExecution-provider selection\nCUDA / ROCm / OpenVINO / CPU"]
         ENGINE["vc/inference/engine.rs\n3× ort::Session (ContentVec, RMVPE, Synth)\nowns the sliding-window state machine"]
-        DSP["vc_dsp.rs (or vc/inference/dsp.rs)\nported DSP glue: VAD, F0 post-processing,\nVTLN, SOLA, envelope gate, soft limiter,\nRMS mix — pure, unit-tested functions"]
+        DSP["vc_dsp.rs ✅\nported DSP glue: F0 post-processing,\nVTLN, SOLA, envelope gate, soft limiter,\nRMS mix — pure, unit-tested functions"]
         RETR["vc_retrieval.rs\nbrute-force weighted k-NN\nover the model's .index vectors"]
-        MEL["vc_mel.rs\nnative mel-spectrogram (rustfft)\n+ exported filterbank constant"]
+        MEL["vc/inference/mel.rs ✅\nnative mel-spectrogram (rustfft/realfft)\n+ computed filterbank, checked against\ntorchaudio's real source"]
     end
 
     VCBM -.->|downloads rmvpe.onnx / contentvec.onnx| ENGINE
@@ -193,7 +193,7 @@ Crate/dependency choices, validated against prior art before committing to them:
 |---|---|---|
 | ONNX inference | [`ort`](https://github.com/pykeio/ort) | Already used in this daemon's design (Phase 2 decision); confirmed in production real-time-audio use elsewhere (Murmure/SilentKeys STT with NVIDIA Parakeet + Silero VAD, sbv2-api TTS) |
 | Resampling (model_sr → 48 kHz) | [`rubato`](https://docs.rs/rubato) | Real-time-safe (no allocation in the hot path), replaces `torchaudio.functional.resample` |
-| Mel-spectrogram STFT | [`rustfft`](https://docs.rs/rustfft) + exported filterbank constant | `torch.stft` inside the ONNX graph is exporter-finicky; the mel filterbank is a fixed 128×513 matrix regardless — export it once as data, do the STFT natively |
+| Mel-spectrogram STFT | [`realfft`](https://docs.rs/realfft) (built on `rustfft`) | `torch.stft` inside the ONNX graph is exporter-finicky, so the STFT + HTK mel filterbank are done natively instead (`vc/inference/mel.rs`, done) — the filterbank is *computed* from the same formulas as `torchaudio.functional.melscale_fbanks` (checked against its real source, not memory) rather than embedded as a 65k-value literal blob |
 | FAISS retrieval replacement | brute-force weighted k-NN (own code) | Community `.index` files are small enough (few hundred thousand 256-dim vectors) that brute force is cheap and avoids a `libfaiss` C++ dependency — decided in [Phase 3](voice-changing-feature.md) planning |
 
 A from-scratch Rust real-time RVC engine with an almost identical crate split (`vc-core`/`vc-signal`/`vc-inference`/`vc-audio`) already exists as a hobby project ([HaruSameee/Rust-VoiceConversion](https://github.com/HaruSameee/Rust-VoiceConversion)) — no license, so **not a code source**, but independent confirmation that this architecture shape is a proven, tractable way to structure the problem, not a novel risk.
