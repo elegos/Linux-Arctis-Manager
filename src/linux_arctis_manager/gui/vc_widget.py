@@ -83,6 +83,7 @@ class QVCWidget(QWidget):
     sig_hf_token         = Signal(object)
     sig_hf_token_saved   = Signal(object)
     sig_rvc_metrics      = Signal(object)
+    sig_ensure_exported  = Signal(object)
     _sig_sources_loaded  = Signal(object)
     # Emitted after settings are pushed to the daemon (chain may rebuild).
     sig_applied          = Signal()
@@ -106,6 +107,7 @@ class QVCWidget(QWidget):
         self.sig_hf_token.connect(self._on_hf_token_loaded)
         self.sig_hf_token_saved.connect(self._on_hf_token_saved)
         self.sig_rvc_metrics.connect(self._on_rvc_metrics)
+        self.sig_ensure_exported.connect(self._on_ensure_exported)
         self._sig_sources_loaded.connect(self._on_sources_loaded)
 
         self._apply_timer = QTimer(self)
@@ -575,6 +577,13 @@ class QVCWidget(QWidget):
         self._rvc_no_models_lbl.setVisible(False)
         ms.addWidget(self._rvc_no_models_lbl)
 
+        # Export (.pth -> .onnx) status for the selected model — set by
+        # _ensure_selected_model_exported, cleared once exported.
+        self._rvc_export_status_lbl = QLabel()
+        self._rvc_export_status_lbl.setWordWrap(True)
+        self._rvc_export_status_lbl.setVisible(False)
+        ms.addWidget(self._rvc_export_status_lbl)
+
         row, self._rvc_pitch_sl, self._rvc_pitch_lbl = _slider_row(
             _T('ui', 'vc_rvc_pitch'), -12, 12, 0,
             lambda v: f'{v:+d} st' if v != 0 else '0 st')
@@ -900,7 +909,14 @@ class QVCWidget(QWidget):
         self._rvc_model_combo.blockSignals(True)
         self._rvc_model_combo.clear()
         for m in models:
-            label = m['name'] + (' (with index)' if m.get('has_index') else '')
+            label = m['name']
+            if m.get('has_index'):
+                label += ' (with index)'
+            if not m.get('onnx_path'):
+                # Voice conversion and calibration both need the exported
+                # .onnx graph, not the raw .pth checkpoint — see
+                # export_onnx.py.
+                label += ' ' + _T('ui', 'vc_rvc_not_exported_suffix')
             self._rvc_model_combo.addItem(label, m['name'])
 
         # Honour a post-download pending selection, then fall back to previous selection
@@ -917,6 +933,16 @@ class QVCWidget(QWidget):
         self._rvc_delete_btn.setEnabled(has_models)
         if not has_models and folder:
             self._rvc_no_models_lbl.setText(_T('ui', 'vc_rvc_no_models') + f'\n{folder}')
+
+        # `blockSignals` above means selecting `target` never fired
+        # `_on_rvc_model_changed` — so a freshly-downloaded model (selected
+        # via `_pending_model_select`) would otherwise never get its export
+        # checked until the user manually reselects it. Idempotent (a
+        # no-op reply for an already-exported model), so safe to call on
+        # every refresh, not just after a download.
+        selected = self._rvc_model_combo.currentData()
+        if selected:
+            self._ensure_selected_model_exported(selected)
 
     def _on_vc_settings(self, settings: dict) -> None:
         self._loading = True
@@ -1006,7 +1032,67 @@ class QVCWidget(QWidget):
             saved = self._rvc_model_params.get(name) if name else None
             if saved:
                 self._restore_model_params(saved)
+            if name:
+                self._ensure_selected_model_exported(name)
         self._apply()
+
+    # ── Model export (.pth -> .onnx), auto-triggered on selection/download ──
+
+    def _ensure_selected_model_exported(self, name: str) -> None:
+        self._rvc_export_status_lbl.setVisible(False)
+        DbusWrapper.ensure_model_exported(name, self.sig_ensure_exported)
+
+    def _on_ensure_exported(self, data: object) -> None:
+        if not isinstance(data, dict):
+            return
+        status = data.get('status')
+        if status == 'needs_deps':
+            self._prompt_export_deps_install(str(data.get('install_command', '')))
+        elif status == 'exporting':
+            self._rvc_export_status_lbl.setText(_T('ui', 'vc_rvc_exporting'))
+            self._rvc_export_status_lbl.setVisible(True)
+        elif status == 'error':
+            self._rvc_export_status_lbl.setText(
+                _T('ui', 'vc_rvc_export_error').format(message=data.get('message', '')))
+            self._rvc_export_status_lbl.setVisible(True)
+        else:  # 'exported' — nothing to show
+            self._rvc_export_status_lbl.setVisible(False)
+
+    def _prompt_export_deps_install(self, install_command: str) -> None:
+        reply = QMessageBox.question(
+            self,
+            _T('ui', 'vc_rvc_export_deps_title'),
+            _T('ui', 'vc_rvc_export_deps_msg').format(command=install_command),
+            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Ok:
+            return
+        self._rvc_export_status_lbl.setText(_T('ui', 'vc_rvc_export_deps_installing'))
+        self._rvc_export_status_lbl.setVisible(True)
+        DbusWrapper.install_export_deps()
+
+    def on_export_deps_complete(self, success: bool, message: str) -> None:
+        """Called by main_app after InstallExportDeps completes."""
+        if not success:
+            self._rvc_export_status_lbl.setText(
+                _T('ui', 'vc_rvc_export_deps_failed').format(message=message))
+            self._rvc_export_status_lbl.setVisible(True)
+            return
+        name = self._rvc_model_combo.currentData()
+        if name:
+            self._ensure_selected_model_exported(name)
+
+    def on_export_progress(self, message: str) -> None:
+        """Called by main_app while a background export is running."""
+        self._rvc_export_status_lbl.setText(message)
+        self._rvc_export_status_lbl.setVisible(True)
+
+    def on_export_complete(self, success: bool, message: str, name: str) -> None:
+        """Called by main_app after ExportRvcModel's background task completes."""
+        self._rvc_export_status_lbl.setText(message)
+        self._rvc_export_status_lbl.setVisible(bool(message))
+        if success:
+            self.refresh_models()
 
     def _restore_model_params(self, mp: dict) -> None:
         """Set the per-model tunable controls from a saved snapshot (no signals)."""

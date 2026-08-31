@@ -85,6 +85,18 @@ pub enum SignalEvent {
     VCBaseModelComplete {
         json: String,
     },
+    VCExportDepsProgress {
+        message: String,
+    },
+    VCExportDepsComplete {
+        json: String,
+    },
+    VCExportProgress {
+        message: String,
+    },
+    VCExportComplete {
+        json: String,
+    },
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

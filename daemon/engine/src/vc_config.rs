@@ -5,7 +5,11 @@
 // (neural voice conversion) config is a separate, later addition — see
 // docs/voice-changing-feature.md.
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
+
+use crate::vc_rvc_config::RvcParams;
 
 // LADSPA plugin filenames (without .so) and labels, in preference order.
 pub const PITCH_CANDIDATES: &[(&str, &str)] = &[
@@ -185,6 +189,68 @@ impl VcLadspaConfig {
     }
 }
 
+/// One model's calibrated tuning: the [`RvcParams`] dynamics knobs plus the
+/// pitch shift that was found to fit that model's trained register (not
+/// itself an `RvcParams` field — see `vc_calibration.rs`'s
+/// `propose_pitch_variants` doc comment for why pitch is tuned separately
+/// from dynamics). Keyed by model name in [`RvcConfig::model_params`], and
+/// flattened to match the flat JSON shape the GUI already sends
+/// (`vc_widget.py`'s `_apply`/`_current_model_params`).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RvcModelSnapshot {
+    pub pitch_offset: f32,
+    #[serde(flatten)]
+    pub params: RvcParams,
+    /// Manual override for a model's native sample rate, used only when its
+    /// `.onnx` predates `export_onnx.py` stamping it in — see
+    /// `SynthSession::native_sample_rate`. Never set by the daemon itself;
+    /// the GUI only offers this field once auto-detection has already come
+    /// back empty ("extrema ratio", not a normal setting).
+    pub sample_rate_override: Option<u32>,
+}
+
+/// RVC (neural voice conversion) settings — model selection, the pitch
+/// pre-scan result, and the dynamics tuning. Direct port of the relevant
+/// slice of the legacy Python `VCSettings` dataclass's `rvc_*` fields.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RvcConfig {
+    /// Display name of the selected model (`RvcModel::name`).
+    pub model: String,
+    pub pitch_offset: f32,
+    #[serde(flatten)]
+    pub params: RvcParams,
+    /// Per-model snapshots, so switching models restores its own tuning
+    /// instead of carrying over whatever was last dialed in.
+    pub model_params: HashMap<String, RvcModelSnapshot>,
+}
+
+/// Top-level voice-changer settings persisted and sent over D-Bus as JSON —
+/// direct port of the legacy Python `VCSettings`'s `_to_dict()`/`load()`
+/// shape (`enabled`/`mode`/`source_id`/`pitch`/`chorus`/`delay`/
+/// `distortion`/`reverb` flattened at the top level, `rvc` nested), so the
+/// existing GUI (`vc_widget.py`) needs no changes to talk to this daemon.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VcSettings {
+    /// `"ladspa"` | `"rvc"`.
+    pub mode: String,
+    #[serde(flatten)]
+    pub ladspa: VcLadspaConfig,
+    pub rvc: RvcConfig,
+}
+
+impl Default for VcSettings {
+    fn default() -> Self {
+        Self {
+            mode: "ladspa".to_owned(),
+            ladspa: VcLadspaConfig::default(),
+            rvc: RvcConfig::default(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -285,6 +351,91 @@ mod tests {
         };
         let json = serde_json::to_string(&cfg).unwrap();
         let back: VcLadspaConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(cfg, back);
+    }
+
+    // ── VcSettings / RvcConfig ───────────────────────────────────────────
+
+    #[test]
+    fn vc_settings_default_mode_is_ladspa() {
+        assert_eq!(VcSettings::default().mode, "ladspa");
+    }
+
+    #[test]
+    fn vc_settings_roundtrip_default() {
+        let cfg = VcSettings::default();
+        let json = serde_json::to_string(&cfg).unwrap();
+        let back: VcSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(cfg, back);
+    }
+
+    #[test]
+    fn vc_settings_json_shape_matches_legacy_python_top_level_keys() {
+        // vc_widget.py's _apply() sends (and GetVCSettings must answer with)
+        // enabled/mode/source_id/pitch/chorus/delay/distortion/reverb/rvc
+        // all as top-level keys — the `ladspa` field's flatten must produce
+        // that, not a nested "ladspa" object.
+        let json = serde_json::to_string(&VcSettings::default()).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let obj = value.as_object().unwrap();
+        for key in [
+            "enabled",
+            "mode",
+            "source_id",
+            "pitch",
+            "chorus",
+            "delay",
+            "distortion",
+            "reverb",
+            "rvc",
+        ] {
+            assert!(obj.contains_key(key), "missing top-level key {key:?}");
+        }
+        assert!(!obj.contains_key("ladspa"), "ladspa must not be nested");
+    }
+
+    #[test]
+    fn rvc_config_model_params_shape_matches_legacy_python_flat_dict() {
+        // vc_widget.py's model_params values are the same flat dict shape
+        // as the top-level rvc params (pitch_offset + RvcParams fields),
+        // not a further-nested {"params": {...}} object.
+        let mut cfg = RvcConfig::default();
+        cfg.model_params.insert(
+            "MyVoice".to_owned(),
+            RvcModelSnapshot {
+                pitch_offset: 12.0,
+                params: RvcParams {
+                    target_rms: 0.1,
+                    ..Default::default()
+                },
+                sample_rate_override: None,
+            },
+        );
+        let json = serde_json::to_string(&cfg).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let snapshot = &value["model_params"]["MyVoice"];
+        assert_eq!(snapshot["pitch_offset"], 12.0);
+        assert_eq!(snapshot["target_rms"], 0.1);
+        assert!(snapshot.get("params").is_none(), "params must be flattened");
+    }
+
+    #[test]
+    fn rvc_config_roundtrip_with_model_params() {
+        let mut cfg = RvcConfig {
+            model: "MyVoice".to_owned(),
+            pitch_offset: 12.0,
+            ..Default::default()
+        };
+        cfg.model_params.insert(
+            "MyVoice".to_owned(),
+            RvcModelSnapshot {
+                pitch_offset: 12.0,
+                params: RvcParams::default(),
+                sample_rate_override: Some(48000),
+            },
+        );
+        let json = serde_json::to_string(&cfg).unwrap();
+        let back: RvcConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(cfg, back);
     }
 }

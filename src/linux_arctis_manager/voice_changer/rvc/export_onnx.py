@@ -183,7 +183,14 @@ def _capture_real_draws(synth: SynthesizerTrnMs768NSFsid, sample_inputs) -> tupl
 
 def export(model_path: Path) -> Path:
     torch.manual_seed(0)
-    synth, _config = load_synth(model_path)
+    synth, config = load_synth(model_path)
+    # RVC checkpoints store their native sample rate as the last element of
+    # the `config` list (same field the legacy Python pipeline reads it
+    # from). ONNX has no standard field for this, so it's stamped into the
+    # exported graph's custom metadata below and read back by the Rust
+    # engine via `SynthSession::native_sample_rate()` — the daemon has no
+    # PyTorch pickle reader to fall back on, unlike this script.
+    sample_rate = int(config[-1])
     sample_inputs = _sample_inputs()
 
     prior_noise, rand_phase, source_noise, ref_out = _capture_real_draws(synth, sample_inputs)
@@ -211,9 +218,20 @@ def export(model_path: Path) -> Path:
         opset_version=17,
         dynamo=False,
     )
+    _stamp_sample_rate(onnx_path, sample_rate)
 
     _verify_onnx_output(onnx_path, sample_inputs, prior_noise, rand_phase, source_noise, wrapper_out)
     return onnx_path
+
+
+def _stamp_sample_rate(onnx_path: Path, sample_rate: int) -> None:
+    import onnx
+
+    model = onnx.load(str(onnx_path))
+    entry = model.metadata_props.add()
+    entry.key = 'sample_rate'
+    entry.value = str(sample_rate)
+    onnx.save(model, str(onnx_path))
 
 
 def _verify_onnx_output(onnx_path, sample_inputs, prior_noise, rand_phase, source_noise, expected) -> None:

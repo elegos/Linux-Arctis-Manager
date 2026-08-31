@@ -19,31 +19,37 @@ pub struct RvcModel {
     pub path: PathBuf,
     /// True when a matching FAISS `.index` file sits next to the model.
     pub has_index: bool,
+    /// `<stem>.onnx` next to the `.pth`, if `export_onnx.py` has been run
+    /// for this model — `None` means the model exists locally but can't be
+    /// rendered/converted yet (the live chain and calibration both need the
+    /// exported graph, not the `.pth` checkpoint).
+    pub onnx_path: Option<PathBuf>,
 }
 
 /// Same matching rule as the RVC pipeline: `<stem>.index`, or any `*.index`
 /// whose filename contains the model stem (RVC WebUI exports
 /// `added_IVF…_<name>_v2.index`).
-pub fn index_exists(pth: &Path) -> bool {
-    let Some(stem) = pth.file_stem().and_then(|s| s.to_str()) else {
-        return false;
-    };
-    if pth.with_file_name(format!("{stem}.index")).is_file() {
-        return true;
+pub fn find_index_path(pth: &Path) -> Option<PathBuf> {
+    let stem = pth.file_stem().and_then(|s| s.to_str())?;
+    let exact = pth.with_file_name(format!("{stem}.index"));
+    if exact.is_file() {
+        return Some(exact);
     }
-    let Some(parent) = pth.parent() else {
-        return false;
-    };
-    let Ok(entries) = std::fs::read_dir(parent) else {
-        return false;
-    };
-    entries.filter_map(|e| e.ok()).any(|e| {
-        let p = e.path();
-        p.extension().is_some_and(|e| e == "index")
-            && p.file_stem()
-                .and_then(|s| s.to_str())
-                .is_some_and(|s| s.contains(stem))
-    })
+    let parent = pth.parent()?;
+    std::fs::read_dir(parent)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| {
+            p.extension().is_some_and(|e| e == "index")
+                && p.file_stem()
+                    .and_then(|s| s.to_str())
+                    .is_some_and(|s| s.contains(stem))
+        })
+}
+
+pub fn index_exists(pth: &Path) -> bool {
+    find_index_path(pth).is_some()
 }
 
 /// Scan `<base>/rvc_models/` for `.pth` files (non-recursive), sorted by name.
@@ -64,10 +70,13 @@ pub fn list_models(base: &Path) -> Vec<RvcModel> {
                 .unwrap_or_default()
                 .to_owned();
             let has_index = index_exists(&p);
+            let onnx_path = p.with_extension("onnx");
+            let onnx_path = onnx_path.is_file().then_some(onnx_path);
             RvcModel {
                 name,
                 path: p,
                 has_index,
+                onnx_path,
             }
         })
         .collect();
@@ -75,9 +84,6 @@ pub fn list_models(base: &Path) -> Vec<RvcModel> {
     models
 }
 
-/// Not called yet — the RVC live chain and calibration will need this to
-/// resolve a model by name once [E10-S6a] lands.
-#[allow(dead_code)]
 pub fn find_model(base: &Path, name: &str) -> Option<RvcModel> {
     list_models(base).into_iter().find(|m| m.name == name)
 }
@@ -118,6 +124,22 @@ mod tests {
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].name, "voice_a");
         assert!(models[0].has_index);
+    }
+
+    #[test]
+    fn list_models_detects_exported_onnx() {
+        let base = tempdir().unwrap();
+        let dir = models_dir(base.path());
+        std::fs::create_dir_all(&dir).unwrap();
+        touch(&dir.join("voice_a.pth"));
+        touch(&dir.join("voice_a.onnx"));
+        touch(&dir.join("voice_b.pth")); // no .onnx: not exported yet
+
+        let models = list_models(base.path());
+        let a = models.iter().find(|m| m.name == "voice_a").unwrap();
+        let b = models.iter().find(|m| m.name == "voice_b").unwrap();
+        assert_eq!(a.onnx_path, Some(dir.join("voice_a.onnx")));
+        assert_eq!(b.onnx_path, None);
     }
 
     #[test]
