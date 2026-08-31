@@ -173,7 +173,7 @@ flowchart TB
     subgraph new["Target — [E10-S6a]"]
         direction TB
         PROV["vc/inference/providers.rs ✅\nExecution-provider selection\nCUDA / ROCm / OpenVINO / CPU"]
-        ENGINE["vc/inference/engine.rs 🔶\nContentVec + RMVPE + Synth ort::Session\nloading + inference, all live-verified\nagainst real onnxruntime output —\nstreaming state machine still to come"]
+        ENGINE["vc/inference/engine.rs ✅ + pipeline.rs ✅\nContentVec + RMVPE + Synth ort::Session\nloading/inference (live-verified vs real\nonnxruntime) + the sliding-window\nstreaming state machine — structurally\nverified end to end, not yet heard"]
         DSP["vc_dsp.rs ✅\nported DSP glue: F0 post-processing,\nVTLN, SOLA, envelope gate, soft limiter,\nRMS mix — pure, unit-tested functions"]
         RETR["vc/inference/retrieval.rs ✅\nbrute-force weighted k-NN\nover the model's .index vectors\n(hand-parsed IndexIVFFlat format)"]
         MEL["vc/inference/mel.rs ✅\nnative mel-spectrogram (rustfft/realfft)\n+ computed filterbank, checked against\ntorchaudio's real source"]
@@ -205,12 +205,12 @@ A from-scratch Rust real-time RVC engine with an almost identical crate split (`
 
 ## What is *not* yet de-risked
 
-Exporting the models cleanly is necessary but not sufficient. The real remaining risk is the ~500 lines of hand-tuned DSP surrounding them (VAD hysteresis, SOLA alignment search, F0 continuity clamp, phrase-final floor, envelope gating — see `pipeline.py`) — every constant there was tuned by ear against real speech, not derived mathematically. The plan for that part specifically:
+Exporting the models cleanly was necessary but not sufficient. The real risk was always the ~500 lines of hand-tuned DSP surrounding them (VAD hysteresis, SOLA alignment search, F0 continuity clamp, phrase-final floor, envelope gating — see `pipeline.py`) — every constant there was tuned by ear against real speech, not derived mathematically. The plan for that part, as executed:
 
-1. Port each DSP function as a **pure, standalone Rust function** (no model calls, no streaming state) — mirrors exactly how `vc_calibration.rs`'s downmix and `vc_ladspa_chain.rs`'s control-value math were already ported successfully.
-2. For each one, compute expected outputs from the **Python reference** on fixed test vectors and assert against them in Rust `#[test]`s — the same approach already used throughout this migration, not a new technique.
-3. Only after the DSP layer and the three `ort` sessions are individually verified, wire them into the real streaming loop and compare full-pipeline output against `pipeline.py` on real recordings (e.g. the calibration WAVs already on disk).
-4. The user's own listening is still the final gate — numeric closeness to the Python reference is a strong proxy for "sounds the same," not a substitute for it.
+1. ✅ Port each DSP function as a **pure, standalone Rust function** (no model calls, no streaming state) — mirrors exactly how `vc_calibration.rs`'s downmix and `vc_ladspa_chain.rs`'s control-value math were already ported successfully.
+2. ✅ For each one, compute expected outputs from the **Python reference** on fixed test vectors and assert against them in Rust `#[test]`s — the same approach already used throughout this migration, not a new technique.
+3. ✅ Wire them into the real streaming loop (`vc/inference/pipeline.rs`) and verify end to end against real `onnxruntime`-backed sessions: true silence stays silence, a loud tone produces finite, correctly-shaped, non-silent output through the full chain.
+4. ⬜ **The user's own listening is still the final gate** — numeric closeness to the Python reference is a strong proxy for "sounds the same," not a substitute for it, and this is the one piece of the whole [E10] epic that hasn't had that gate applied yet. Two real bugs surfaced by *structural* end-to-end testing alone (a missing 50fps→100fps feature-doubling step, and a wrong frame-count assumption in the synthesizer export) — reasonable to expect more would only surface by ear, the way the original DSP constants themselves were tuned. A known, deliberate deviation from `pipeline.py` is already tracked for this reason: the engine always uses one look-ahead hop instead of Python's two-at-cold-start, since the synthesizer's static ONNX shape can't accept a varying frame count — this trades away a specific, real quality fix ("short words garbling right after silence") until a second cold-start-shaped export is built. See [`v3-backlog.md`](v3-backlog.md)'s [E10-S6a] entry for the full account.
 
 ---
 

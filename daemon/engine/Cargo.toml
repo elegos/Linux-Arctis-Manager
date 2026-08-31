@@ -35,6 +35,8 @@ realfft = { workspace = true }
 ort = { workspace = true }
 rand = { workspace = true }
 rand_distr = { workspace = true }
+rubato = { workspace = true }
+audioadapter-buffers = { workspace = true }
 
 [dev-dependencies]
 lam-hidraw-helper = { workspace = true }

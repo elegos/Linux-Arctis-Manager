@@ -39,9 +39,16 @@ import torch.nn.functional as F
 
 from linux_arctis_manager.voice_changer.rvc.synth import SynthesizerTrnMs768NSFsid
 
-# Matches the daemon's fixed sliding-window constants (WINDOW_FRAMES=8192 at
-# 16kHz -> 26 ContentVec frames at 50fps -> 52 at 100fps after doubling).
-T_FEAT = 52
+# ContentVec's real input in `pipeline.py::_run_inference` is
+# WINDOW_FRAMES (8192) + HOP_FRAMES (2048, the look-ahead right-pad) +
+# HUBERT_EXTRA_PAD (320) = 10560 samples — *not* just window+pad (8512),
+# which is a smaller, easy-to-misread subset of the real call chain
+# (`audio_padded = concat(audio, right_pad)` happens *before*
+# `_extract_features`, which adds its own +320 pad on top). Verified
+# empirically against the real content_vec_best.onnx: a 10560-sample input
+# produces 32 pre-doubling frames -> 64 after the pipeline's 50fps->100fps
+# doubling, not 52.
+T_FEAT = 64
 
 
 class ExportableSynth(torch.nn.Module):
