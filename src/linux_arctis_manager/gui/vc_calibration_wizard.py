@@ -1,9 +1,17 @@
 """Guided voice calibration wizard for the RVC voice changer.
 
-The user reads a short edge-case text, the daemon renders it through three
-candidate tunings, and the user picks by ear — with the original recording
-available for reference.  "Refine" iterates with narrower steps around the
-chosen candidate; "Save" persists it as the model's tuning.
+Two rounds, back to back: the user reads a short edge-case text once, then
+
+  1. Pitch — a wide sweep of pitch-shift candidates (the model's trained
+     register usually differs from the user's own, e.g. a bass-baritone
+     voice against a soprano-trained model — see docs/v3-backlog.md's
+     [E10-S6b] notes), picked first because it swamps every other tunable.
+  2. Dynamics — three candidate tunings (drive/envelope mix) rendered at
+     the pitch just picked.
+
+"Refine" (available on both rounds) narrows the search around the current
+pick instead of starting over. "Save" persists the combined result as the
+model's tuning.
 """
 from __future__ import annotations
 
@@ -34,7 +42,7 @@ _DEFAULT_TEXT = (
     'And in the end… it slowly fades away.'
 )
 
-_VARIANT_HINTS = {
+_DYNAMICS_HINTS = {
     'A': 'current tuning',
     'B': 'follows your voice dynamics more closely',
     'C': 'lets the model character through more',
@@ -53,9 +61,15 @@ class QVCCalibrationWizard(QDialog):
         self.setMinimumWidth(560)
 
         self.chosen_params: dict | None = None   # set on Save
-        self._results: list[dict] = []
         self._original_path: str = ''
         self._play_proc: subprocess.Popen | None = None
+
+        # Round state: 'pitch' while picking the register, 'dynamics' once
+        # a pitch has been picked and the timbre round is under way.
+        self._round: str = 'pitch'
+        self._pitch_results: list[dict] = []
+        self._picked_pitch_offset: float = 0.0
+        self._dynamics_results: list[dict] = []
 
         self._poll = QTimer(self)
         self._poll.setInterval(500)
@@ -78,7 +92,22 @@ class QVCCalibrationWizard(QDialog):
         self._stack.addWidget(self._page_intro())      # 0
         self._stack.addWidget(self._page_recording())  # 1
         self._stack.addWidget(self._page_rendering())  # 2
-        self._stack.addWidget(self._page_listen())     # 3
+        self._pitch_page, self._pitch_list = self._page_listen(
+            on_again=lambda: self._goto(0),
+            again_label=_T('ui', 'vc_calib_read_again'),
+            on_refine=self._refine_pitch,
+            on_next=self._accept_pitch,
+            next_label=_T('ui', 'vc_calib_next'),
+        )
+        self._stack.addWidget(self._pitch_page)         # 3
+        self._dynamics_page, self._dynamics_list = self._page_listen(
+            on_again=self._back_to_pitch,
+            again_label=_T('ui', 'vc_calib_back'),
+            on_refine=self._refine_dynamics,
+            on_next=self._save_selected,
+            next_label=_T('ui', 'vc_calib_save'),
+        )
+        self._stack.addWidget(self._dynamics_page)      # 4
 
     # ── Pages ─────────────────────────────────────────────────────────
 
@@ -143,68 +172,94 @@ class QVCCalibrationWizard(QDialog):
         lay.addStretch()
         return page
 
-    def _page_listen(self) -> QWidget:
+    def _page_listen(self, *, on_again, again_label: str, on_refine, on_next, next_label: str):
+        """One "listen to N variants and pick by ear" page. The variant
+        rows are (re)built on demand by `_populate_variants` — the pitch
+        round can render up to 6 candidates, the dynamics round always 3,
+        and a refine pass may return fewer — so the row count can't be
+        fixed at construction time the way it used to be.
+        """
         page = QWidget()
         lay = QVBoxLayout(page)
-        lbl = QLabel(_T('ui', 'vc_calib_listen'))
-        lbl.setWordWrap(True)
-        lay.addWidget(lbl)
+        title = QLabel()
+        title.setWordWrap(True)
+        lay.addWidget(title)
 
-        self._orig_row = self._make_play_row(_T('ui', 'vc_calib_original'), None)
-        lay.addLayout(self._orig_row[0])
+        orig_row = QHBoxLayout()
+        orig_name = QLabel(_T('ui', 'vc_calib_original'))
+        orig_name.setMinimumWidth(260)
+        orig_row.addWidget(orig_name)
+        orig_play = QPushButton('▶')
+        orig_play.setFixedWidth(44)
+        orig_play.clicked.connect(lambda: self._play(self._original_path))
+        orig_row.addWidget(orig_play)
+        orig_row.addStretch()
+        lay.addLayout(orig_row)
 
-        self._variant_group = QButtonGroup(self)
-        self._variant_rows: list[tuple[QHBoxLayout, QRadioButton, QPushButton, QLabel]] = []
-        for i in range(3):
-            row, radio, play, name = self._make_variant_row(i)
-            lay.addLayout(row)
-            self._variant_rows.append((row, radio, play, name))
-
+        group = QButtonGroup(page)
+        variants_lay = QVBoxLayout()
+        lay.addLayout(variants_lay)
         lay.addStretch()
+
         row = QHBoxLayout()
         cancel = QPushButton(_T('ui', 'vc_calib_cancel'))
         cancel.clicked.connect(self.reject)
         row.addWidget(cancel)
         row.addStretch()
-        again = QPushButton(_T('ui', 'vc_calib_read_again'))
-        again.clicked.connect(lambda: self._goto(0))
+        again = QPushButton(again_label)
+        again.clicked.connect(on_again)
         row.addWidget(again)
         refine = QPushButton(_T('ui', 'vc_calib_refine'))
-        refine.clicked.connect(self._refine_selected)
+        refine.clicked.connect(on_refine)
         row.addWidget(refine)
-        save = QPushButton(_T('ui', 'vc_calib_save'))
-        save.setDefault(True)
-        save.clicked.connect(self._save_selected)
-        row.addWidget(save)
+        next_btn = QPushButton(next_label)
+        next_btn.setDefault(True)
+        next_btn.clicked.connect(on_next)
+        row.addWidget(next_btn)
         lay.addLayout(row)
-        return page
 
-    def _make_play_row(self, label: str, path: str | None):
-        row = QHBoxLayout()
-        name = QLabel(label)
-        name.setMinimumWidth(260)
-        row.addWidget(name)
-        play = QPushButton('▶')
-        play.setFixedWidth(44)
-        play.clicked.connect(lambda: self._play(path or self._original_path))
-        row.addWidget(play)
-        row.addStretch()
-        return row, name, play
+        state = {
+            'title': title,
+            'group': group,
+            'variants_lay': variants_lay,
+            'rows': [],   # list[(radio, play_btn, name_lbl)]
+        }
+        return page, state
 
-    def _make_variant_row(self, idx: int):
-        row = QHBoxLayout()
-        radio = QRadioButton()
-        self._variant_group.addButton(radio, idx)
-        row.addWidget(radio)
-        name = QLabel('—')
-        name.setMinimumWidth(240)
-        row.addWidget(name)
-        play = QPushButton('▶')
-        play.setFixedWidth(44)
-        play.clicked.connect(lambda: self._play_variant(idx))
-        row.addWidget(play)
-        row.addStretch()
-        return row, radio, play, name
+    def _populate_variants(self, list_state: dict, results: list[dict],
+                            title_text: str, hint_fn) -> None:
+        list_state['title'].setText(title_text)
+        variants_lay = list_state['variants_lay']
+        group = list_state['group']
+        for radio, _play, _name in list_state['rows']:
+            group.removeButton(radio)
+        while variants_lay.count():
+            item = variants_lay.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        rows: list[tuple[QRadioButton, QPushButton, QLabel]] = []
+        for idx, result in enumerate(results):
+            row_widget = QWidget()
+            row = QHBoxLayout(row_widget)
+            row.setContentsMargins(0, 0, 0, 0)
+            radio = QRadioButton()
+            group.addButton(radio, idx)
+            row.addWidget(radio)
+            name = QLabel(hint_fn(result))
+            name.setMinimumWidth(240)
+            row.addWidget(name)
+            play = QPushButton('▶')
+            play.setFixedWidth(44)
+            play.clicked.connect(lambda _=False, p=result.get('path', ''): self._play(p))
+            row.addWidget(play)
+            row.addStretch()
+            variants_lay.addWidget(row_widget)
+            rows.append((radio, play, name))
+            if idx == 0:
+                radio.setChecked(True)
+        list_state['rows'] = rows
 
     # ── Flow ──────────────────────────────────────────────────────────
 
@@ -233,13 +288,50 @@ class QVCCalibrationWizard(QDialog):
         # Fetch status once to check the recording level before rendering.
         DbusWrapper.calibration_get_status(self.sig_status)
 
-    def _refine_selected(self) -> None:
-        sel = self._variant_group.checkedId()
-        if sel < 0 or sel >= len(self._results):
+    def _start_pitch_round(self, anchor: float, refine: bool) -> None:
+        self._round = 'pitch'
+        self._render_label.setText(_T('ui', 'vc_calib_rendering_pitch'))
+        DbusWrapper.calibration_start_render(
+            {'round': 'pitch', 'anchor': anchor, 'refine': refine},
+            self.sig_render_started)
+
+    def _start_dynamics_round(self, refine_params: dict | None) -> None:
+        self._round = 'dynamics'
+        self._render_label.setText(_T('ui', 'vc_calib_rendering_dynamics'))
+        DbusWrapper.calibration_start_render(
+            {'round': 'dynamics', 'pitch_offset': self._picked_pitch_offset,
+             'refine_params': refine_params},
+            self.sig_render_started)
+
+    def _refine_pitch(self) -> None:
+        sel = self._pitch_list['group'].checkedId()
+        if sel < 0 or sel >= len(self._pitch_results):
             QMessageBox.information(self, self.windowTitle(), _T('ui', 'vc_calib_pick_first'))
             return
-        DbusWrapper.calibration_start_render(
-            self._results[sel]['params'], self.sig_render_started)
+        anchor = float(self._pitch_results[sel].get('pitch_offset', 0.0))
+        self._start_pitch_round(anchor, refine=True)
+
+    def _accept_pitch(self) -> None:
+        sel = self._pitch_list['group'].checkedId()
+        if sel < 0 or sel >= len(self._pitch_results):
+            QMessageBox.information(self, self.windowTitle(), _T('ui', 'vc_calib_pick_first'))
+            return
+        self._picked_pitch_offset = float(self._pitch_results[sel].get('pitch_offset', 0.0))
+        self._start_dynamics_round(refine_params=None)
+
+    def _back_to_pitch(self) -> None:
+        # No re-render: the pitch round's own results/paths are still valid
+        # (each round writes into its own subdirectory — see dbus.rs's
+        # CalibrationStartRender doc comment), so just switch pages back.
+        self._round = 'pitch'
+        self._goto(3)
+
+    def _refine_dynamics(self) -> None:
+        sel = self._dynamics_list['group'].checkedId()
+        if sel < 0 or sel >= len(self._dynamics_results):
+            QMessageBox.information(self, self.windowTitle(), _T('ui', 'vc_calib_pick_first'))
+            return
+        self._start_dynamics_round(refine_params=self._dynamics_results[sel]['params'])
 
     def _on_render_started(self, ok: object) -> None:
         if not ok:
@@ -254,24 +346,33 @@ class QVCCalibrationWizard(QDialog):
         state = status.get('state', '')
         if state == 'recorded':
             # Post-recording level gate: a wrong/dead input records digital
-            # near-silence — warn instead of rendering three mute variants.
+            # near-silence — warn instead of rendering mute variants.
             if float(status.get('peak', 0.0)) < 0.005:
                 QMessageBox.warning(self, self.windowTitle(),
                                     _T('ui', 'vc_calib_err_silent'))
                 self._goto(0)
             else:
-                DbusWrapper.calibration_start_render(None, self.sig_render_started)
+                self._start_pitch_round(anchor=0.0, refine=False)
             return
         if state == 'done':
             self._poll.stop()
-            self._results = list(status.get('results', []))
-            for i, (_, radio, _, name) in enumerate(self._variant_rows):
-                if i < len(self._results):
-                    label = self._results[i].get('label', '?')
-                    hint = _VARIANT_HINTS.get(label, '')
-                    name.setText(f"{_T('ui', 'vc_calib_variant')} {label} — {hint}")
-                    radio.setChecked(label == 'A')
-            self._goto(3)
+            results = list(status.get('results', []))
+            if self._round == 'pitch':
+                self._pitch_results = results
+                self._populate_variants(
+                    self._pitch_list, results,
+                    _T('ui', 'vc_calib_listen_pitch'),
+                    lambda r: f"{float(r.get('pitch_offset', 0.0)):+.1f} st")
+                self._goto(3)
+            else:
+                self._dynamics_results = results
+                self._populate_variants(
+                    self._dynamics_list, results,
+                    _T('ui', 'vc_calib_listen_dynamics'),
+                    lambda r: (f"{_T('ui', 'vc_calib_variant')} "
+                              f"{r.get('label', '?')} — "
+                              f"{_DYNAMICS_HINTS.get(r.get('label', ''), '')}"))
+                self._goto(4)
         elif state == 'error':
             self._poll.stop()
             QMessageBox.warning(self, self.windowTitle(),
@@ -279,11 +380,13 @@ class QVCCalibrationWizard(QDialog):
             self._goto(0)
 
     def _save_selected(self) -> None:
-        sel = self._variant_group.checkedId()
-        if sel < 0 or sel >= len(self._results):
+        sel = self._dynamics_list['group'].checkedId()
+        if sel < 0 or sel >= len(self._dynamics_results):
             QMessageBox.information(self, self.windowTitle(), _T('ui', 'vc_calib_pick_first'))
             return
-        self.chosen_params = dict(self._results[sel]['params'])
+        params = dict(self._dynamics_results[sel]['params'])
+        params['pitch_offset'] = self._picked_pitch_offset
+        self.chosen_params = params
         self.accept()
 
     # ── Playback (paplay, one at a time) ──────────────────────────────
@@ -298,10 +401,6 @@ class QVCCalibrationWizard(QDialog):
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception as e:
             logger.warning('playback failed: %s', e)
-
-    def _play_variant(self, idx: int) -> None:
-        if idx < len(self._results):
-            self._play(self._results[idx].get('path', ''))
 
     def _stop_playback(self) -> None:
         if self._play_proc is not None and self._play_proc.poll() is None:
