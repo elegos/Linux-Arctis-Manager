@@ -20,6 +20,12 @@ BuildRequires:  libcap
 Requires:       python3
 Requires:       libcap
 
+# Only needed for the AI voice changer's one-shot .pth -> ONNX voice-model
+# conversion tool (E10-S6a/S7) — a soft dependency since the rest of the
+# daemon (NC, EQ, sidetone, LADSPA voice changer, ...) doesn't need torch at
+# all. Falls back to a per-user pip venv, with explicit consent, when absent.
+Recommends:     python3-torch
+
 %description
 Linux Arctis Manager replaces the SteelSeries GG software for managing
 SteelSeries Arctis headsets on Linux. It provides a user-space daemon
