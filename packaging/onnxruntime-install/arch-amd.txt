@@ -1,0 +1,9 @@
+Arch ships an official ROCm-accelerated build of ONNX Runtime:
+
+    sudo pacman -S onnxruntime-rocm
+
+This pulls in the ROCm stack (rocm-hip-sdk and friends) as a dependency. If you'd rather not, the CPU-only build also works, just without GPU acceleration:
+
+    sudo pacman -S onnxruntime
+
+After installing, click "Verify" below.

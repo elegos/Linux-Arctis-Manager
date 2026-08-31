@@ -1,0 +1,9 @@
+ONNX Runtime is only packaged in Debian's development branches (testing/unstable) as of this writing — it may not be available via apt on a stable Debian install:
+
+    sudo apt install libonnxruntime1
+
+If that fails with "unable to locate package", your Debian release doesn't carry it yet. In that case, install it via pip instead (asks you to confirm the exact command before running it — this is not a system package, so review it like you would any other download):
+
+    pip install --user onnxruntime
+
+After installing either way, click "Verify" below.

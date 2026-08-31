@@ -1,0 +1,10 @@
+Your distribution's package manager wasn't recognized. Install ONNX Runtime via pip instead (asks you to confirm the exact command before running it — this is not a system package, so review it like you would any other download):
+
+    pip install --user onnxruntime
+
+If you have an NVIDIA or AMD GPU and want hardware acceleration, use one of these instead:
+
+    pip install --user onnxruntime-gpu
+    pip install --user onnxruntime-rocm
+
+After installing, click "Verify" below.

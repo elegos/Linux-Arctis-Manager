@@ -1162,6 +1162,44 @@ impl VcInterface {
         let session = self.calibration.lock().await;
         serde_json::to_string(&session.status()).unwrap_or_else(|_| "{}".to_string())
     }
+
+    // ── libonnxruntime install helper ([E10-S7]) ────────────────────────
+
+    /// The GUI's "Install AI Dependencies" dialog calls this to render an
+    /// incipit ("You need to install libonnxruntime for your graphics
+    /// card: NVIDIA") plus the matching mini-tutorial. Detection only —
+    /// never installs anything itself; see `vc_onnxruntime_detect.rs`'s
+    /// module doc for the trust model.
+    #[zbus(name = "GetOnnxRuntimeInstallInstructions")]
+    async fn get_onnxruntime_install_instructions(&self) -> String {
+        let vendor = crate::vc_onnxruntime_detect::detect_gpu_vendor();
+        let distro = crate::vc_onnxruntime_detect::detect_distro_id();
+        let pkg_mgr = crate::vc_onnxruntime_detect::detect_package_manager();
+        let instructions =
+            crate::vc_onnxruntime_detect::pick_tutorial(vendor, distro.as_deref(), pkg_mgr);
+        serde_json::json!({
+            "vendor": vendor.display_name(),
+            "distro": distro,
+            "instructions": instructions,
+        })
+        .to_string()
+    }
+
+    /// The "Verify" button: re-probes known install locations for a real
+    /// `libonnxruntime.so` after the user has (supposedly) followed the
+    /// tutorial. Only checks the file exists — it does not attempt to load
+    /// it (that needs an `ort` environment, which this cheap read-only
+    /// check deliberately avoids initialising just to answer "is it there
+    /// now").
+    #[zbus(name = "DetectOnnxRuntime")]
+    async fn detect_onnxruntime(&self) -> String {
+        let path = crate::vc_onnxruntime_detect::find_onnxruntime_dylib();
+        serde_json::json!({
+            "found": path.is_some(),
+            "path": path.map(|p| p.display().to_string()),
+        })
+        .to_string()
+    }
 }
 
 // ── Service startup ───────────────────────────────────────────────────────────

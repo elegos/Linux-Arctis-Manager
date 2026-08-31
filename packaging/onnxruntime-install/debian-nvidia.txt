@@ -1,0 +1,15 @@
+No NVIDIA-accelerated ONNX Runtime package is known to be available via apt on Debian. Two options:
+
+1. CPU-only (works everywhere, no GPU acceleration):
+
+    sudo apt install libonnxruntime1
+
+   (If that fails, your Debian release doesn't carry it yet — see the CPU-only tutorial's pip fallback.)
+
+2. NVIDIA GPU acceleration, via pip instead of a system package (asks you to confirm the exact command before running it — this is not a system package, so review it like you would any other download):
+
+    pip install --user onnxruntime-gpu
+
+   This needs your existing NVIDIA driver and CUDA toolkit already installed. ONNX Runtime's CUDA builds match by CUDA major version — see https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html for version compatibility.
+
+After installing either, click "Verify" below.

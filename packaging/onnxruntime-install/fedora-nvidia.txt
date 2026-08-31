@@ -1,0 +1,13 @@
+Fedora doesn't currently package a CUDA-accelerated build of ONNX Runtime (neither in the official repos, RPM Fusion, nor NVIDIA's own CUDA repo — that repo ships the CUDA toolkit itself, not software built against it). Two options:
+
+1. CPU-only (works everywhere, no extra setup):
+
+    sudo dnf install onnxruntime
+
+2. NVIDIA GPU acceleration, via pip instead of a system package (asks you to confirm the exact command before running it — this is not a system package, so review it like you would any other download):
+
+    pip install --user onnxruntime-gpu
+
+   This needs your existing NVIDIA driver and CUDA toolkit to already be installed (if `nvidia-smi` works, you likely already have them). ONNX Runtime's CUDA builds match by CUDA major version — if the pip package doesn't detect your CUDA install correctly, check `pip show onnxruntime-gpu` and https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html for version compatibility.
+
+After installing either, click "Verify" below.

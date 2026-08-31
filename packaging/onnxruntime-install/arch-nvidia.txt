@@ -1,0 +1,11 @@
+Arch ships an official CUDA-accelerated build of ONNX Runtime:
+
+    sudo pacman -S onnxruntime-cuda
+
+Important: this package conflicts with the plain "onnxruntime" (CPU) package — pacman will remove one to install the other, they can't both be installed at once. If you have "onnxruntime" installed already, pacman will offer to replace it; that's expected.
+
+If you'd rather not pull in the CUDA package (it bundles cuDNN and other large dependencies), the CPU-only build also works, just without GPU acceleration:
+
+    sudo pacman -S onnxruntime
+
+After installing, click "Verify" below.

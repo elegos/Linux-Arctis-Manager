@@ -1,0 +1,15 @@
+No ROCm-accelerated ONNX Runtime package is known to be available via apt on Debian. Two options:
+
+1. CPU-only (works everywhere, no GPU acceleration):
+
+    sudo apt install libonnxruntime1
+
+   (If that fails, your Debian release doesn't carry it yet — see the CPU-only tutorial's pip fallback.)
+
+2. AMD GPU acceleration, via pip instead of a system package (asks you to confirm the exact command before running it — this is not a system package, so review it like you would any other download):
+
+    pip install --user onnxruntime-rocm
+
+   This needs ROCm already installed. This path is less common than the CUDA one — check https://onnxruntime.ai/docs/execution-providers/ROCm-ExecutionProvider.html if it doesn't work.
+
+After installing either, click "Verify" below.

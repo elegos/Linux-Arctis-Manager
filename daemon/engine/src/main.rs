@@ -23,6 +23,7 @@ mod vc_dsp;
 mod vc_hf_client;
 mod vc_ladspa_chain;
 mod vc_models;
+mod vc_onnxruntime_detect;
 mod vc_rvc_config;
 
 use std::collections::HashMap;
