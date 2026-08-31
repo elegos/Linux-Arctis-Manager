@@ -32,6 +32,7 @@ sha2 = { workspace = true }
 zip = { workspace = true }
 flate2 = { workspace = true }
 realfft = { workspace = true }
+ort = { workspace = true }
 
 [dev-dependencies]
 lam-hidraw-helper = { workspace = true }

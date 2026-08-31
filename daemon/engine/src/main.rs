@@ -15,6 +15,7 @@ mod nc_config;
 mod nc_manager;
 mod state;
 mod stream_monitor;
+mod vc;
 mod vc_base_models;
 mod vc_calibration;
 mod vc_config;
