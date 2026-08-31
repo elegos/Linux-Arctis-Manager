@@ -46,6 +46,9 @@ use crate::vc_rvc_config::RvcParams;
 
 pub const RECORD_SAMPLE_RATE: u32 = 16000;
 const MAX_RECORD_SECS: u64 = 120;
+// Matches `RvcParams::default().target_rms` — see the call site's comment.
+const INPUT_NORMALIZE_TARGET_RMS: f32 = 0.06;
+const INPUT_NORMALIZE_MAX_GAIN: f32 = 8.0;
 /// f32 stereo = 8 bytes/frame.
 const BYTES_PER_FRAME: u64 = 8;
 
@@ -517,6 +520,17 @@ fn render_blocking(
     let (raw, sr) = crate::vc::wav_io::read_mono_f32(recording_path)
         .map_err(|e| format!("read recording: {e}"))?;
     let input_16k = resample(&raw, sr, RECORD_SAMPLE_RATE);
+    // Normalize once, shared across every variant: a quiet *recording*
+    // (not a per-variant tuning choice) is what makes the VAD gate/output
+    // envelope mask crush genuine-but-quiet speech — see
+    // `vc_dsp::normalize_input_level`'s doc comment. Target matches
+    // `RvcParams::default().target_rms`, the same level the per-window
+    // normalization inside `run_inference` already aims for downstream.
+    let input_16k = crate::vc_dsp::normalize_input_level(
+        &input_16k,
+        INPUT_NORMALIZE_TARGET_RMS,
+        INPUT_NORMALIZE_MAX_GAIN,
+    );
 
     std::fs::create_dir_all(out_dir).map_err(|e| format!("create output dir: {e}"))?;
 
