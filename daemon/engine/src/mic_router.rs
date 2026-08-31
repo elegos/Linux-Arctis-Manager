@@ -31,6 +31,14 @@ impl MicRouterState {
     pub fn new() -> Self {
         Self::default()
     }
+
+    /// NC's current candidate output source, if any — used by voice
+    /// calibration to record from the same audio NC would otherwise feed
+    /// the live VC chain, same as the legacy Python service's
+    /// `nc.output_source` read in `CalibrationStartRecording`.
+    pub fn nc_source(&self) -> Option<&str> {
+        self.nc_source.as_deref()
+    }
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

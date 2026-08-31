@@ -88,6 +88,10 @@ class QMainApp(QBaseDesktopApp):
         self.dbus_wrapper.sig_download_complete.connect(self._on_download_complete)
         self.dbus_wrapper.sig_base_model_progress.connect(self._on_base_model_progress)
         self.dbus_wrapper.sig_base_model_complete.connect(self._on_base_model_complete)
+        self.dbus_wrapper.sig_export_deps_progress.connect(self._on_export_deps_progress)
+        self.dbus_wrapper.sig_export_deps_complete.connect(self._on_export_deps_complete)
+        self.dbus_wrapper.sig_export_progress.connect(self._on_export_progress)
+        self.dbus_wrapper.sig_export_complete.connect(self._on_export_complete)
 
         self._ui_version = project_version()
         self._service_restart_attempted = False
@@ -343,6 +347,29 @@ class QMainApp(QBaseDesktopApp):
             self._base_dl_bar.setVisible(False),
         ))
         self.mic_widget.vc_widget.on_base_model_complete(success, message)
+
+    @Slot(str)
+    def _on_export_deps_progress(self, message: str) -> None:
+        self._ai_status_label.setVisible(True)
+        self._ai_status_label.setText(f'Export dependencies: {message}')
+
+    @Slot(bool, str)
+    def _on_export_deps_complete(self, success: bool, message: str) -> None:
+        self._ai_status_label.setText(f'Export dependencies: {message}')
+        QTimer.singleShot(5000, lambda: self._ai_status_label.setVisible(False))
+        self.mic_widget.vc_widget.on_export_deps_complete(success, message)
+
+    @Slot(str)
+    def _on_export_progress(self, message: str) -> None:
+        self._ai_status_label.setVisible(True)
+        self._ai_status_label.setText(f'Export: {message}')
+        self.mic_widget.vc_widget.on_export_progress(message)
+
+    @Slot(bool, str, str)
+    def _on_export_complete(self, success: bool, message: str, name: str) -> None:
+        self._ai_status_label.setText(f'Export: {message}')
+        QTimer.singleShot(5000, lambda: self._ai_status_label.setVisible(False))
+        self.mic_widget.vc_widget.on_export_complete(success, message, name)
 
     @Slot(str, str)
     def _show_error_dialog(self, title: str, message: str) -> None:

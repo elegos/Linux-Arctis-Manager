@@ -870,20 +870,83 @@ impl NcInterface {
 // `rvc.available: false` so clients can gate their RVC UI on it instead of
 // hitting an UnknownMethod error.
 
-use crate::vc_config::VcLadspaConfig;
+use crate::vc_config::{VcLadspaConfig, VcSettings};
 
 fn vc_config_path(base: &std::path::Path) -> std::path::PathBuf {
     base.join("vc_config.json")
 }
 
-fn load_vc_config(base: &std::path::Path) -> VcLadspaConfig {
+fn load_vc_config(base: &std::path::Path) -> VcSettings {
     std::fs::read_to_string(vc_config_path(base))
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default()
 }
 
-fn save_vc_config(base: &std::path::Path, cfg: &VcLadspaConfig) -> bool {
+/// `CalibrationStartRender`'s request body — see that method's doc comment.
+#[derive(serde::Deserialize)]
+#[serde(tag = "round", rename_all = "lowercase")]
+enum CalibrationRenderRequest {
+    Pitch {
+        #[serde(default)]
+        anchor: f32,
+        #[serde(default)]
+        refine: bool,
+    },
+    Dynamics {
+        #[serde(default)]
+        pitch_offset: Option<f32>,
+        #[serde(default)]
+        refine_params: Option<crate::vc_rvc_config::RvcParams>,
+    },
+}
+
+impl Default for CalibrationRenderRequest {
+    fn default() -> Self {
+        Self::Dynamics {
+            pitch_offset: None,
+            refine_params: None,
+        }
+    }
+}
+
+/// Spawns the background task that runs `export_onnx.py` on `pth_path` and
+/// reports `ExportProgress`/`ExportComplete` — shared by `EnsureModelExported`
+/// and `DownloadHFModel`'s post-download auto-export. Callers are
+/// responsible for having already confirmed the export dependencies are
+/// available (`vc_export::detect_export_deps`) — this function itself never
+/// prompts for or performs a dependency install, so it can be called
+/// silently right after a download completes without surprising the user
+/// with an install prompt they didn't ask for; `EnsureModelExported` is the
+/// one place that *does* surface `needs_deps` for the GUI to act on.
+fn spawn_export_task(
+    signal_tx: broadcast::Sender<SignalEvent>,
+    pth_path: std::path::PathBuf,
+    name: String,
+) {
+    tokio::spawn(async move {
+        let _ = signal_tx.send(SE::VCExportProgress {
+            message: format!("Exporting {name} to ONNX..."),
+        });
+        let json = match crate::vc_export::run_export(&pth_path).await {
+            Ok(onnx_path) => serde_json::json!({
+                "success": true,
+                "name": name,
+                "message": format!("Exported {}.", onnx_path.display()),
+            })
+            .to_string(),
+            Err(e) => serde_json::json!({
+                "success": false,
+                "name": name,
+                "message": format!("Export of {name} failed: {e}"),
+            })
+            .to_string(),
+        };
+        let _ = signal_tx.send(SE::VCExportComplete { json });
+    });
+}
+
+fn save_vc_config(base: &std::path::Path, cfg: &VcSettings) -> bool {
     let path = vc_config_path(base);
     let Ok(json) = serde_json::to_string_pretty(cfg) else {
         return false;
@@ -956,46 +1019,34 @@ impl VcInterface {
         serde_json::to_string(&cfg).unwrap_or_else(|_| "{}".to_string())
     }
 
-    /// The GUI's payload carries a top-level `mode` (`"ladspa"` | `"rvc"`)
-    /// that `VcLadspaConfig` doesn't model — RVC mode has no backend yet
-    /// ([E10-S6a]). The client's `enabled` checkbox is independent of that
-    /// mode selector, so a client that let a user pick "AI Voice Changer"
-    /// and enable would otherwise silently run the unrelated LADSPA chain
+    /// `VcSettings::mode` (`"ladspa"` | `"rvc"`) and `enabled` are
+    /// independent: a client that lets a user pick "AI Voice Changer" and
+    /// enable it would otherwise silently run the unrelated LADSPA chain
     /// instead. Never actually activate LADSPA unless `mode` is `"ladspa"`
-    /// (or absent) — the server is the source of truth on what can run, not
-    /// whatever a client happens to send.
+    /// — the server is the source of truth on what can run, not whatever a
+    /// client happens to send. RVC mode itself doesn't activate anything
+    /// here yet either — see `CalibrationStartRender` for the one RVC path
+    /// that *is* wired ([E10-S6b]); the live chain is [E10-S8], not started.
     #[zbus(name = "SetVCSettings")]
     async fn set_vc_settings(&self, json: &str) -> bool {
-        let value: serde_json::Value = match serde_json::from_str(json) {
-            Ok(v) => v,
-            Err(e) => {
-                warn!("SetVCSettings: invalid JSON: {e}");
-                return false;
-            }
-        };
-        let cfg: VcLadspaConfig = match serde_json::from_value(value.clone()) {
+        let cfg: VcSettings = match serde_json::from_str(json) {
             Ok(c) => c,
             Err(e) => {
                 warn!("SetVCSettings: invalid JSON: {e}");
                 return false;
             }
         };
-        let mode = value
-            .get("mode")
-            .and_then(|m| m.as_str())
-            .unwrap_or("ladspa")
-            .to_owned();
 
         if !save_vc_config(&self.settings_base_dir, &cfg) {
             warn!("SetVCSettings: failed to persist config");
         }
 
-        let effective_cfg = if mode == "ladspa" {
-            cfg.clone()
+        let effective_cfg = if cfg.mode == "ladspa" {
+            cfg.ladspa.clone()
         } else {
             VcLadspaConfig {
                 enabled: false,
-                ..cfg.clone()
+                ..cfg.ladspa.clone()
             }
         };
         let output_source = {
@@ -1029,6 +1080,100 @@ impl VcInterface {
     async fn delete_rvc_model(&self, name: &str) -> bool {
         crate::vc_models::delete_model(&self.settings_base_dir, name)
     }
+
+    // ── Model export (.pth -> .onnx) ─────────────────────────────────────
+
+    /// `{"available": bool, "install_command": "..."}` — the GUI shows
+    /// `install_command` in a consent dialog before ever calling
+    /// `InstallExportDeps`; see `vc_export.rs`'s module doc for why the
+    /// daemon never installs this itself without being asked.
+    #[zbus(name = "GetExportDepsStatus")]
+    async fn get_export_deps_status(&self) -> String {
+        let status = crate::vc_export::detect_export_deps().await;
+        serde_json::json!({
+            "available": status.available,
+            "install_command": status.install_command,
+        })
+        .to_string()
+    }
+
+    /// Fire-and-forget: creates the slim per-user `ai_env` venv and installs
+    /// `torch`/`numpy`/`onnx` (CPU wheels) into it — only ever called after
+    /// the GUI has shown `GetExportDepsStatus`'s `install_command` and the
+    /// user agreed to run it. Reports via `ExportDepsProgress`/
+    /// `ExportDepsComplete`.
+    #[zbus(name = "InstallExportDeps")]
+    async fn install_export_deps(&self) {
+        let signal_tx = self.signal_tx.clone();
+        tokio::spawn(async move {
+            let _ = signal_tx.send(SE::VCExportDepsProgress {
+                message: "Installing export dependencies (torch, numpy, onnx)...".to_owned(),
+            });
+            let json = match crate::vc_export::install_export_deps().await {
+                Ok(()) => serde_json::json!({
+                    "success": true,
+                    "message": "Export dependencies installed.",
+                })
+                .to_string(),
+                Err(e) => serde_json::json!({
+                    "success": false,
+                    "message": e,
+                })
+                .to_string(),
+            };
+            let _ = signal_tx.send(SE::VCExportDepsComplete { json });
+        });
+    }
+
+    #[zbus(signal)]
+    async fn export_deps_progress(emitter: &SignalEmitter<'_>, message: &str) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    async fn export_deps_complete(
+        emitter: &SignalEmitter<'_>,
+        result_json: &str,
+    ) -> zbus::Result<()>;
+
+    /// Ensures `name`'s local model has an exported `.onnx`, starting a
+    /// background export if not — the GUI calls this right after a model
+    /// download completes and whenever the model dropdown selection
+    /// changes, so a user never has to run `export_onnx.py` by hand.
+    /// Returns immediately with one of:
+    /// `{"status":"exported"}` (nothing to do),
+    /// `{"status":"exporting"}` (background task started — watch
+    /// `ExportProgress`/`ExportComplete`),
+    /// `{"status":"needs_deps","install_command":"..."}` (GUI should show
+    /// the consent dialog, call `InstallExportDeps`, then retry this call
+    /// after `ExportDepsComplete`), or
+    /// `{"status":"error","message":"..."}` (model not found).
+    #[zbus(name = "EnsureModelExported")]
+    async fn ensure_model_exported(&self, name: &str) -> String {
+        let Some(model) = crate::vc_models::find_model(&self.settings_base_dir, name) else {
+            return serde_json::json!({"status": "error", "message": "model not found"})
+                .to_string();
+        };
+        if model.onnx_path.is_some() {
+            return serde_json::json!({"status": "exported"}).to_string();
+        }
+
+        let deps = crate::vc_export::detect_export_deps().await;
+        if !deps.available {
+            return serde_json::json!({
+                "status": "needs_deps",
+                "install_command": deps.install_command,
+            })
+            .to_string();
+        }
+
+        spawn_export_task(self.signal_tx.clone(), model.path, model.name);
+        serde_json::json!({"status": "exporting"}).to_string()
+    }
+
+    #[zbus(signal)]
+    async fn export_progress(emitter: &SignalEmitter<'_>, message: &str) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    async fn export_complete(emitter: &SignalEmitter<'_>, result_json: &str) -> zbus::Result<()>;
 
     // ── HuggingFace ──────────────────────────────────────────────────────
 
@@ -1069,6 +1214,11 @@ impl VcInterface {
     /// Fire-and-forget: downloads in a background task, reporting via
     /// `DownloadProgress`/`DownloadComplete` signals (no byte-level progress
     /// yet — `vc_hf_client::download_model` does not stream progress today).
+    /// A freshly-downloaded model is exported to `.onnx` automatically
+    /// afterwards, *if* the export dependencies already happen to be
+    /// available — see `spawn_export_task`'s doc comment for why this
+    /// doesn't itself prompt for a dependency install (that only happens
+    /// from `EnsureModelExported`, when the GUI actually needs the model).
     #[zbus(name = "DownloadHFModel")]
     async fn download_hf_model(&self, repo_id: &str, filename: &str) {
         let base = self.settings_base_dir.clone();
@@ -1087,7 +1237,7 @@ impl VcInterface {
             // Field names/shape match the legacy Python service's
             // DownloadComplete payload (`dbus_service.py::_run_download`) so
             // the existing GUI handler needs no changes: {success, message, name}.
-            let json = match result {
+            let json = match &result {
                 Ok(outcome) => {
                     let joined = outcome.model_names.join(", ");
                     let message = if joined.is_empty() {
@@ -1110,6 +1260,16 @@ impl VcInterface {
                 .to_string(),
             };
             let _ = signal_tx.send(SE::VCDownloadComplete { json });
+
+            if let Ok(outcome) = result {
+                if crate::vc_export::detect_export_deps().await.available {
+                    for name in outcome.model_names {
+                        if let Some(model) = crate::vc_models::find_model(&base, &name) {
+                            spawn_export_task(signal_tx.clone(), model.path, model.name);
+                        }
+                    }
+                }
+            }
         });
     }
 
@@ -1156,13 +1316,32 @@ impl VcInterface {
         result_json: &str,
     ) -> zbus::Result<()>;
 
-    // ── Calibration (recording only — see module doc comment) ──────────
+    // ── Calibration ([E10-S6b]) ──────────────────────────────────────────
 
+    /// Records from the same source the live VC chain would consume: NC's
+    /// output when noise cancellation is active, else the configured VC
+    /// source — the settings `source_id` alone can be stale (the live
+    /// chain ignores it whenever the NC override is in effect). Matches the
+    /// legacy Python service's `CalibrationStartRecording` exactly, down to
+    /// the zero-argument signature (the GUI never had a source to pass —
+    /// `vc_calibration_wizard.py` calls this with no parameters).
     #[zbus(name = "CalibrationStartRecording")]
-    async fn calibration_start_recording(&self, source_id: &str) -> bool {
+    async fn calibration_start_recording(&self) -> bool {
+        let nc_source = {
+            let mr = self.mic_router.lock().await;
+            mr.nc_source().map(str::to_owned)
+        };
+        let source = match nc_source {
+            Some(s) if !s.is_empty() => s,
+            _ => load_vc_config(&self.settings_base_dir).ladspa.source_id,
+        };
+        if source.is_empty() {
+            warn!("CalibrationStartRecording: no source configured");
+            return false;
+        }
         let cache_base = crate::vc_calibration::user_cache_base_dir();
         let mut session = self.calibration.lock().await;
-        session.record_start(&cache_base, source_id).await
+        session.record_start(&cache_base, &source).await
     }
 
     #[zbus(name = "CalibrationStopRecording")]
@@ -1174,6 +1353,120 @@ impl VcInterface {
             .await
             .map(|p| p.display().to_string())
             .unwrap_or_default()
+    }
+
+    /// Render a pitch pre-scan round or a dynamics round through the last
+    /// recording, using the currently persisted RVC model + tuning
+    /// (`RvcConfig`) as the base to vary from. `request_json` (empty string
+    /// defaults to a first-pass dynamics round):
+    /// `{"round":"pitch","anchor":0.0,"refine":false}` —
+    /// `propose_pitch_variants`, dynamics held fixed at the persisted
+    /// tuning; or `{"round":"dynamics","pitch_offset":12.0,"refine_params":null}`
+    /// — `propose_variants`, pitch held fixed at `pitch_offset` (defaults to
+    /// the persisted `rvc.pitch_offset`, e.g. the pitch round's pick).
+    /// `refine_params` is the previously-chosen variant's params for a
+    /// narrower refine pass, `null`/omitted for a first-pass.
+    ///
+    /// Each round renders into its own subdirectory (`calibration/pitch/`,
+    /// `calibration/dynamics/`) rather than sharing one, since both rounds
+    /// reuse the same `A`/`B`/`C`... labels for their `variant_<label>.wav`
+    /// filenames — sharing a directory would let a dynamics-round render
+    /// silently overwrite a pitch-round result the user might still go
+    /// "back" to and re-listen to.
+    #[zbus(name = "CalibrationStartRender")]
+    async fn calibration_start_render(&self, request_json: &str) -> bool {
+        let request: CalibrationRenderRequest = if request_json.is_empty() {
+            CalibrationRenderRequest::default()
+        } else {
+            match serde_json::from_str(request_json) {
+                Ok(r) => r,
+                Err(e) => {
+                    warn!("CalibrationStartRender: invalid JSON: {e}");
+                    return false;
+                }
+            }
+        };
+
+        let cfg = load_vc_config(&self.settings_base_dir);
+        if cfg.rvc.model.is_empty() {
+            warn!("CalibrationStartRender: no RVC model selected");
+            return false;
+        }
+        let Some(model) = crate::vc_models::find_model(&self.settings_base_dir, &cfg.rvc.model)
+        else {
+            warn!(
+                "CalibrationStartRender: model {:?} not found",
+                cfg.rvc.model
+            );
+            return false;
+        };
+        let Some(onnx_path) = model.onnx_path.clone() else {
+            warn!(
+                "CalibrationStartRender: model {:?} has no exported .onnx \
+                 (run export_onnx.py on its .pth first)",
+                model.name
+            );
+            return false;
+        };
+        let vendor = crate::vc_onnxruntime_detect::detect_gpu_vendor();
+        let Some((dylib_path, _)) = crate::vc_onnxruntime_detect::find_onnxruntime_dylib(vendor)
+        else {
+            warn!("CalibrationStartRender: no onnxruntime library found");
+            return false;
+        };
+
+        let snapshot = cfg.rvc.model_params.get(&model.name);
+        let index_path = if cfg.rvc.params.index_rate > 0.0 {
+            crate::vc_models::find_index_path(&model.path)
+        } else {
+            None
+        };
+        let base_models_dir = crate::vc_base_models::base_models_dir(&self.settings_base_dir);
+        let cache_base = crate::vc_calibration::user_cache_base_dir();
+        let calib_dir = crate::vc_calibration::calibration_dir(&cache_base);
+
+        let (out_dir, variants): (
+            std::path::PathBuf,
+            Vec<crate::vc_calibration::RenderVariant>,
+        ) = match request {
+            CalibrationRenderRequest::Pitch { anchor, refine } => (
+                calib_dir.join("pitch"),
+                crate::vc_calibration::propose_pitch_variants(anchor, refine)
+                    .into_iter()
+                    .map(|(label, offset)| (label, cfg.rvc.params.clone(), offset))
+                    .collect(),
+            ),
+            CalibrationRenderRequest::Dynamics {
+                pitch_offset,
+                refine_params,
+            } => {
+                let pitch = pitch_offset.unwrap_or(cfg.rvc.pitch_offset);
+                (
+                    calib_dir.join("dynamics"),
+                    crate::vc_calibration::propose_variants(
+                        &cfg.rvc.params,
+                        refine_params.as_ref(),
+                    )
+                    .into_iter()
+                    .map(|(label, params)| (label, params, pitch))
+                    .collect(),
+                )
+            }
+        };
+
+        crate::vc_calibration::CalibrationSession::render_start(
+            Arc::clone(&self.calibration),
+            crate::vc_calibration::RenderModel {
+                path: onnx_path,
+                sample_rate_hint: snapshot.and_then(|s| s.sample_rate_override),
+                index_path,
+            },
+            base_models_dir,
+            dylib_path,
+            out_dir,
+            variants,
+        )
+        .await
     }
 
     #[zbus(name = "CalibrationGetStatus")]
@@ -1412,6 +1705,26 @@ pub async fn start_dbus_service(
                 SignalEvent::VCBaseModelComplete { json } => {
                     if let Err(e) = VcInterface::base_model_complete(&vc_emitter, &json).await {
                         error!("VCBaseModelComplete signal failed: {e}");
+                    }
+                }
+                SignalEvent::VCExportDepsProgress { message } => {
+                    if let Err(e) = VcInterface::export_deps_progress(&vc_emitter, &message).await {
+                        error!("VCExportDepsProgress signal failed: {e}");
+                    }
+                }
+                SignalEvent::VCExportDepsComplete { json } => {
+                    if let Err(e) = VcInterface::export_deps_complete(&vc_emitter, &json).await {
+                        error!("VCExportDepsComplete signal failed: {e}");
+                    }
+                }
+                SignalEvent::VCExportProgress { message } => {
+                    if let Err(e) = VcInterface::export_progress(&vc_emitter, &message).await {
+                        error!("VCExportProgress signal failed: {e}");
+                    }
+                }
+                SignalEvent::VCExportComplete { json } => {
+                    if let Err(e) = VcInterface::export_complete(&vc_emitter, &json).await {
+                        error!("VCExportComplete signal failed: {e}");
                     }
                 }
                 SignalEvent::DeviceConnected {

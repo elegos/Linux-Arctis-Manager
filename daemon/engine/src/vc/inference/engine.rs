@@ -272,6 +272,21 @@ impl SynthSession {
         self.t_audio
     }
 
+    /// The synthesizer's native output sample rate, read from the
+    /// `sample_rate` custom metadata key `export_onnx.py` stamps onto the
+    /// exported graph (see that script's `_stamp_sample_rate`). `None` for
+    /// an `.onnx` exported before that was added — the caller falls back to
+    /// a user-supplied value in that case (see `vc_calibration.rs`'s
+    /// `RenderModel::sample_rate_hint`).
+    pub fn native_sample_rate(&self) -> Option<u32> {
+        self.session
+            .metadata()
+            .ok()?
+            .custom("sample_rate")?
+            .parse()
+            .ok()
+    }
+
     /// `phone`: `[n_feat, 768]` row-major (ContentVec features). `pitch`:
     /// coarse F0 indices (0-255, port of `pipeline.py::_f0_to_coarse`).
     /// `pitchf`: F0 in Hz. `sid`: speaker id (0 for single-speaker models).

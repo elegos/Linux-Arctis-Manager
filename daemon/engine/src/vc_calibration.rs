@@ -5,26 +5,16 @@
 // `propose_variants`, and — since [E10-S6b] — render_start/_render, now that
 // the [E10-S6a] inference engine exists in Rust to run them through.
 //
-// `render_start`'s known open gap: the caller must supply the synthesizer's
-// native sample rate (`RenderModel::sample_rate`) explicitly — nothing in
-// this engine can derive it from a `.onnx` file today (unlike
-// `inter_channels`/`t_audio`, which `SynthSession::load` reads from the
-// model's own static input shapes). The Python reference reads it from the
-// original `.pth` checkpoint's `sr`/`config[-1]` field at load time, which
-// this Rust daemon has no path to (no PyTorch pickle reading here by
-// design). The clean fix — have `export_onnx.py` write it into the
-// exported `.onnx`'s `metadata_props` and read it back here via `ort`'s
-// `Session::metadata()` — is a real follow-up, not done here; existing
-// already-exported `.onnx` files wouldn't have it anyway without a
-// re-export. This same gap blocks the eventual live-chain D-Bus wiring too,
-// not just calibration.
+// The synthesizer's native sample rate (needed to construct `Pipeline`) is
+// auto-detected from the `.onnx`'s own metadata (`SynthSession::
+// native_sample_rate()`, stamped in by `export_onnx.py`'s
+// `_stamp_sample_rate`) — see `RenderModel::sample_rate_hint`'s doc comment
+// for the manual-entry fallback an `.onnx` exported before that existed
+// needs.
 //
-// `render_start`/`propose_pitch_variants`/`RenderModel` are not yet called
-// from `dbus.rs` — `CalibrationStartRender` still only exercises
-// record_start/record_stop today. D-Bus wiring (plus the not-yet-existing
-// persisted RVC settings — model selection, pitch, tuning — it would read
-// from) is tracked as the immediate next step, not done here.
-#![allow(dead_code)]
+// Wired from `dbus.rs`'s `CalibrationStartRender`, which picks a pitch
+// pre-scan round (`propose_pitch_variants`) vs. a dynamics round
+// (`propose_variants`) based on the request's `round` field.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -483,10 +473,14 @@ impl CalibrationSession {
 /// (resolved by the caller via `vc_onnxruntime_detect::find_onnxruntime_dylib`,
 /// same as `DetectOnnxRuntime` does).
 pub struct RenderModel {
+    /// The exported `.onnx` synthesizer (not the `.pth` checkpoint).
     pub path: PathBuf,
-    /// The synthesizer's native sample rate — see this module's header
-    /// comment for why the caller must supply this explicitly today.
-    pub sample_rate: u32,
+    /// Fallback native sample rate, used only when the `.onnx` has no
+    /// `sample_rate` metadata (exported before `export_onnx.py` started
+    /// stamping it) — see `SynthSession::native_sample_rate`. Normally
+    /// `None`; when the auto-detect also comes back empty and no hint was
+    /// supplied, rendering fails with a clear error rather than guessing.
+    pub sample_rate_hint: Option<u32>,
     pub index_path: Option<PathBuf>,
 }
 
@@ -554,6 +548,16 @@ fn render_blocking(
             .map_err(|e| format!("variant {label}: load RMVPE: {e}"))?;
         let synth = SynthSession::load(&model.path)
             .map_err(|e| format!("variant {label}: load synthesizer: {e}"))?;
+        let sample_rate = synth
+            .native_sample_rate()
+            .or(model.sample_rate_hint)
+            .ok_or_else(|| {
+                format!(
+                    "variant {label}: {} has no embedded sample rate (re-export with a newer \
+                 export_onnx.py, or set the model's sample rate manually once)",
+                    model.path.display()
+                )
+            })?;
         // Retrieval blend is a real, known performance problem for anything
         // but a tiny `.index` (brute-force k-NN over the full vector set —
         // see the [E10-S6a] retrieval.rs follow-up in CHANGELOG.md), so it's
@@ -571,14 +575,8 @@ fn render_blocking(
             None
         };
 
-        let mut pipeline = Pipeline::new(
-            hubert,
-            rmvpe,
-            synth,
-            model.sample_rate,
-            params.clone(),
-            retrieval,
-        );
+        let mut pipeline =
+            Pipeline::new(hubert, rmvpe, synth, sample_rate, params.clone(), retrieval);
 
         let mut out_all: Vec<f32> = Vec::new();
         let mut pos = 0usize;
@@ -898,7 +896,7 @@ mod tests {
             Arc::clone(&session),
             RenderModel {
                 path: PathBuf::from(&synth_path),
-                sample_rate: synth_sr,
+                sample_rate_hint: Some(synth_sr),
                 index_path: None,
             },
             base_models_dir,

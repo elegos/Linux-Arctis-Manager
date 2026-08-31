@@ -140,6 +140,10 @@ class DbusWrapper(QObject):
     sig_download_complete = Signal(bool, str, str)  # (success, message, model_name)
     sig_base_model_progress = Signal(str)
     sig_base_model_complete = Signal(bool, str)
+    sig_export_deps_progress = Signal(str)
+    sig_export_deps_complete = Signal(bool, str)
+    sig_export_progress = Signal(str)
+    sig_export_complete = Signal(bool, str, str)  # (success, message, model_name)
 
     logger = logging.getLogger('DbusWrapper')
 
@@ -291,6 +295,31 @@ class DbusWrapper(QObject):
                 except Exception:
                     self.sig_base_model_complete.emit(False, result_json)
 
+            def on_export_deps_progress(message: str) -> None:
+                self.sig_export_deps_progress.emit(message)
+
+            def on_export_deps_complete(result_json: str) -> None:
+                try:
+                    data = json.loads(result_json)
+                    self.sig_export_deps_complete.emit(
+                        data.get('success', False), data.get('message', ''))
+                except Exception:
+                    self.sig_export_deps_complete.emit(False, result_json)
+
+            def on_export_progress(message: str) -> None:
+                self.sig_export_progress.emit(message)
+
+            def on_export_complete(result_json: str) -> None:
+                try:
+                    data = json.loads(result_json)
+                    self.sig_export_complete.emit(
+                        data.get('success', False),
+                        data.get('message', ''),
+                        data.get('name', ''),
+                    )
+                except Exception:
+                    self.sig_export_complete.emit(False, result_json, '')
+
             # No InstallProgress/InstallComplete subscription: the v3 Rust
             # daemon has no runtime Python deps to install, so VcInterface
             # doesn't declare those signals — dbus_next raises AttributeError
@@ -301,6 +330,10 @@ class DbusWrapper(QObject):
             iface.on_download_complete(on_dl_complete)                   # type: ignore
             iface.on_base_model_progress(on_base_progress)               # type: ignore
             iface.on_base_model_complete(on_base_complete)               # type: ignore
+            iface.on_export_deps_progress(on_export_deps_progress)       # type: ignore
+            iface.on_export_deps_complete(on_export_deps_complete)       # type: ignore
+            iface.on_export_progress(on_export_progress)                 # type: ignore
+            iface.on_export_complete(on_export_complete)                 # type: ignore
 
             self._vc_signal_loop = asyncio.get_running_loop()
             self._stop_vc_signal_future = self._vc_signal_loop.create_future()
@@ -657,8 +690,12 @@ class DbusWrapper(QObject):
         Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async('CalibrationStopRecording', '', [], qt_signal))).start()
 
     @staticmethod
-    def calibration_start_render(refine_params: dict | None, qt_signal: SignalInstance) -> None:
-        payload = json.dumps(refine_params) if refine_params else ''
+    def calibration_start_render(request: dict | None, qt_signal: SignalInstance) -> None:
+        # `request` shape: {'round': 'pitch', 'anchor': float, 'refine': bool}
+        # or {'round': 'dynamics', 'pitch_offset': float, 'refine_params': dict | None}
+        # — see dbus.rs's CalibrationStartRender doc comment. `None`/`{}`
+        # defaults to a first-pass dynamics round daemon-side.
+        payload = json.dumps(request) if request else ''
         Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async('CalibrationStartRender', 's', [payload], qt_signal))).start()
 
     @staticmethod
@@ -709,6 +746,21 @@ class DbusWrapper(QObject):
     def download_base_models() -> None:
         Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async(
             'DownloadBaseModels', '', []))).start()
+
+    @staticmethod
+    def get_export_deps_status(qt_signal: SignalInstance) -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async(
+            'GetExportDepsStatus', '', [], qt_signal, is_json=True))).start()
+
+    @staticmethod
+    def install_export_deps() -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async(
+            'InstallExportDeps', '', []))).start()
+
+    @staticmethod
+    def ensure_model_exported(name: str, qt_signal: SignalInstance) -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async(
+            'EnsureModelExported', 's', [name], qt_signal, is_json=True))).start()
 
     @staticmethod
     async def _call_vc_async(member: str, signature: str, body: list,
