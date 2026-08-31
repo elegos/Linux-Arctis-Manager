@@ -114,9 +114,12 @@ flowchart LR
 
 **Per-user voice models** are community-trained `.pth` files from HuggingFace — there is no fixed catalogue to pre-convert, so conversion happens locally, once, the first time a model is used (mirroring how OpenVINO model conversion already worked in the Python reference's design). This is the **one Python piece that stays** (see [`voice-changing-feature.md`](voice-changing-feature.md#the-one-python-piece-that-stays-pth--onnx-conversion)) — an offline tool invoked per-model, not a daemon runtime dependency.
 
-### Static shapes, not dynamic axes
+### Static shapes, not dynamic axes — for the synthesizer only
 
-The windowing constants above are fixed by this application, not user-configurable, so every model is exported with **static input/output shapes** matching real usage exactly (`phone[1,52,768]`, `mel[1,128,65]`, …) rather than ONNX `dynamic_axes`. This sidesteps a real export failure found while prototyping: `synth_modules.py`'s `LayerNorm.forward` computes `F.layer_norm(x, x.shape[-1:], …)`, and when *any* dimension of the traced graph is marked dynamic, PyTorch's legacy TorchScript exporter treats `x.shape[-1]` as a non-constant traced value and rejects it (`SymbolicValueError: ... because it is not constant`). With a fully static graph, `x.shape[-1]` traces to a plain Python int and the export succeeds cleanly.
+> [!NOTE]
+> Correction from [E10-S6a]'s engine-loading work: inspecting the real published `rmvpe.onnx`/`content_vec_best.onnx` (via `onnx.load(..., load_external_data=False)`, no torch needed) shows both actually use **dynamic** axes (`mel[1,128,'frames']`, `wav[1,'samples']`) — the static-shape workaround below was only ever needed for the synthesizer's `LayerNorm`, not these two. `vc/inference/engine.rs`'s `RmvpeSession`/`ContentVecSession` take the frame/sample count as a runtime parameter accordingly (RMVPE also right-pads the frame axis to a multiple of 32 per mel-channel, matching `rmvpe.py::RMVPE.infer`'s own padding for the DeepUnet's 5 stride-2 encoder layers).
+
+The synthesizer's windowing constants are fixed by this application, not user-configurable, so *that* model is exported with **static input/output shapes** matching real usage exactly (`phone[1,52,768]`, …) rather than ONNX `dynamic_axes`. This sidesteps a real export failure found while prototyping: `synth_modules.py`'s `LayerNorm.forward` computes `F.layer_norm(x, x.shape[-1:], …)`, and when *any* dimension of the traced graph is marked dynamic, PyTorch's legacy TorchScript exporter treats `x.shape[-1]` as a non-constant traced value and rejects it (`SymbolicValueError: ... because it is not constant`). With a fully static graph, `x.shape[-1]` traces to a plain Python int and the export succeeds cleanly.
 
 ### The synthesizer's internal randomness
 
@@ -170,7 +173,7 @@ flowchart TB
     subgraph new["Target — [E10-S6a]"]
         direction TB
         PROV["vc/inference/providers.rs ✅\nExecution-provider selection\nCUDA / ROCm / OpenVINO / CPU"]
-        ENGINE["vc/inference/engine.rs\n3× ort::Session (ContentVec, RMVPE, Synth)\nowns the sliding-window state machine"]
+        ENGINE["vc/inference/engine.rs 🔶\nContentVec + RMVPE ort::Session loading\n+ inference, live-verified against real\nonnxruntime output — Synth session +\nstreaming state machine still to come"]
         DSP["vc_dsp.rs ✅\nported DSP glue: F0 post-processing,\nVTLN, SOLA, envelope gate, soft limiter,\nRMS mix — pure, unit-tested functions"]
         RETR["vc/inference/retrieval.rs ✅\nbrute-force weighted k-NN\nover the model's .index vectors\n(hand-parsed IndexIVFFlat format)"]
         MEL["vc/inference/mel.rs ✅\nnative mel-spectrogram (rustfft/realfft)\n+ computed filterbank, checked against\ntorchaudio's real source"]
