@@ -87,7 +87,7 @@ This keeps the checklist honest and makes blocked work immediately visible witho
   - [ ] [E7-S3] Arctis Nova Pro (wired)
   - [ ] [E7-S4] Arctis Nova 5 and Nova Elite
   - [ ] [E7-S5] Arctis 7+ family
-  - [ ] [E7-S6] Bootloader and upgrade PID registration
+  - [x] [E7-S6] Bootloader and upgrade PID registration
   - [ ] [E7-S7] Device compatibility matrix
 - [ ] **[E8] OLED display** *(stretch)*
   - [ ] [E8-S1] `draw_bitmap` API
@@ -337,8 +337,8 @@ Extend coverage to all Arctis headset families present in the official spec, sta
 - **[E7-S5] Arctis 7+ family**
   Translate the existing `arctis_7_plus.yaml` and verify against the spec files for the 7+ and its variants.
 
-- **[E7-S6] Bootloader and upgrade PID registration**
-  Ensure every device file registers its bootloader PID(s). Implement the engine-side logic that detects a bootloader PID, marks the device as `firmware_update_mode`, suppresses D-Bus settings exposure, and emits a `DeviceFirmwareUpdateMode` signal.
+- **[E7-S6] Bootloader and upgrade PID registration** — Done. `nova_pro_wireless.yaml`'s two variants now carry `bootloader_pid` (`0x12E0` → `0x12E1`, `0x12E5` → `0x12E7`, from the real spec). Engine-side: new `find_bootloader_variant` (`engine/src/main.rs`) checked at both the startup device scan and the runtime hotplug-add path, before the normal `find_config` PID match; a hit skips `device_init`/`DeviceEntry` registration entirely (so it's automatically absent from `GetStatus`/`GetSettings`, no separate suppression logic needed) and sends a new `DeviceFirmwareUpdateMode` signal (`Status` D-Bus interface) instead. Unit-tested (`engine/src/main.rs`'s `tests` module).
+  > Not done here: the Xbox White variant (`0x225D`, its bootloader PID `0x225F` confirmed in the same spec) is missing from `nova_pro_wireless.yaml` entirely — a pre-existing gap unrelated to this story, since v2.4.1 shipped 225D support. Left for whoever picks that variant back up.
 
 - **[E7-S7] Device compatibility matrix**
   Maintain `docs/device_support.md` with a table listing all supported devices, their PID(s), supported capabilities, and known gaps. Auto-generate the table from the YAML files as part of the CI build.

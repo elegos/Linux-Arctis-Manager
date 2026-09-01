@@ -67,6 +67,15 @@ pub enum SignalEvent {
     DeviceDisconnected {
         pid: u16,
     },
+    /// A device re-enumerated on its `bootloader_pid` (firmware update mode,
+    /// see `docs/ARCHITECTURE.md`'s "Firmware and Bootloader PIDs" section).
+    /// The engine does not run `device_init` or register a `DeviceEntry` for
+    /// it, so no settings are exposed on D-Bus; this signal is the only
+    /// visible trace, meant to let the GUI warn the user not to unplug it.
+    DeviceFirmwareUpdateMode {
+        pid: u16,
+        name: String,
+    },
     NCChanged {
         json: String,
     },
