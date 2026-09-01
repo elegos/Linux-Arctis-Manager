@@ -15,6 +15,10 @@ wheels/
 # Rust build artifacts
 daemon/target/
 
+# Decoded proprietary SteelSeries device specs (reverse-engineering source material)
+decoded-device-specifications.tar.gz
+decoded-device-specifications/
+
 # Generated packaging scripts (produced by make generate-gui-wrapper)
 packaging/scripts/lam-gui
 packaging/systemd/user/lam-hidraw-helper.service

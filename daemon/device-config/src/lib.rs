@@ -827,4 +827,34 @@ mod nova_yaml_tests {
         assert!(variants.iter().any(|v| v.product_id == 0x12E0));
         assert_eq!(device.vendor_id, Some(0x1038));
     }
+
+    /// Regression guard: every device file (anything not starting with
+    /// `base_`) in `device-configs/` must parse without error. Catches DSL
+    /// typos/schema mistakes in new device conversions without needing a
+    /// dedicated test per device.
+    #[test]
+    fn every_device_config_parses() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("device-configs");
+        if !dir.exists() {
+            return; // skip when not present (CI without device-configs)
+        }
+        let mut checked = 0;
+        for entry in std::fs::read_dir(&dir).expect("read device-configs dir") {
+            let path = entry.expect("dir entry").path();
+            let is_base = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("base_"));
+            if is_base || path.extension().and_then(|e| e.to_str()) != Some("yaml") {
+                continue;
+            }
+            load(&path, &[dir.as_path()])
+                .unwrap_or_else(|e| panic!("{} failed to parse: {e}", path.display()));
+            checked += 1;
+        }
+        assert!(checked > 0, "expected at least one device config to check");
+    }
 }

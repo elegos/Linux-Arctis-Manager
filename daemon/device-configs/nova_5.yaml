@@ -1,0 +1,49 @@
+extends: base_arctis_nova_5
+
+device:
+  name: "SteelSeries Arctis Nova 5 Wireless"
+  vendor_id: 0x1038
+
+  # NOTE ON command_interface/sync_interface: the vendor spec only declares a
+  # sync (listen) interface (5, usage-page 0xFF00) — it never states which
+  # interface accepts command writes, because on Windows the SDK's HIDIO
+  # abstraction picks a pipe automatically and falls back to a control
+  # transfer (endpoint 0) when the target interface has no interrupt OUT
+  # endpoint. v2 (validated on real hardware via PyUSB, which bypasses the
+  # kernel HID driver and had to do that endpoint-0 fallback by hand) found
+  # writes go to interface 3. v3 goes through /dev/hidraw*, where the kernel's
+  # own HID core already performs that same interrupt-OUT-vs-control-transfer
+  # fallback transparently on write() — so plumbing this to interface 3 should
+  # just work without any device-specific fallback logic. Still, interface 3
+  # cannot be derived from this spec file (it has no endpoint/interface
+  # numbers, only usage-page/usage) — it comes from v2's empirical finding and
+  # wants confirming against real hardware (`lam-cli tools arctis-devices`)
+  # before this ships. sync_interface is taken as declared (5); v2 also
+  # listened on 3 defensively, but nothing in the spec suggests it pushes
+  # unsolicited data.
+  variants:
+    - product_id: 0x2232
+      name: "Arctis Nova 5"
+      bootloader_pid: 0x2233
+    - product_id: 0x2253
+      name: "Arctis Nova 5X"
+      bootloader_pid: 0x2254
+    - product_id: 0x2264
+      name: "Arctis Nova 5X (white)"
+      bootloader_pid: 0x2265
+
+  hid:
+    usage_page: 0xFFC0
+    usage: 0x0001
+    command_interface:
+      interface: 3
+    sync_interface:
+      interface: 5
+      usage_page: 0xFF00
+      usage: 0x0001
+
+  capabilities:
+    - battery
+    - chatmix
+    - microphone
+    - wireless
