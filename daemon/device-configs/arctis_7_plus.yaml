@@ -1,0 +1,98 @@
+extends: base_arctis_7_plus
+
+# Full capability tier: chatmix (hardware dial on the base station) + sidetone.
+# Shared by the standard SKU and the Destiny 2 cosmetic skin — identical
+# protocol, confirmed against the raw spec (only fw_update PID/name differ).
+
+structs:
+  sidetone:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x39}
+    - name: level
+      type: uint8
+      range: [0, 3]
+      values_mapping: {"0": "off", "1": "low", "2": "medium", "3": "high"}
+
+  headset_status:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: command,   type: uint8, constant: 0xB0}
+    incoming:
+      - {name: report_id,          type: uint8, constant: 0x00}
+      - {name: command,            type: uint8, constant: 0xB0}
+      - {name: connection_status,  type: uint8, range: [0, 3]}
+      - {name: battery_level,      type: uint8, range: [0, 5]}
+      - {name: charging_status,    type: uint8, range: [0, 3]}
+      - {name: game_chatmix_level, type: uint8, range: [0, 100]}
+      - {name: chat_chatmix_level, type: uint8, range: [0, 100]}
+
+apis:
+  sidetone:
+    write: {transport: HID_IO, chunk_size: 65}
+  headset_status:
+    read: {transport: HID_IO, chunk_size: 65}
+
+sync_events:
+  0x45:
+    emit: chatmix_changed
+    fields:
+      - {name: game_attenuation, byte: 2}
+      - {name: chat_attenuation, byte: 3}
+
+  0xB7:
+    emit: battery_changed
+    fields:
+      - {name: battery_level, byte: 2, transform: battery_level_to_percent, display_type: percentage}
+
+  0xB9:
+    emit: connection_changed
+    fields:
+      - {name: connection_status, byte: 2, transform: connection_status_to_label}
+
+  0xBB:
+    emit: charging_changed
+    fields:
+      - {name: charging_status, byte: 2, transform: charging_status_to_label}
+
+sync_read:
+  - struct: headset_status
+    maps:
+      - {emit: connection_changed, field: connection_status, transform: connection_status_to_label}
+      - {emit: battery_changed,    field: battery_level,      transform: battery_level_to_percent, display_type: percentage}
+      - {emit: charging_changed,   field: charging_status,    transform: charging_status_to_label}
+      - emit: chatmix_changed
+        fields: [game_chatmix_level, chat_chatmix_level]
+
+device:
+  name: "SteelSeries Arctis 7+"
+  vendor_id: 0x1038
+
+  # NOTE ON command_interface/sync_interface: same situation as Nova 5 — the
+  # vendor spec only declares a sync interface (5, usage-page 0xFF00), never
+  # a command interface number. v2 (real hardware, PyUSB) found writes need
+  # `[0, 3]` (endpoint-0/control-transfer trick, target interface 3) *and*
+  # only ever listened on interface 3 — not 5 as the spec's sync-interface
+  # declares. Trusting v2 fully here (command AND sync both on 3) rather than
+  # the spec's "5", since on this family the two sources disagree even on
+  # which interface pushes events. Wants confirming on real hardware.
+  variants:
+    - product_id: 0x220E
+      name: "Arctis 7+"
+      bootloader_pid: 0x220F
+    - product_id: 0x2236
+      name: "Arctis 7+ Destiny 2"
+      bootloader_pid: 0x2237
+
+  hid:
+    usage_page: 0xFFC0
+    usage: 0x0001
+    command_interface:
+      interface: 3
+    sync_interface:
+      interface: 3
+
+  capabilities:
+    - battery
+    - chatmix
+    - custom_eq
+    - microphone

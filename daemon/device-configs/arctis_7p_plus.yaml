@@ -1,0 +1,69 @@
+extends: base_arctis_7_plus
+
+# PlayStation capability tier: NO hardware chatmix (same reasoning as the
+# Xbox tier) AND NO sidetone at all — the `sidetone` struct/API is entirely
+# absent from this SKU's raw spec, not just its sync path. Genuinely fewer
+# hardware features, not just an OS-integration difference.
+
+structs:
+  headset_status:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: command,   type: uint8, constant: 0xB0}
+    incoming:
+      - {name: report_id,         type: uint8, constant: 0x00}
+      - {name: command,           type: uint8, constant: 0xB0}
+      - {name: connection_status, type: uint8, range: [0, 3]}
+      - {name: battery_level,     type: uint8, range: [0, 5]}
+      - {name: charging_status,   type: uint8, range: [0, 3]}
+
+apis:
+  headset_status:
+    read: {transport: HID_IO, chunk_size: 65}
+
+sync_events:
+  0xB7:
+    emit: battery_changed
+    fields:
+      - {name: battery_level, byte: 2, transform: battery_level_to_percent, display_type: percentage}
+
+  0xB9:
+    emit: connection_changed
+    fields:
+      - {name: connection_status, byte: 2, transform: connection_status_to_label}
+
+  0xBB:
+    emit: charging_changed
+    fields:
+      - {name: charging_status, byte: 2, transform: charging_status_to_label}
+
+sync_read:
+  - struct: headset_status
+    maps:
+      - {emit: connection_changed, field: connection_status, transform: connection_status_to_label}
+      - {emit: battery_changed,    field: battery_level,      transform: battery_level_to_percent, display_type: percentage}
+      - {emit: charging_changed,   field: charging_status,    transform: charging_status_to_label}
+
+device:
+  name: "SteelSeries Arctis 7P+"
+  vendor_id: 0x1038
+
+  # See arctis_7_plus.yaml for the command_interface/sync_interface note —
+  # same family, same v2-vs-spec interface discrepancy.
+  variants:
+    - product_id: 0x2212
+      name: "Arctis 7P+"
+      bootloader_pid: 0x2213
+
+  hid:
+    usage_page: 0xFFC0
+    usage: 0x0001
+    command_interface:
+      interface: 3
+    sync_interface:
+      interface: 3
+
+  capabilities:
+    - battery
+    - custom_eq
+    - microphone

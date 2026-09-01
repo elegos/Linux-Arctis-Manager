@@ -62,6 +62,41 @@ pub fn power_timer_write_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
     dim_timer_write_payload(bytes)
 }
 
+/// Converts 10 IEEE 754 little-endian float32 gain values (in dB) into 10 uint8
+/// firmware values for the Arctis 7+ family: `firmware_val = clamp(round(2 ×
+/// (12 + gain_dB)), 0, 48) as u8` (±12 dB range in 0.5 dB steps, vs. the Nova
+/// Pro family's ±10 dB — see [`gains_to_firmware_values`]). A third device
+/// with yet another offset/clamp pair should prompt generalising this instead
+/// of adding a fourth near-identical function.
+///
+/// Input: 40 bytes (10 × f32 LE). Output: 10 bytes, one per EQ band.
+pub fn gains_to_firmware_values_7plus(bytes: &[u8]) -> Vec<u8> {
+    bytes
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| {
+            let db = f32::from_le_bytes(*c);
+            ((2.0_f32 * (12.0_f32 + db)).round() as i32).clamp(0, 48) as u8
+        })
+        .collect()
+}
+
+/// Full-payload transform for the Arctis 7+ `eq` write: passes `report_id`
+/// and `command` through unchanged, then converts 10 × float32 gains
+/// (bytes 2–41) to 10 × uint8 firmware values using
+/// [`gains_to_firmware_values_7plus`].
+pub fn eq_gains_7plus_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
+    if bytes.len() < 2 {
+        return vec![bytes.to_vec()];
+    }
+    let mut out = Vec::with_capacity(12);
+    out.push(bytes[0]);
+    out.push(bytes[1]);
+    out.extend_from_slice(&gains_to_firmware_values_7plus(&bytes[2..]));
+    vec![out]
+}
+
 /// Full-payload transform for `muted_mic_brightness` write (Arctis Nova 5 family).
 /// Converts byte 2 from a user-facing level (0–3) to the firmware brightness
 /// value (0, 1, 4, 10).  Unknown levels map to 4 (medium), matching firmware
@@ -407,6 +442,47 @@ mod tests {
             let result = power_timer_write_payload(&input);
             assert_eq!(result[0][2], expected_enum);
         }
+    }
+
+    // ── gains_to_firmware_values_7plus / eq_gains_7plus_payload ─────────────────
+
+    #[test]
+    fn gains_to_firmware_values_7plus_known_values() {
+        // 0 dB → 24, -12 dB → 0, +12 dB → 48
+        let db: [f32; 10] = [0.0, -12.0, 12.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let mut input = Vec::with_capacity(40);
+        for &v in &db {
+            input.extend_from_slice(&v.to_le_bytes());
+        }
+        let out = gains_to_firmware_values_7plus(&input);
+        assert_eq!(out[0], 24);
+        assert_eq!(out[1], 0);
+        assert_eq!(out[2], 48);
+    }
+
+    #[test]
+    fn gains_to_firmware_values_7plus_clamps_out_of_range() {
+        let db: [f32; 10] = [-100.0, 100.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let mut input = Vec::with_capacity(40);
+        for &v in &db {
+            input.extend_from_slice(&v.to_le_bytes());
+        }
+        let out = gains_to_firmware_values_7plus(&input);
+        assert_eq!(out[0], 0);
+        assert_eq!(out[1], 48);
+    }
+
+    #[test]
+    fn eq_gains_7plus_payload_preserves_header_and_converts_gains() {
+        let db = [0.0_f32; 10];
+        let mut input = vec![0x00u8, 0x33];
+        for &v in &db {
+            input.extend_from_slice(&v.to_le_bytes());
+        }
+        let result = eq_gains_7plus_payload(&input);
+        assert_eq!(result[0][0], 0x00);
+        assert_eq!(result[0][1], 0x33);
+        assert_eq!(&result[0][2..], &[24u8; 10]);
     }
 
     // ── muted_mic_brightness_write_payload ─────────────────────────────────────
