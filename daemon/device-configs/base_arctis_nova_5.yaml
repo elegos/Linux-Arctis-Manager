@@ -157,7 +157,7 @@ sync_events:
   0x27:
     emit: volume_limiter_changed
     fields:
-      - {name: enabled, byte: 2, display_type: on_off}
+      - {name: volume_limiter, byte: 2, display_type: on_off}
 
   0x37:
     emit: mic_volume_changed
@@ -172,23 +172,23 @@ sync_events:
   0x45:
     emit: chatmix_changed
     fields:
-      - {name: game_attenuation, byte: 2}
-      - {name: chat_attenuation, byte: 3}
+      - {name: game_chatmix_level, byte: 2}
+      - {name: chat_chatmix_level, byte: 3}
 
   0xA3:
     emit: power_inactivity_timer_changed
     fields:
-      - {name: minutes, byte: 2}
+      - {name: power_inactivity_timer, byte: 2}
 
   0xAE:
     emit: muted_mic_brightness_changed
     fields:
-      - {name: level, byte: 2, transform: mic_mute_brightness_to_level}
+      - {name: muted_mic_brightness, byte: 2, transform: mic_mute_brightness_to_level}
 
   0xB7:
     emit: battery_changed
     fields:
-      - {name: battery_percent, byte: 2, display_type: percentage}
+      - {name: battery_status, byte: 2, display_type: percentage}
 
   0xB9:
     emit: connection_changed
