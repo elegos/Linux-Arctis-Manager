@@ -400,13 +400,17 @@ impl DeviceSession {
 fn make_api_executor(config: &DeviceConfig) -> ApiExecutor<'_> {
     use device_config::builtins::{
         custom_eq_gains_payload, dim_timer_write_payload, high_gain_write_payload,
-        power_timer_write_payload,
+        muted_mic_brightness_write_payload, power_timer_write_payload,
     };
     let mut exec = ApiExecutor::new(config);
     exec.register_builtin("builtin:custom_eq_gains", custom_eq_gains_payload);
     exec.register_builtin("builtin:high_gain_write", high_gain_write_payload);
     exec.register_builtin("builtin:dim_timer_write", dim_timer_write_payload);
     exec.register_builtin("builtin:power_timer_write", power_timer_write_payload);
+    exec.register_builtin(
+        "builtin:muted_mic_brightness_write",
+        muted_mic_brightness_write_payload,
+    );
     exec
 }
 
