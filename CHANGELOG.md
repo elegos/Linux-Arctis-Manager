@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The GUI's automatic service restart on a version mismatch now restarts the actual installed `lam-daemon`/`lam-hidraw-helper` systemd units instead of authoring and restarting a stale, differently-named unit left over from v2.
 - Noise Cancellation no longer swallows quiet consonants (nasals, word-final sounds).
 - EQ preset/gain changes no longer interrupt other apps' playback or leak PipeWire modules over a session.
 - Settings with many options no longer overflow the window (now a dropdown instead of a button row); sliders no longer stutter while dragging.
