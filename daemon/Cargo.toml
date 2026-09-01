@@ -34,8 +34,11 @@ nix = { version = "0.30", features = ["user", "socket", "uio", "ioctl", "fs"] }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 serde_json = "1"
-# HTTP client (HuggingFace Hub API, base RVC model downloads — added in E10-S3)
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+# HTTP client (HuggingFace Hub API, base RVC model downloads — added in E10-S3).
+# 0.13's default rustls crypto provider is aws-lc-rs, not ring — ring 0.17.14
+# fails to link on Arch's current toolchain (undefined ring_core_* symbols);
+# needs cmake at build time as a result (see packaging *depends*).
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 # checksums (base RVC model download verification — added in E10-S3)
 sha2 = "0.10"
 # zip archive extraction (RVC WebUI .pth+.index bundles — added in E10-S3);
