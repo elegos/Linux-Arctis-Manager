@@ -214,6 +214,37 @@ impl SettingsInterface {
         sent
     }
 
+    /// Fires a one-shot command api (`action: true` in the device YAML,
+    /// e.g. Arctis 7+'s `pairing_mode`, Nova Elite/Nova Pro Omni/Nova 7
+    /// Gen2's `restore_factory_default`) — unlike `SetSetting`, nothing is
+    /// persisted to disk or reflected back into `status`/`SettingsChanged`,
+    /// since an action has no state to remember or restore on the next
+    /// connect. `args_json` is a JSON object of non-constant field
+    /// overrides (`{}`/empty string for an action that takes none, e.g.
+    /// `{"mode": 1}` for `pairing_mode`). Returns `false` if no device is
+    /// connected, `action_name` isn't a known action, or `args_json` is
+    /// malformed.
+    async fn trigger_action(&self, action_name: &str, args_json: &str) -> bool {
+        let (cmd_tx, values) = {
+            let state = self.state.lock().await;
+            let Some(entry) = state.devices.values().find(|e| !e.status.is_empty()) else {
+                return false;
+            };
+            let Some(values) = resolve_action_write(&entry.config, action_name, args_json) else {
+                warn!("TriggerAction: '{action_name}' is not a known action, or args_json is malformed");
+                return false;
+            };
+            (entry.cmd_tx.clone(), values)
+        };
+        cmd_tx
+            .send(DeviceCommand::WriteApi {
+                api_name: action_name.to_string(),
+                values,
+            })
+            .await
+            .is_ok()
+    }
+
     async fn get_version(&self) -> String {
         env!("LAM_VERSION").to_string()
     }
@@ -2176,7 +2207,10 @@ pub(crate) fn build_settings_json(state: &AppState) -> String {
     let config_map = result["settings_config"].as_object_mut().unwrap();
 
     for (api_name, api_def) in apis {
-        if api_def.write.is_none() {
+        // Action apis are one-shot commands, not persisted settings — they
+        // must not gain a schema entry here (that would render them as an
+        // ordinary settings-widget field in the GUI).
+        if api_def.write.is_none() || api_def.action {
             continue;
         }
         let Some(struct_def) = structs.get(api_name.as_str()) else {
@@ -2353,7 +2387,11 @@ pub(crate) fn find_api_for_field(config: &DeviceConfig, field_name: &str) -> Opt
     let structs = config.structs.as_ref()?;
 
     for (api_name, api_def) in apis {
-        if api_def.write.is_none() {
+        // Action apis (`action: true`) are one-shot commands, not persisted
+        // settings — dispatched only via `TriggerAction`, never discoverable
+        // through `SetSetting` even if they happen to have a non-constant
+        // field (e.g. `pairing_mode`'s `mode`).
+        if api_def.write.is_none() || api_def.action {
             continue;
         }
         let Some(struct_def) = structs.get(api_name.as_str()) else {
@@ -2492,6 +2530,48 @@ pub(crate) fn build_write_values_with_defaults(
         partial.insert(fdef.name.clone(), default_fv);
     }
     partial
+}
+
+/// Resolve a `TriggerAction` D-Bus call into the `values` map to send as a
+/// `DeviceCommand::WriteApi{api_name: action_name, ..}`, or `None` if
+/// `action_name` doesn't name a real fire-and-forget action (unknown api, no
+/// write side, or an ordinary value-bearing setting not marked
+/// `action: true` — `TriggerAction` must never become a second, unchecked
+/// path to write any struct).
+///
+/// `args_json` is a JSON object of non-constant field overrides (e.g.
+/// `{"mode": 1}` for Arctis 7+'s `pairing_mode`); an empty string is treated
+/// as `{}` — most actions (e.g. `restore_factory_default`) take none at all.
+/// Fields absent from `args_json` default to their range minimum, same as
+/// `build_write_values_with_defaults`.
+pub(crate) fn resolve_action_write(
+    config: &DeviceConfig,
+    action_name: &str,
+    args_json: &str,
+) -> Option<HashMap<String, FieldValue>> {
+    let apis = config.apis.as_ref()?;
+    let api_def = apis.get(action_name)?;
+    if !api_def.action || api_def.write.is_none() {
+        return None;
+    }
+
+    let args: Map<String, JsonValue> = if args_json.is_empty() {
+        Map::new()
+    } else {
+        serde_json::from_str(args_json).ok()?
+    };
+
+    let mut partial = HashMap::new();
+    for (field, value) in &args {
+        let fv = parse_setting_value(config, action_name, field, &value.to_string())?;
+        partial.insert(field.clone(), fv);
+    }
+
+    Some(build_write_values_with_defaults(
+        config,
+        action_name,
+        partial,
+    ))
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -2691,6 +2771,7 @@ mod tests {
                     chunk_size: 64,
                     payload_transform: None,
                 })),
+                action: false,
             },
         );
         let config = DeviceConfig {
@@ -2704,6 +2785,164 @@ mod tests {
             Some("set_vol".to_string())
         );
         assert_eq!(find_api_for_field(&config, "nonexistent"), None);
+    }
+
+    /// Builds a `DeviceConfig` shaped like Arctis 7+'s `pairing_mode`: a
+    /// one-shot action with two constant fields and one non-constant
+    /// `mode` field (`[0, 1]`), registered under an api of the same name
+    /// with `action: true`. Shared by the `find_api_for_field`/
+    /// `resolve_action_write` tests below.
+    fn pairing_mode_config() -> DeviceConfig {
+        let make_field =
+            |name: &str,
+             constant: Option<serde_yaml::Value>,
+             range: Option<Vec<serde_yaml::Value>>| FieldDef {
+                name: name.to_string(),
+                field_type: FieldType::Uint8,
+                constant,
+                range,
+                values: None,
+                values_mapping: None,
+                repeat: None,
+                size: None,
+            };
+
+        let mut structs = HashMap::new();
+        structs.insert(
+            "pairing_mode".to_string(),
+            StructDef::Flat(vec![
+                FieldOrRef::Field(make_field("report_id", Some(0.into()), None)),
+                FieldOrRef::Field(make_field("command", Some(3.into()), None)),
+                FieldOrRef::Field(make_field("mode", None, Some(vec![0.into(), 1.into()]))),
+            ]),
+        );
+
+        let mut apis = HashMap::new();
+        apis.insert(
+            "pairing_mode".to_string(),
+            ApiDef {
+                read: None,
+                write: Some(WriteApi::Single(ApiOp {
+                    transport: Transport::HidIo,
+                    chunk_size: 65,
+                    payload_transform: None,
+                })),
+                action: true,
+            },
+        );
+
+        DeviceConfig {
+            structs: Some(structs),
+            apis: Some(apis),
+            ..DeviceConfig::default()
+        }
+    }
+
+    /// Builds a `DeviceConfig` shaped like Nova Elite's
+    /// `restore_factory_default`: a one-shot action with only constant
+    /// fields, no arguments at all.
+    fn restore_factory_default_config() -> DeviceConfig {
+        let make_field = |name: &str, constant: serde_yaml::Value| FieldDef {
+            name: name.to_string(),
+            field_type: FieldType::Uint8,
+            constant: Some(constant),
+            range: None,
+            values: None,
+            values_mapping: None,
+            repeat: None,
+            size: None,
+        };
+
+        let mut structs = HashMap::new();
+        structs.insert(
+            "restore_factory_default".to_string(),
+            StructDef::Flat(vec![
+                FieldOrRef::Field(make_field("report_id", 1.into())),
+                FieldOrRef::Field(make_field("command", 0xFD.into())),
+            ]),
+        );
+
+        let mut apis = HashMap::new();
+        apis.insert(
+            "restore_factory_default".to_string(),
+            ApiDef {
+                read: None,
+                write: Some(WriteApi::Single(ApiOp {
+                    transport: Transport::HidIo,
+                    chunk_size: 64,
+                    payload_transform: None,
+                })),
+                action: true,
+            },
+        );
+
+        DeviceConfig {
+            structs: Some(structs),
+            apis: Some(apis),
+            ..DeviceConfig::default()
+        }
+    }
+
+    #[test]
+    fn find_api_for_field_skips_action_apis() {
+        let config = pairing_mode_config();
+        // `mode` is a real non-constant field, but its api is marked
+        // `action: true` — must never be reachable via the ordinary
+        // SetSetting field-lookup path, only via TriggerAction.
+        assert_eq!(find_api_for_field(&config, "mode"), None);
+    }
+
+    #[test]
+    fn resolve_action_write_no_args_action() {
+        let config = restore_factory_default_config();
+        let values = resolve_action_write(&config, "restore_factory_default", "").unwrap();
+        // Both fields are constants — nothing to send in the values map.
+        assert!(values.is_empty());
+    }
+
+    #[test]
+    fn resolve_action_write_with_arg() {
+        let config = pairing_mode_config();
+        let values = resolve_action_write(&config, "pairing_mode", r#"{"mode": 1}"#).unwrap();
+        assert_eq!(values.get("mode"), Some(&FieldValue::U8(1)));
+    }
+
+    #[test]
+    fn resolve_action_write_defaults_missing_arg() {
+        let config = pairing_mode_config();
+        let values = resolve_action_write(&config, "pairing_mode", "").unwrap();
+        // `mode` defaults to its range minimum (0) when not supplied.
+        assert_eq!(values.get("mode"), Some(&FieldValue::U8(0)));
+    }
+
+    #[test]
+    fn resolve_action_write_rejects_non_action_api() {
+        let mut config = pairing_mode_config();
+        // Same api, but not marked as an action: TriggerAction must refuse
+        // it rather than becoming a second, unchecked write path.
+        config
+            .apis
+            .as_mut()
+            .unwrap()
+            .get_mut("pairing_mode")
+            .unwrap()
+            .action = false;
+        assert_eq!(resolve_action_write(&config, "pairing_mode", ""), None);
+    }
+
+    #[test]
+    fn resolve_action_write_rejects_unknown_action() {
+        let config = pairing_mode_config();
+        assert_eq!(resolve_action_write(&config, "nonexistent", ""), None);
+    }
+
+    #[test]
+    fn resolve_action_write_rejects_malformed_args() {
+        let config = pairing_mode_config();
+        assert_eq!(
+            resolve_action_write(&config, "pairing_mode", "not json"),
+            None
+        );
     }
 
     #[test]

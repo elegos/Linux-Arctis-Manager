@@ -178,6 +178,15 @@ pub struct ApiDef {
     pub read: Option<ApiOp>,
     #[serde(default)]
     pub write: Option<WriteApi>,
+    /// Marks this API as a one-shot fire-and-forget command (e.g. trigger
+    /// RF/BT pairing, restore factory defaults) rather than a value-bearing
+    /// setting. The engine itself dispatches an action's write exactly like
+    /// any other `WriteApi` — this flag only matters to the D-Bus layer,
+    /// which must never treat an action's non-constant fields (if any) as a
+    /// persisted setting discoverable via `SetSetting`, and instead exposes
+    /// actions through the dedicated `TriggerAction` method.
+    #[serde(default)]
+    pub action: bool,
 }
 
 // ── Transform types ───────────────────────────────────────────────────────────

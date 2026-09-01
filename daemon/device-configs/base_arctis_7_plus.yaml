@@ -63,12 +63,9 @@ structs:
     - {name: report_id, type: uint8, constant: 0x00}
     - {name: command,   type: uint8, constant: 0x09}
 
-  # TODO(action-commands): one-shot RF/BT pairing trigger, found in the spec
-  # but not wired to anything — the DSL has no "fire and forget action"
-  # primitive yet (everything is either a value-bearing setting or an
-  # internal lifecycle call), so exposing this on D-Bus needs its own design
-  # pass. Declared here so the struct/API exist and can be dispatched
-  # manually once that lands; see the v3 backlog.
+  # One-shot RF/BT pairing trigger — an action, not a persisted setting.
+  # Exposed via the `TriggerAction` D-Bus method ([E7-S9]), e.g.
+  # `TriggerAction("pairing_mode", "{\"mode\": 1}")` to enter pairing mode.
   pairing_mode:
     - {name: report_id, type: uint8, constant: 0x00}
     - {name: command,   type: uint8, constant: 0x03}
@@ -94,6 +91,7 @@ apis:
     write: {transport: HID_IO, chunk_size: 65}
 
   pairing_mode:
+    action: true
     write: {transport: HID_IO, chunk_size: 65}
 
 lifecycle:
