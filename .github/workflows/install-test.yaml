@@ -181,6 +181,23 @@ jobs:
               ;;
           esac
 
+      # Temporary: CachyOS's install-test has SIGILL'd on lam-daemon startup
+      # on the GH-hosted runner three times in a row, but the identical
+      # build+install flow (real makepkg + pacman -U, same package) runs
+      # clean locally on a CPU with full x86-64-v3 support — so this isn't
+      # reproducible off-runner. Capture the runner's actual CPU flags and a
+      # real gdb backtrace here so the next failure has a root cause instead
+      # of another guess. Remove once the cause is confirmed and fixed.
+      - name: Diagnose CachyOS SIGILL (temporary)
+        if: matrix.slug == 'cachyos'
+        run: |
+          set -x
+          grep -m1 flags /proc/cpuinfo | tr ' ' '\n' | grep -E '^(avx|avx2|avx512f|bmi1|bmi2|fma|f16c|lzcnt|movbe|abm|sse4_2)$' || true
+          pacman -Sy --noconfirm --needed gdb
+          ulimit -c unlimited
+          gdb -batch -ex run -ex bt -ex "info registers" -ex "x/8i \$pc" --args /usr/bin/lam-daemon --log-level=error || true
+        continue-on-error: true
+
       - name: Install test
         run: |
           chmod +x tests/install-test.sh
