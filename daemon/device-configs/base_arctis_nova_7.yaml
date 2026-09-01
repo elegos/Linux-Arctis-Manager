@@ -1,0 +1,121 @@
+transforms:
+  connection_status_to_label:
+    type: case_int_to_str
+    default: UNKNOWN
+    values: {0: NOT_PAIRED_NOT_SEARCHING, 1: NOT_PAIRED_SEARCHING, 2: PAIRED_NOT_CONNECTED, 3: PAIRED_CONNECTED}
+
+  charging_status_to_label:
+    type: case_int_to_str
+    default: UNKNOWN
+    values: {0: UNKNOWN_OR_HEADSET_NOT_CONNECTED, 1: PLUGGED_IN_CHARGING, 2: PLUGGED_IN_NOT_CHARGING, 3: DISCHARGING}
+
+  # Firmware only defines cases 0-4 (25% steps).
+  battery_level_to_percent:
+    type: case_int_to_int
+    default: 0
+    values: {0: 0, 1: 25, 2: 50, 3: 75, 4: 100}
+
+structs:
+  # Shared by all gen1-protocol SKUs (standard/WoW/Diablo IV/7X/7X White/7P).
+  # No report-ID byte on the wire; firmware always expects 0x00 in that
+  # position, same convention as Nova 5 and Arctis 7+. This is the SIMPLER
+  # "gen1" wire protocol (discrete 0-4 battery levels, no readback API for
+  # any of these settings) — the richer "gen2" protocol (percentage battery,
+  # 3-domain parametric EQ, RGB, mic-mute/BT-link status), used by real gen2
+  # hardware and by gen1 units with the "upgrade" firmware, is a separate,
+  # much larger device family tracked as [E7-S11] in the backlog, not
+  # modeled here. sidetone and headset_status differ per capability tier
+  # (7P lacks sidetone) and are declared in each tier's own device file.
+  mic_volume:
+    - {name: report_id,  type: uint8, constant: 0x00}
+    - {name: command,    type: uint8, constant: 0x37}
+    - {name: mic_volume, type: uint8, range: [0, 7]}
+
+  # 10-band graphic EQ (fixed frequencies, gain only). Firmware byte =
+  # round(2 x (10 + gain_dB)), same ±10dB/0-40 formula as the Nova Pro
+  # family — reuses builtin:custom_eq_gains as-is, no new Rust code.
+  eq:
+    - {name: report_id, type: uint8,   constant: 0x00}
+    - {name: command,   type: uint8,   constant: 0x33}
+    - {name: gain1,      type: float32, range: [-10.0, 10.0]}
+    - {name: gain2,      type: float32, range: [-10.0, 10.0]}
+    - {name: gain3,      type: float32, range: [-10.0, 10.0]}
+    - {name: gain4,      type: float32, range: [-10.0, 10.0]}
+    - {name: gain5,      type: float32, range: [-10.0, 10.0]}
+    - {name: gain6,      type: float32, range: [-10.0, 10.0]}
+    - {name: gain7,      type: float32, range: [-10.0, 10.0]}
+    - {name: gain8,      type: float32, range: [-10.0, 10.0]}
+    - {name: gain9,      type: float32, range: [-10.0, 10.0]}
+    - {name: gain10,     type: float32, range: [-10.0, 10.0]}
+
+  volume_limiter:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x3A}
+    - {name: volume_limiter, type: uint8, range: [0, 1]}
+
+  muted_mic_brightness:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0xAE}
+    - {name: muted_mic_brightness, type: uint8, range: [0, 3]}
+
+  power_inactivity_timer:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0xA3}
+    - {name: power_inactivity_timer, type: uint8, range: [0, 255]}
+
+  bluetooth_startup:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0xB2}
+    - {name: bluetooth_startup, type: uint8, range: [0, 1]}
+
+  bt_call_default:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0xB3}
+    - name: bt_call_default
+      type: uint8
+      range: [0, 2]
+      values_mapping: {"0": "none", "1": "attenuate_12db", "2": "mute"}
+
+  save_to_flash:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x09}
+
+apis:
+  mic_volume:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  eq:
+    write:
+      transport: HID_IO
+      chunk_size: 65
+      payload_transform: "builtin:custom_eq_gains"
+
+  volume_limiter:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  muted_mic_brightness:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  power_inactivity_timer:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  bluetooth_startup:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  bt_call_default:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  save_to_flash:
+    write: {transport: HID_IO, chunk_size: 65}
+
+lifecycle:
+  init:
+    # LAM does not provide SteelSeries Sonar, and this device has no
+    # set_sonar_present/software_chatmix_status struct at all — nothing to
+    # disable. No EQ reset to flat: there is no readback API for the EQ (or
+    # for any other setting besides headset_status), so the daemon has no
+    # way to know the device's current curve — same reasoning as Arctis 7+.
+    - call: discord_certified_set_attributes
+      args: {echo_cancellation: true, noise_suppression: true}
+  shutdown:
+    - call: save_to_flash

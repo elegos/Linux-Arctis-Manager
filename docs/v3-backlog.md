@@ -83,7 +83,7 @@ This keeps the checklist honest and makes blocked work immediately visible witho
   - [x] [E6-S9] Save to flash
 - [ ] **[E7] Multi-device support**
   - [ ] [E7-S1] Spec-to-YAML conversion script
-  - [ ] [E7-S2] Arctis Nova 7 family
+  - [ ] [E7-S2] Arctis Nova 7 family (gen1 protocol done; gen2/upgrade deferred, see [E7-S11])
   - [x] [E7-S3] Arctis Nova Pro (wired)
   - [x] [E7-S4] Arctis Nova 5 and Nova Elite
   - [ ] [E7-S5] Arctis 7+ family
@@ -93,6 +93,7 @@ This keeps the checklist honest and makes blocked work immediately visible witho
   - [ ] [E7-S8] Nova 5 parametric EQ
   - [ ] [E7-S9] Action-command DSL primitive
   - [ ] [E7-S10] Nova Elite EQ (named-slot presets)
+  - [ ] [E7-S11] Nova 7 Gen2 + upgrade-firmware protocol
 - [ ] **[E8] OLED display** *(stretch)*
   - [ ] [E8-S1] `draw_bitmap` API
   - [ ] [E8-S2] `reload_display` API
@@ -331,6 +332,7 @@ Extend coverage to all Arctis headset families present in the official spec, sta
 
 - **[E7-S2] Arctis Nova 7 family**
   Write base and device files for Nova 7, Nova 7X, Nova 7P, and their Gen2 / upgrade variants. Key difference: `battery_discrete_5step` (0/25/50/75/100%) on original vs `battery_percentage` (1–100%) on Gen2. Cover all SKU variants (Diablo IV, WoW editions).
+  > Gen1 protocol done: `base_arctis_nova_7.yaml` / `nova_7.yaml` (5 protocol-identical SKUs: standard `0x2202`, WoW `0x227A`, Diablo IV `0x223A`, 7X `0x2206`, 7X white `0x2258` — all have sidetone + chatmix) / `nova_7p.yaml` (7P `0x220A` — no sidetone struct at all in its own spec file, but *does* keep hardware chatmix, unlike the Arctis 7+ family's PlayStation tier). This is the simpler of two genuinely different wire protocols this raw-spec family exposes — no readback API for any setting besides `headset_status` (mic volume/sidetone/EQ/etc. are write-only, same situation as Arctis 7+), discrete 0-4 battery levels, EQ reuses `builtin:custom_eq_gains` as-is (same ±10dB/0-40 formula as Nova Pro — zero new code). `command_interface`/`sync_interface` both taken from v2 (interface 3, v2 only ever listens on 3 despite the spec declaring sync-interface 5) — same call made for Arctis 7+, unverified on real hardware. The richer "gen2" protocol (real gen2 hardware *and* gen1 units running "upgrade" firmware) is a separate device family — see [E7-S11].
 
 - **[E7-S3] Arctis Nova Pro (wired)**
   Translate the existing `nova_pro_wired.yaml` to the new DSL. Wired device has no wireless_settings struct; validate that sync events and capabilities reflect this correctly.
@@ -365,6 +367,9 @@ Extend coverage to all Arctis headset families present in the official spec, sta
 - **[E7-S10] Nova Elite EQ (named-slot presets)**
   Found on Nova Elite ([E7-S4]): EQ (wireless/Bluetooth/microphone domains) has no simple "select preset by id" write, unlike every other family done so far. Presets are named slots read/written whole (`parametric_eq` for wireless — genuinely parametric, frequency/filter-type/gain/Q-factor per band, like Nova 5's; `ten_band_eq_mic`/`ten_band_eq_bt` — graphic, gain-only, like Nova Pro's) via `0x1B`/`0x1D`/`0x1F` `HID_FEATURE` writes (`chunk_size: 1036`, same as `audio_settings` — see [E7-S4]'s note on why that size is fine) carrying an alias + free-text name alongside the curve. Needs its own struct shapes and read/write flow, sharing groundwork with [E7-S8]'s parametric EQ builtin where the wireless domain overlaps, but the named-slot mechanic is new.
   > This story originally also covered `audio_settings`'s 1036-byte `HID_FEATURE` read as a second, transport-layer gap — that turned out not to be a real blocker (nothing in the code actually enforces `hid-transport`'s `REPORT_SIZE_HID_FEATURE_MAX`) and has been implemented; see [E7-S4]'s note.
+
+- **[E7-S11] Nova 7 Gen2 + upgrade-firmware protocol**
+  Found while scoping [E7-S2]: the raw spec's `base_arctis_nova_7_gen2_tx` (1243 lines, vs. gen1's 402) is a materially different, much richer protocol — not just a battery-scale difference as originally assumed. It's used by real Gen2 hardware (`0x227E` Nova 7 Gen2, `0x229E` 7X Gen2, `0x2298` 7P Gen2, plus their RX counterparts) *and* by gen1-hardware units running the "upgrade" firmware (e.g. `arctis_nova_7_upgrade_tx.device`, app_pid `0x22A1`, includes `base_arctis_nova_7_gen2_tx` while keeping the gen1 bootloader PID `0x2203` for the firmware-flash-in-place step) — this firmware-upgrade-in-place scheme is what the "possible PID collision" flagged early in this initiative turned out to be; it's not a collision, v2 already groups both under one `nova_7_wireless_perc_battery.yaml` by protocol, not by hardware generation. New capabilities: percentage battery (1-100, vs gen1's 0/25/50/75/100), a 10-band **parametric** EQ (frequency/filter-type/gain/Q-factor) across three independent domains (RF/2.4GHz, Bluetooth, mic) with named-slot presets and a 3-message compound write sequence (name → band data → commit, cmd `0xA7`/`0x33`/`0x27`) — structurally close to Nova Elite's named-slot EQ ([E7-S10]) and worth sharing groundwork with it, RGB "color spin" lighting (a capability not modelled anywhere yet), live mic-mute status (cmd `0x52`), and Bluetooth link status (cmd `0xB5`). v2's own `nova_7_wireless_perc_battery.yaml` does **not** implement any of this — it reuses the gen1 command set verbatim against gen2 hardware, including a `perc_max: 128` battery-scale hack that doesn't match the real spec's declared 1-100 range; don't use it as a reference for anything beyond the shared basic commands (mic volume/sidetone/volume limiter/inactivity timer/mute-LED brightness/BT toggles, same command bytes as gen1). One raw discrepancy needing hardware confirmation before starting: v2's product_ids list includes `0x22a4`, which the raw spec assigns to `arctis_nova_7x_upgrade_**rx**` (not tx) — possibly a v2 typo (`0x22a5` is the matching tx PID), possibly a real quirk of how this specific SKU enumerates; verify against real hardware rather than assuming either way.
 
 ---
 

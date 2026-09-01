@@ -1,0 +1,81 @@
+extends: base_arctis_nova_7
+
+# PlayStation capability tier: NO sidetone at all — the `sidetone` struct/API
+# is entirely absent from this SKU's raw spec (confirmed: 7P's own .device
+# file never defines it, unlike every other SKU in this family). Chatmix IS
+# still present here (unlike the Arctis 7+ family's PlayStation tier), since
+# this device's headset_status is never redefined per-SKU.
+
+structs:
+  headset_status:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: command,   type: uint8, constant: 0xB0}
+    incoming:
+      - {name: report_id,          type: uint8, constant: 0x00}
+      - {name: command,            type: uint8, constant: 0xB0}
+      - {name: connection_status,  type: uint8, range: [0, 3]}
+      - {name: battery_status,     type: uint8, range: [0, 4]}
+      - {name: charging_status,    type: uint8, range: [0, 3]}
+      - {name: game_chatmix_level, type: uint8, range: [0, 100]}
+      - {name: chat_chatmix_level, type: uint8, range: [0, 100]}
+
+apis:
+  headset_status:
+    read: {transport: HID_IO, chunk_size: 65}
+
+sync_events:
+  0x45:
+    emit: chatmix_changed
+    fields:
+      - {name: game_chatmix_level, byte: 2}
+      - {name: chat_chatmix_level, byte: 3}
+
+  0xB7:
+    emit: battery_changed
+    fields:
+      - {name: battery_status, byte: 2, transform: battery_level_to_percent, display_type: percentage}
+
+  0xB9:
+    emit: connection_changed
+    fields:
+      - {name: connection_status, byte: 2, transform: connection_status_to_label}
+
+  0xBB:
+    emit: charging_changed
+    fields:
+      - {name: charging_status, byte: 2, transform: charging_status_to_label}
+
+sync_read:
+  - struct: headset_status
+    maps:
+      - {emit: connection_changed, field: connection_status, transform: connection_status_to_label}
+      - {emit: battery_changed,    field: battery_status,     transform: battery_level_to_percent, display_type: percentage}
+      - {emit: charging_changed,   field: charging_status,    transform: charging_status_to_label}
+      - emit: chatmix_changed
+        fields: [game_chatmix_level, chat_chatmix_level]
+
+device:
+  name: "SteelSeries Arctis Nova 7P"
+  vendor_id: 0x1038
+
+  # See nova_7.yaml for the command_interface/sync_interface note — same
+  # family, same v2-vs-spec interface discrepancy.
+  variants:
+    - product_id: 0x220A
+      name: "Arctis Nova 7P"
+      bootloader_pid: 0x220B
+
+  hid:
+    usage_page: 0xFFC0
+    usage: 0x0001
+    command_interface:
+      interface: 3
+    sync_interface:
+      interface: 3
+
+  capabilities:
+    - battery
+    - chatmix
+    - custom_eq
+    - microphone
