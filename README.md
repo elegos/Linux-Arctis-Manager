@@ -42,7 +42,7 @@ Cross-checked against SteelSeries' own device specs, not just the previous v2 li
 | Arctis Nova Pro (wired, GameDAC Gen 2, incl. v2 / Xbox) | ✅ | — |
 | Arctis Nova Pro Omni | ✅ | — |
 | Arctis Nova Pro Wireless (+ X, + X White) | ✅ | — |
-| Arctis GameBuds (+ X) | ❌ | True wireless earbuds, not a headset — different product category, not planned. |
+| Arctis GameBuds (+ X) | ❌ | True wireless earbuds, not a headset — different product category. |
 
 > **Note:** software EQ (10/15-band, applied via PipeWire regardless of what the headset itself supports) is always available as a substitute for hardware EQ. "No hardware EQ" above only means that headset's own onboard curve isn't adjustable — not that EQ itself is unavailable.
 
