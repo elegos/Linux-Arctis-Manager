@@ -18,39 +18,41 @@ An open-source replacement for SteelSeries GG, to manage your Arctis headset on 
 
 ## 🎧 Supported Devices
 
-Cross-checked against SteelSeries' own device specs, not just the previous v2 list — see [`docs/device_compatibility.md`](docs/device_compatibility.md) for the auto-generated, per-capability breakdown of everything below marked ✅.
+Cross-checked against SteelSeries' own device specs, not just the previous v2 list — see [`docs/device_compatibility.md`](docs/device_compatibility.md) for the auto-generated, per-capability, per-PID breakdown of everything below marked ✅.
 
 | Device | Supported | Notes |
 |---|:---:|---|
-| Arctis 7+ / Destiny 2 Edition | ✅ | PID `220e`, `2236`. ChatMix, 10-band graphic EQ, mic volume. |
-| Arctis 7X+ (Xbox) | ✅ | PID `2216`. No hardware ChatMix (Xbox tier); 10-band graphic EQ. |
-| Arctis 7P+ (PlayStation) | ✅ | PID `2212`. No ChatMix, no sidetone; 10-band graphic EQ. |
-| Arctis Nova 5 / 5X / 5X White | ✅ | PID `2232`, `2253`, `2264`. ChatMix, 10-band parametric EQ, wireless range/speed mode. |
-| Arctis Nova 7 / 7X / WoW / Diablo IV (original firmware) | ✅ | PID `2202`, `2206`, `223a`, `227a`, `2258`. ChatMix, Bluetooth, 10-band parametric EQ. |
-| Arctis Nova 7 / 7X / 7P Gen 2 (native hardware *or* Gen 2 upgrade firmware) | ✅ | PID `227e`, `229e`, `2298`, `22a1`, `22a5`, `22ad`, `22a7`, `22ab`, `22a9`. Percentage battery; ChatMix, Bluetooth, 10-band parametric EQ (write + readback). Same protocol whether the hardware is native Gen 2 or gen-1 hardware on the Gen 2 upgrade firmware. |
-| Arctis Nova 7P (original firmware) | ✅ | PID `220a`. ChatMix, Bluetooth, 10-band parametric EQ. |
-| Arctis Nova Elite (+ SNG SKU) | ✅ | PID `2244`, `2270`. ANC + transparency, dual mic (boom + on-ear) sidetone, OLED station display, ChatMix, Bluetooth, named-slot EQ presets (write only — reading a slot back isn't modelled yet). |
-| Arctis Nova Pro (wired, GameDAC Gen 2, incl. v2 / Xbox) | ✅ | PID `12cb`, `12fa`, `12cd`. GameDAC Gen 2 required; 10-band graphic EQ, hardware ChatMix. Wired — no battery/wireless status. |
-| Arctis Nova Pro Omni | ✅ | PID `2290`. Same hardware family as Nova Elite; adds mic noise reduction, no on-ear mic. ANC, ChatMix, Bluetooth, named-slot EQ presets (write only). |
-| Arctis Nova Pro Wireless (+ X, + X White) | ✅ | PID `12e0`, `12e5`, `225d`. ANC + transparency, OLED base station, ChatMix, Bluetooth, 10-band graphic EQ. |
-| Arctis 1 Wireless (+ Xbox, + Cyberpunk 2077 Edition) | ❌ | PID `12b3`, `12b6`, `12d0`, `12d2`. EQ is fixed on the AVNERA DSP chip, not writable by software; no ChatMix or ANC — low priority to port. |
-| Arctis 3 Console Edition | ❌ | Not present in the spec archive we've surveyed — PID unconfirmed. [Help us find it!](docs/device_support.md) |
-| Arctis 5 (+ 2018, Dota 2 Edition, PUBG 2018 Edition) | ❌ | PID `1250`, `1251`, `12a8`, `12aa`. Wired. Real 5-band graphic EQ. |
-| Arctis 7 (+ 2019 refresh) | ❌ | PID `1260`, `12ad`. Wireless. 2018 original has no EQ at all; 2019 refresh has AVNERA-fixed EQ only (not software-writable). |
-| Arctis Pro (wired) + Pro GameDAC | ❌ | PID `1252`, `1280`. Real EQ — 5-band on the headset itself, 10-band on the GameDAC; hardware ChatMix (GameDAC only). |
-| Arctis 9 / 9X | ❌ | PID `12c2`, `12b1`. Wireless. Real 10-band EQ (CX20833 chip). |
-| Arctis Pro Wireless | ❌ | PID `1290`. Real 5-band EQ (reuses the legacy Siberia 840 firmware API). |
-| Arctis Nova 3 (wired) | ❌ | PID `12ec`. Real EQ. |
-| Arctis Nova 3 / 3X Wireless | ❌ | PID `2269`, `226d`. ChatMix, real 10-band parametric EQ (same shape as Nova 5's). |
-| Arctis Nova 4 / 4X | ❌ | PID `12f2`, `12f6`. ChatMix, real EQ. |
-| Arctis GameBuds (+ X) | ❌ | True wireless earbuds, not a headset — no ChatMix dial. Real 10-band parametric EQ, ANC. Out of scope for now; flagging since they're in SteelSeries' own Arctis lineup. |
+| Arctis 1 Wireless (+ Xbox, + Cyberpunk 2077 Edition) | ❌ | No hardware EQ (fixed on the AVNERA DSP chip, not adjustable); no ChatMix; no ANC. |
+| Arctis 3 Console Edition | ❌ | Not present in the spec archive we've surveyed — hardware capabilities unconfirmed. |
+| Arctis 5 (+ 2018, Dota 2 Edition, PUBG 2018 Edition) | ❌ | No ChatMix; no ANC. |
+| Arctis 7 (+ 2019 refresh) | ❌ | No hardware EQ (2018 original has none at all; 2019 refresh has a fixed AVNERA curve, not adjustable); no ANC. |
+| Arctis 7+ / Destiny 2 Edition | ✅ | No ANC. |
+| Arctis 7X+ (Xbox) | ✅ | No ChatMix (Xbox tier); no ANC. |
+| Arctis 7P+ (PlayStation) | ✅ | No ChatMix, no sidetone; no ANC. |
+| Arctis 9 / 9X | ❌ | No ANC. |
+| Arctis Pro (wired) + Pro GameDAC | ❌ | Wired — no battery/wireless status; no ANC. |
+| Arctis Pro Wireless | ❌ | No ANC. |
+| Arctis Nova 3 (wired) | ❌ | No ChatMix; no ANC. |
+| Arctis Nova 3 / 3X Wireless | ❌ | No ANC. |
+| Arctis Nova 4 / 4X | ❌ | No ANC. |
+| Arctis Nova 5 / 5X / 5X White | ✅ | No ANC. |
+| Arctis Nova 7 / 7X / WoW / Diablo IV (original firmware) | ✅ | No ANC. |
+| Arctis Nova 7 / 7X / 7P Gen 2 (native hardware *or* Gen 2 upgrade firmware) | ✅ | No ANC. |
+| Arctis Nova 7P (original firmware) | ✅ | No ANC. |
+| Arctis Nova Elite (+ SNG SKU) | ✅ | — |
+| Arctis Nova Pro (wired, GameDAC Gen 2, incl. v2 / Xbox) | ✅ | Wired — no battery/wireless status; no ANC. |
+| Arctis Nova Pro Omni | ✅ | No on-ear mic sidetone (unlike Nova Elite). |
+| Arctis Nova Pro Wireless (+ X, + X White) | ✅ | — |
+| Arctis GameBuds (+ X) | ❌ | True wireless earbuds, not a headset — no ChatMix dial. Out of scope for now; flagging since they're in SteelSeries' own Arctis lineup. |
+
+> **Note:** software EQ (10/15-band, applied via PipeWire regardless of what the headset itself supports) is always available as a substitute for hardware EQ. "No hardware EQ" above only means that headset's own onboard curve isn't adjustable — not that EQ itself is unavailable.
 
 ### Legend
 
 | Symbol | Description |
 | :---: | --- |
 | ✅ | Supported by the v3 (Rust) daemon today |
-| ❌ | Not ported yet — see the Notes column for what the hardware actually supports, and [How to add support for a new device](docs/device_support.md) if you want to help |
+| ❌ | Not ported yet — [How to add support for a new device](docs/device_support.md) if you want to help |
 
 ## ⌨️ Components
 
