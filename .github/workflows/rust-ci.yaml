@@ -37,3 +37,6 @@ jobs:
 
       - name: Tests
         run: cargo test --all
+
+      - name: Device compatibility matrix up to date
+        run: cargo run -p device-config --bin lam-gen-device-matrix -- --check
