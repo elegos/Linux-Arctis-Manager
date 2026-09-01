@@ -100,7 +100,13 @@ jobs:
 
               # Build deps come straight from debian/control's own
               # Build-Depends:, not a list maintained separately here.
-              mk-build-deps --install --tool 'apt-get -y --no-install-recommends' debian/control
+              # Building + installing as two explicit steps (rather than
+              # mk-build-deps --install's own orchestration) sidesteps an
+              # apt quirk where its "correcting dependencies" pass drops the
+              # just-unpacked meta-package after pulling in the real deps,
+              # reporting a false failure even though everything installed.
+              mk-build-deps --tool 'apt-get -y --no-install-recommends' debian/control
+              apt-get -y --no-install-recommends install ./linux-arctis-manager-build-deps_*.deb
 
               dpkg-buildpackage -us -uc -b
               mkdir -p /out

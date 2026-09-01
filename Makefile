@@ -120,6 +120,12 @@ $(GUI_WRAPPER_OUT): $(GUI_WRAPPER_IN) Makefile
 install-python: generate-gui-wrapper
 	install -dm755 $(DESTDIR)$(dir $(VENVDIR))
 	$(UV) venv --python python3 --clear $(DESTDIR)$(VENVDIR)
+	# activate/activate.{csh,fish,nu,bat} bake in an absolute VIRTUAL_ENV path
+	# at creation time (here, the DESTDIR buildroot) and are never sourced —
+	# lam-gui invokes $(VENVDIR)/bin/python3 directly. Left in place, rpmbuild's
+	# check-buildroot fails the package: the buildroot path leaks into an
+	# installed file.
+	rm -f $(DESTDIR)$(VENVDIR)/bin/activate*
 	$(UV) export --frozen --no-dev --no-emit-project \
 		| $(UV) pip install \
 			--python $(DESTDIR)$(VENVDIR)/bin/python \

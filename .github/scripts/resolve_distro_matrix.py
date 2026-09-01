@@ -42,6 +42,12 @@ import urllib.request
 #
 # Arch Linux itself isn't in the top 10, but is added explicitly (CachyOS's
 # repos/kernel are custom enough that a plain-Arch job is worth having too).
+#
+# Bazzite was tried and dropped: ghcr.io/ublue-os/bazzite (a blue-build/
+# ublue-os OCI image, deeply layered by construction) fails to even pull as
+# a GitHub Actions job container — "failed to register layer: max depth
+# exceeded" against the runner's overlay2 storage driver. Not a packaging or
+# script issue; there's no image-side fix available to us.
 
 ENDOFLIFE_TIMEOUT = 15
 
@@ -135,7 +141,6 @@ def static_entries() -> list[dict]:
         # Rolling / atomic — no versioned releases to resolve.
         _entry("Arch Linux", "archlinux:latest", "arch"),
         _entry("CachyOS", "cachyos/cachyos:latest", "arch"),
-        _entry("Bazzite", "ghcr.io/ublue-os/bazzite:stable", "rpm"),
     ]
 
 
