@@ -44,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Device detection now matches primarily by product name (falling back to product ID), so a firmware update that changes the PID is still recognised automatically.
 - Side navigation now uses icon buttons instead of text labels.
 - The Voice Changer panel is labelled "(Preview)" — usable, not yet considered production quality.
+- README's Supported Devices table rewritten and re-checked against SteelSeries' own device specs (not just the previous v2 list): simplified to Supported/Notes columns, split a few v2 rows that had actually-different hardware bundled together (e.g. Arctis 7 2018/2019 wireless vs. the wired Arctis Pro/Pro GameDAC), and every unsupported row now notes what EQ (if any) that hardware actually has — several legacy models turned out to have DSP-fixed or no EQ at all, not the software-writable kind this project can expose.
 
 ### Fixed
 
