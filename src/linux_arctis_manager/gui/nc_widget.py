@@ -100,6 +100,10 @@ class QNCWidget(QWidget):
         self._rnnoise_frame.setLayout(rf_layout)
         self._rnnoise_warn_label = QLabel()
         self._rnnoise_warn_label.setWordWrap(True)
+        self._rnnoise_warn_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+            | Qt.TextInteractionFlag.TextSelectableByKeyboard
+        )
         rf_layout.addWidget(self._rnnoise_warn_label)
         rf_btn_row = QHBoxLayout()
         self._rnnoise_retry_btn = QPushButton(I18n.translate('ui', 'nc_retry'))
@@ -168,6 +172,10 @@ class QNCWidget(QWidget):
         self._swh_frame.setLayout(swh_layout)
         self._swh_warn_label = QLabel()
         self._swh_warn_label.setWordWrap(True)
+        self._swh_warn_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+            | Qt.TextInteractionFlag.TextSelectableByKeyboard
+        )
         swh_layout.addWidget(self._swh_warn_label)
         swh_retry_row = QHBoxLayout()
         swh_retry_btn = QPushButton(I18n.translate('ui', 'nc_retry'))
