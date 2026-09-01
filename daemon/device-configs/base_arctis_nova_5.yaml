@@ -1,0 +1,239 @@
+transforms:
+  connection_status_to_label:
+    type: case_int_to_str
+    default: UNKNOWN
+    values: {0: NOT_PAIRED_NOT_SEARCHING, 1: NOT_PAIRED_SEARCHING, 2: PAIRED_NOT_CONNECTED, 3: PAIRED_CONNECTED}
+
+  charging_status_to_label:
+    type: case_int_to_str
+    default: UNKNOWN
+    values: {0: UNKNOWN_OR_HEADSET_NOT_CONNECTED, 1: PLUGGED_IN_CHARGING, 2: PLUGGED_IN_NOT_CHARGING, 3: DISCHARGING}
+
+  mic_mute_brightness_to_level:
+    type: case_int_to_int
+    default: 2
+    values: {0: 0, 1: 1, 4: 2, 10: 3}
+
+  wireless_mode_to_label:
+    type: case_int_to_str
+    default: UNKNOWN
+    values: {0: RANGE, 1: SPEED}
+
+structs:
+  # This family has no report-ID byte on the wire; the firmware always expects
+  # 0x00 in that position ("Data size + 1 to account for report ID 0" per the
+  # SteelSeries spec). No save_to_flash / sonar / software-chatmix structs
+  # exist for this device — it has neither feature.
+  mic_volume:
+    - {name: report_id,  type: uint8, constant: 0x00}
+    - {name: command,    type: uint8, constant: 0x37}
+    - {name: mic_volume, type: uint8, range: [0, 15]}
+
+  sidetone:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x39}
+    - {name: sidetone,  type: uint8, range: [0, 10]}
+
+  volume_limiter:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x27}
+    - {name: enabled,   type: uint8, range: [0, 1]}
+
+  power_inactivity_timer:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0xA3}
+    - {name: minutes,   type: uint8, range: [0, 255]}
+
+  muted_mic_brightness:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0xAE}
+    - {name: level,     type: uint8, range: [0, 3]}
+
+  wireless_mode:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x35}
+    - name: mode
+      type: uint8
+      range: [0, 1]
+      values_mapping: {"0": "range", "1": "speed"}
+
+  wireless_mode_status:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: command,   type: uint8, constant: 0x36}
+    incoming:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: command,   type: uint8, constant: 0x36}
+      - {name: mode,      type: uint8, range: [0, 1]}
+
+  headset_status:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: command,   type: uint8, constant: 0xB0}
+    incoming:
+      - {name: report_id,          type: uint8, constant: 0x00}
+      - {name: command,            type: uint8, constant: 0xB0}
+      - {name: connection_status,  type: uint8, range: [0, 3]}
+      - {name: unused,             type: uint8}
+      - {name: battery_status,     type: uint8, range: [0, 100]}
+      - {name: charging_status,    type: uint8, range: [0, 3]}
+      - {name: game_chatmix_level, type: uint8, range: [0, 100]}
+      - {name: chat_chatmix_level, type: uint8, range: [0, 100]}
+
+  # TODO(nova-5-parametric-eq, story not stretch): this device also exposes a
+  # 10-band PARAMETRIC EQ (frequency + filter type + gain + Q factor per band,
+  # write commands 0x33/0x34, preset name 0xA5, preset name read 0xA6) — a
+  # different shape from the fixed-frequency graphic EQ already supported for
+  # the Nova Pro family (builtin:custom_eq_gains). It needs its own struct
+  # shape and a new Rust payload_transform builtin, and touches the DSL, the
+  # EQ subsystem, and this device's import together. Tracked as a follow-up,
+  # not shipped in this pass. `eq_data_raw` below reserves the 60 EQ-band
+  # wire bytes so `mic_volume`/`sidetone`/`volume_limiter` stay aligned.
+  audio_settings:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: command,   type: uint8, constant: 0x20}
+    incoming:
+      - {name: report_id,      type: uint8, constant: 0x00}
+      - {name: command,        type: uint8, constant: 0x20}
+      - {name: eq_data_raw,    type: bytearray, size: 60}
+      - {name: mic_volume,     type: uint8, range: [0, 15]}
+      - {name: sidetone,       type: uint8, range: [0, 10]}
+      - {name: volume_limiter, type: uint8, range: [0, 1]}
+
+  ux_settings:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: command,   type: uint8, constant: 0xA0}
+    incoming:
+      - {name: report_id,              type: uint8, constant: 0x00}
+      - {name: command,                type: uint8, constant: 0xA0}
+      - {name: power_inactivity_timer, type: uint8, range: [0, 255]}
+      - {name: muted_mic_brightness,   type: uint8, range: [0, 10]}
+      - {name: unused1,                type: uint8}
+      # Firmware reserves a byte for EQ-sync-from-device, but SteelSeries never
+      # enabled the feature on this hardware (per the vendor spec comment) —
+      # not exposed as a setting here.
+      - {name: eq_sync_unused,         type: uint8}
+      - {name: unused2,                type: uint8}
+      - {name: unused3,                type: uint8}
+      - {name: unused4,                type: uint8}
+
+apis:
+  mic_volume:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  sidetone:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  volume_limiter:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  power_inactivity_timer:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  muted_mic_brightness:
+    write:
+      transport: HID_IO
+      chunk_size: 65
+      payload_transform: "builtin:muted_mic_brightness_write"
+
+  wireless_mode:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  wireless_mode_status:
+    read: {transport: HID_IO, chunk_size: 65}
+
+  headset_status:
+    read: {transport: HID_IO, chunk_size: 65}
+
+  audio_settings:
+    read: {transport: HID_IO, chunk_size: 65}
+
+  ux_settings:
+    read: {transport: HID_IO, chunk_size: 65}
+
+sync_events:
+  0x27:
+    emit: volume_limiter_changed
+    fields:
+      - {name: enabled, byte: 2, display_type: on_off}
+
+  0x37:
+    emit: mic_volume_changed
+    fields:
+      - {name: mic_volume, byte: 2}
+
+  0x39:
+    emit: sidetone_changed
+    fields:
+      - {name: sidetone, byte: 2}
+
+  0x45:
+    emit: chatmix_changed
+    fields:
+      - {name: game_attenuation, byte: 2}
+      - {name: chat_attenuation, byte: 3}
+
+  0xA3:
+    emit: power_inactivity_timer_changed
+    fields:
+      - {name: minutes, byte: 2}
+
+  0xAE:
+    emit: muted_mic_brightness_changed
+    fields:
+      - {name: level, byte: 2, transform: mic_mute_brightness_to_level}
+
+  0xB7:
+    emit: battery_changed
+    fields:
+      - {name: battery_percent, byte: 2, display_type: percentage}
+
+  0xB9:
+    emit: connection_changed
+    fields:
+      - {name: connection_status, byte: 2, transform: connection_status_to_label}
+    side_effects:
+      - call: sync_all
+
+  0xBB:
+    emit: charging_changed
+    fields:
+      - {name: charging_status, byte: 2, transform: charging_status_to_label}
+
+sync_read:
+  - struct: headset_status
+    maps:
+      - {emit: connection_changed, field: connection_status, transform: connection_status_to_label}
+      - {emit: battery_changed,    field: battery_status,    display_type: percentage}
+      - {emit: charging_changed,   field: charging_status,   transform: charging_status_to_label}
+      - emit: chatmix_changed
+        fields: [game_chatmix_level, chat_chatmix_level]
+
+  - struct: audio_settings
+    maps:
+      - {emit: mic_volume_changed,     field: mic_volume}
+      - {emit: sidetone_changed,       field: sidetone}
+      - {emit: volume_limiter_changed, field: volume_limiter, display_type: on_off}
+
+  - struct: ux_settings
+    maps:
+      - {emit: power_inactivity_timer_changed, field: power_inactivity_timer}
+      - {emit: muted_mic_brightness_changed,   field: muted_mic_brightness, transform: mic_mute_brightness_to_level}
+
+  - struct: wireless_mode_status
+    maps:
+      - {emit: wireless_mode_changed, field: mode, transform: wireless_mode_to_label}
+
+lifecycle:
+  init:
+    # LAM does not provide SteelSeries Sonar, and this device has no
+    # set_sonar_present/software_chatmix_status struct at all — nothing to
+    # disable. Once parametric EQ (see TODO above) is implemented, add a
+    # "reset EQ to flat" call here, matching the convention used elsewhere.
+    - call: discord_certified_set_attributes
+      args: {echo_cancellation: true, noise_suppression: true}
+  # No post_init/shutdown hooks: the engine always runs the full sync_read
+  # automatically as part of device_init, and this device has no
+  # save_to_flash struct (settings apply immediately, no explicit commit step).

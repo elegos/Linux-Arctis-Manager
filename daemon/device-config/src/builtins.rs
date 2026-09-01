@@ -62,6 +62,24 @@ pub fn power_timer_write_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
     dim_timer_write_payload(bytes)
 }
 
+/// Full-payload transform for `muted_mic_brightness` write (Arctis Nova 5 family).
+/// Converts byte 2 from a user-facing level (0–3) to the firmware brightness
+/// value (0, 1, 4, 10).  Unknown levels map to 4 (medium), matching firmware
+/// behaviour on an unrecognised value.
+pub fn muted_mic_brightness_write_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
+    let mut out = bytes.to_vec();
+    if out.len() >= 3 {
+        out[2] = match out[2] {
+            0 => 0,
+            1 => 1,
+            2 => 4,
+            3 => 10,
+            _ => 4,
+        };
+    }
+    vec![out]
+}
+
 fn minutes_to_timer_enum(minutes: u8) -> u8 {
     match minutes {
         0 => 0,
@@ -389,5 +407,35 @@ mod tests {
             let result = power_timer_write_payload(&input);
             assert_eq!(result[0][2], expected_enum);
         }
+    }
+
+    // ── muted_mic_brightness_write_payload ─────────────────────────────────────
+
+    #[test]
+    fn muted_mic_brightness_write_payload_all_levels() {
+        let cases = [(0, 0), (1, 1), (2, 4), (3, 10)];
+        for (level, expected_fw) in cases {
+            let input = vec![0x00u8, 0xAE, level];
+            let result = muted_mic_brightness_write_payload(&input);
+            assert_eq!(
+                result[0][2], expected_fw,
+                "level {level} should map to firmware value {expected_fw}"
+            );
+        }
+    }
+
+    #[test]
+    fn muted_mic_brightness_write_payload_unknown_level_maps_to_medium() {
+        let input = vec![0x00u8, 0xAE, 9];
+        let result = muted_mic_brightness_write_payload(&input);
+        assert_eq!(result[0][2], 4);
+    }
+
+    #[test]
+    fn muted_mic_brightness_write_payload_preserves_header() {
+        let input = vec![0x00u8, 0xAE, 3];
+        let result = muted_mic_brightness_write_payload(&input);
+        assert_eq!(result[0][0], 0x00);
+        assert_eq!(result[0][1], 0xAE);
     }
 }
