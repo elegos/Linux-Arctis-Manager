@@ -85,13 +85,14 @@ This keeps the checklist honest and makes blocked work immediately visible witho
   - [ ] [E7-S1] Spec-to-YAML conversion script
   - [ ] [E7-S2] Arctis Nova 7 family
   - [x] [E7-S3] Arctis Nova Pro (wired)
-  - [ ] [E7-S4] Arctis Nova 5 and Nova Elite
+  - [x] [E7-S4] Arctis Nova 5 and Nova Elite
   - [ ] [E7-S5] Arctis 7+ family
     > Not done here: RF/BT `pairing_mode` (found in the spec, all tiers) has no D-Bus exposure — the DSL has no "fire and forget action" primitive yet, only value-bearing settings and internal lifecycle calls. Struct/API are declared and ready to dispatch once that lands. Everything else in the story (mic, sidetone, EQ, battery, chatmix, connection sync) is complete and tested.
   - [x] [E7-S6] Bootloader and upgrade PID registration
   - [ ] [E7-S7] Device compatibility matrix
   - [ ] [E7-S8] Nova 5 parametric EQ
   - [ ] [E7-S9] Action-command DSL primitive
+  - [ ] [E7-S10] Nova Elite EQ and oversized FEATURE reads
 - [ ] **[E8] OLED display** *(stretch)*
   - [ ] [E8-S1] `draw_bitmap` API
   - [ ] [E8-S2] `reload_display` API
@@ -337,7 +338,9 @@ Extend coverage to all Arctis headset families present in the official spec, sta
 
 - **[E7-S4] Arctis Nova 5 and Nova Elite**
   Translate the existing YAML files for these simpler devices.
-  > Nova 5 done: `base_arctis_nova_5.yaml` / `nova_5.yaml`, covering all three SKUs (Nova 5 `0x2232`, Nova 5X `0x2253`, Nova 5X white `0x2264`). The story's original assumption ("no wireless settings, no chatmix") was wrong — corrected against the real spec: this device *does* have a wireless mode toggle (speed/range) and hardware ChatMix (`game_chatmix_level`/`chat_chatmix_level` on `headset_status`); it has no OLED, confirmed. Parametric EQ intentionally not included — see [E7-S8]. `command_interface: {interface: 3}` was carried over from the v2 config (empirically validated on real hardware) rather than derived from the spec, which only declares `sync_interface: 5` and no command-interface number at all; wants confirming on real hardware before this ships. Nova Elite not started.
+  > Nova 5 done: `base_arctis_nova_5.yaml` / `nova_5.yaml`, covering all three SKUs (Nova 5 `0x2232`, Nova 5X `0x2253`, Nova 5X white `0x2264`). The story's original assumption ("no wireless settings, no chatmix") was wrong — corrected against the real spec: this device *does* have a wireless mode toggle (speed/range) and hardware ChatMix (`game_chatmix_level`/`chat_chatmix_level` on `headset_status`); it has no OLED, confirmed. Parametric EQ intentionally not included — see [E7-S8]. `command_interface: {interface: 3}` was carried over from the v2 config (empirically validated on real hardware) rather than derived from the spec, which only declares `sync_interface: 5` and no command-interface number at all; wants confirming on real hardware before this ships.
+  >
+  > Nova Elite done: `base_arctis_nova_elite.yaml` / `nova_elite.yaml`, covering both PIDs (standard `0x2244`, "sng" SKU `0x2270` — protocol-identical, confirmed by diff). By far the richest family so far: real ANC (off/transparent/on, each with its own level), two independent sidetone paths (boom mic and on-ear mic), Bluetooth, a station display (home-screen view/options, screensaver, brightness). Raw spec and v2 agree on the interface number here (3, both roles) — no discrepancy to flag, unlike Nova 5/Arctis 7+. Left out, tracked in [E7-S10]: all EQ (wireless/Bluetooth/mic — no simple preset-select command exists at all in this family, unlike every other one so far), and everything read through the bulk `audio_settings` struct (mic volume/sidetone/line-out/stream-mix/chatmix snapshot at startup — a genuine transport-layer blocker, not a scoping choice, see S10). `restore_factory_default` is the same one-shot action-command gap as Arctis 7+'s `pairing_mode` — tracked in [E7-S9]. `line_out_mode`'s values ("speaker"/"stream") are v2's unconfirmed guess, same as it guessed wrong for Nova Pro Wired — but this struct has no vendor comment to check against, so left as-is rather than silently "corrected" on no evidence. `wireless_mode` (speed/range) has no write command anywhere in the spec despite v2 assuming one (`0xC3`) — modelled read-only.
 
 - **[E7-S5] Arctis 7+ family**
   Translate the existing `arctis_7_plus.yaml` and verify against the spec files for the 7+ and its variants.
@@ -353,7 +356,12 @@ Extend coverage to all Arctis headset families present in the official spec, sta
   The Nova 5 family's EQ is a 10-band *parametric* EQ (per-band frequency, filter type, gain, and Q factor — commands `0x33`/`0x34` write, `0xA5` preset name, `0xA6` read preset names), a different shape from the Nova Pro family's fixed-frequency graphic EQ (`builtin:custom_eq_gains`, [E6-S3]). Needs: a new struct shape for a parametric EQ band, a new Rust `payload_transform` builtin to serialise it, and — once implemented — an `init` lifecycle call resetting it to flat (matching the no-Sonar/flat-EQ-on-init convention used elsewhere) plus removal of the `eq_data_raw` placeholder bytes reserved for it in `audio_settings` ([E7-S4]). Likely relevant beyond Nova 5 — Nova 3/4 look like they may share the same parametric scheme, worth checking when picked up.
 
 - **[E7-S9] Action-command DSL primitive**
-  Found on the Arctis 7+ family ([E7-S5]): a `pairing_mode` write (`0x03`, mode 0/1) that triggers RF/BT pairing — a one-shot fire-and-forget command, not a persisted value like every other struct the DSL currently models. The DSL has `apis:`/`structs:` for value-bearing settings (read/write, `sync_read`-able) but nothing for "run this command now" with no associated state. Needs: a way to mark a struct as an action (vs. a setting) in the YAML, and a D-Bus method (or a convention on `SetSettings`) to trigger it from the GUI. Check other device families for the same pattern before designing this narrowly around pairing.
+  Found on the Arctis 7+ family ([E7-S5]): a `pairing_mode` write (`0x03`, mode 0/1) that triggers RF/BT pairing — a one-shot fire-and-forget command, not a persisted value like every other struct the DSL currently models. The DSL has `apis:`/`structs:` for value-bearing settings (read/write, `sync_read`-able) but nothing for "run this command now" with no associated state. Needs: a way to mark a struct as an action (vs. a setting) in the YAML, and a D-Bus method (or a convention on `SetSettings`) to trigger it from the GUI. Also found on Nova Elite ([E7-S4]): `restore_factory_default`, same shape — two independent devices with the same gap, worth designing generically rather than narrowly around either one.
+
+- **[E7-S10] Nova Elite EQ and oversized FEATURE reads**
+  Two related gaps found on Nova Elite ([E7-S4]):
+  1. **EQ** (wireless/Bluetooth/microphone domains) has no simple "select preset by id" write, unlike every other family done so far. Presets are named slots read/written whole (`parametric_eq` for wireless — genuinely parametric, frequency/filter-type/gain/Q-factor per band, like Nova 5's; `ten_band_eq_mic`/`ten_band_eq_bt` — graphic, gain-only, like Nova Pro's) via `0x1B`/`0x1D`/`0x1F` `HID_FEATURE` writes carrying an alias + free-text name alongside the curve. Needs its own struct shapes and read/write flow, sharing groundwork with [E7-S8]'s parametric EQ builtin where the wireless domain overlaps, but the named-slot mechanic is new.
+  2. **`audio_settings`** (and the EQ preset reads above) use a 1036-byte `HID_FEATURE` read (`read-chunk HIDOUTPUTFEATUREIN 1036`) — 12 bytes over `hid-transport`'s `REPORT_SIZE_HID_FEATURE_MAX` (1024). None of it can be read with the transport as it stands. Fix is either raising that constant (check `HIDIOCGFEATURE`'s real kernel-side limit before assuming 1036 is safe) or a chunked/multi-read approach. Until this lands, mic volume/sidetone/line-out/stream-mix/chatmix have no startup snapshot on this device — write-only, same as several settings on Nova 5/Arctis 7+, but here because the transport can't fetch it rather than because the device has no read API.
 
 ---
 
