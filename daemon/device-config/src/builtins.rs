@@ -1,14 +1,16 @@
-/// Converts 10 IEEE 754 little-endian float32 gain values (in dB) into 10 uint8
+/// Converts 10 IEEE 754 big-endian float32 gain values (in dB) into 10 uint8
 /// firmware values: `firmware_val = clamp(round(2 × (10 + gain_dB)), 0, 255) as u8`.
 ///
-/// Input: 40 bytes (10 × f32 LE).  Output: 10 bytes, one per EQ band.
+/// Input: 40 bytes (10 × f32 BE — matching `codec::write_fv`'s big-endian
+/// encoding of every multi-byte numeric field).  Output: 10 bytes, one per
+/// EQ band.
 pub fn gains_to_firmware_values(bytes: &[u8]) -> Vec<u8> {
     bytes
         .as_chunks::<4>()
         .0
         .iter()
         .map(|c| {
-            let db = f32::from_le_bytes(*c);
+            let db = f32::from_be_bytes(*c);
             ((2.0_f32 * (10.0_f32 + db)).round() as i32).clamp(0, 255) as u8
         })
         .collect()
@@ -62,21 +64,22 @@ pub fn power_timer_write_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
     dim_timer_write_payload(bytes)
 }
 
-/// Converts 10 IEEE 754 little-endian float32 gain values (in dB) into 10 uint8
+/// Converts 10 IEEE 754 big-endian float32 gain values (in dB) into 10 uint8
 /// firmware values for the Arctis 7+ family: `firmware_val = clamp(round(2 ×
 /// (12 + gain_dB)), 0, 48) as u8` (±12 dB range in 0.5 dB steps, vs. the Nova
 /// Pro family's ±10 dB — see [`gains_to_firmware_values`]). A third device
 /// with yet another offset/clamp pair should prompt generalising this instead
 /// of adding a fourth near-identical function.
 ///
-/// Input: 40 bytes (10 × f32 LE). Output: 10 bytes, one per EQ band.
+/// Input: 40 bytes (10 × f32 BE — see [`gains_to_firmware_values`]). Output:
+/// 10 bytes, one per EQ band.
 pub fn gains_to_firmware_values_7plus(bytes: &[u8]) -> Vec<u8> {
     bytes
         .as_chunks::<4>()
         .0
         .iter()
         .map(|c| {
-            let db = f32::from_le_bytes(*c);
+            let db = f32::from_be_bytes(*c);
             ((2.0_f32 * (12.0_f32 + db)).round() as i32).clamp(0, 48) as u8
         })
         .collect()
@@ -113,6 +116,75 @@ pub fn muted_mic_brightness_write_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
         };
     }
     vec![out]
+}
+
+/// Layout of the `parametric_eq`/`_bt`/`_mic` struct as serialised by the
+/// codec (see `base_arctis_nova_7_gen2.yaml`): `[report_id, eq_name_command,
+/// connection_type, preset_type, eqband_command, update_complete, 10 ×
+/// (frequency:u16, filter_type:u8, gain:f32, q_factor:f32), name:varstring]`.
+/// The three write steps below each pick out a different slice of this same
+/// serialisation and re-encode it into its own wire message — mirroring the
+/// vendor spec's own `api-write` sequence (name+header, band data, commit).
+const NOVA7GEN2_EQ_BAND_COUNT: usize = 10;
+const NOVA7GEN2_EQ_BAND_SRC_SIZE: usize = 11; // u16 + u8 + f32 + f32
+const NOVA7GEN2_EQ_BANDS_OFFSET: usize = 6;
+const NOVA7GEN2_EQ_NAME_OFFSET: usize = 6 + NOVA7GEN2_EQ_BAND_COUNT * NOVA7GEN2_EQ_BAND_SRC_SIZE; // 116
+
+/// Step 1: the name-announcement message — `[report_id, 0xA7 (eq_name_command),
+/// connection_type, preset_type, name_bytes...]`.
+pub fn nova7gen2_eq_name_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
+    if bytes.len() < 4 {
+        return vec![bytes.to_vec()];
+    }
+    let mut out = Vec::with_capacity(4 + bytes.len().saturating_sub(NOVA7GEN2_EQ_NAME_OFFSET));
+    out.extend_from_slice(&bytes[0..4]);
+    if bytes.len() > NOVA7GEN2_EQ_NAME_OFFSET {
+        out.extend_from_slice(&bytes[NOVA7GEN2_EQ_NAME_OFFSET..]);
+    }
+    vec![out]
+}
+
+/// Step 2: the band-data message — `[report_id, 0x33 (eqband_command),
+/// connection_type, 10 × (frequency:u16 BE, filter_type:u8, gain:i8,
+/// q_factor:u16 LE)]`. Re-encodes each band from the engine's wire shape
+/// (BE u16 frequency, u8 filter type, BE f32 gain in dB, BE f32 Q factor)
+/// into the firmware's compact shape: gain becomes a single signed byte in
+/// 0.1 dB units, Q factor becomes a little-endian uint16 in thousandths
+/// (the vendor spec stores Q factor little-endian specifically — everything
+/// else on this device is big-endian).
+pub fn nova7gen2_eq_bands_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
+    if bytes.len() < NOVA7GEN2_EQ_NAME_OFFSET {
+        return vec![bytes.to_vec()];
+    }
+    let mut out = Vec::with_capacity(3 + NOVA7GEN2_EQ_BAND_COUNT * 6);
+    out.push(bytes[0]);
+    out.push(bytes[4]);
+    out.push(bytes[2]);
+    for band in 0..NOVA7GEN2_EQ_BAND_COUNT {
+        let base = NOVA7GEN2_EQ_BANDS_OFFSET + band * NOVA7GEN2_EQ_BAND_SRC_SIZE;
+        // frequency: passthrough, 2 bytes BE
+        out.extend_from_slice(&bytes[base..base + 2]);
+        // filter_type: passthrough
+        out.push(bytes[base + 2]);
+        // gain: f32 dB -> signed byte in 0.1 dB units
+        let gain_db = f32::from_be_bytes(bytes[base + 3..base + 7].try_into().unwrap());
+        let gain_byte = (gain_db * 10.0).round().clamp(-128.0, 127.0) as i8;
+        out.push(gain_byte as u8);
+        // q_factor: f32 -> uint16 in thousandths, little-endian on the wire
+        let q = f32::from_be_bytes(bytes[base + 7..base + 11].try_into().unwrap());
+        let q_u16 = (q * 1000.0).round().clamp(0.0, u16::MAX as f32) as u16;
+        out.extend_from_slice(&q_u16.to_le_bytes());
+    }
+    vec![out]
+}
+
+/// Step 3: the commit message — `[report_id, 0x27 (update_complete)]`,
+/// telling the firmware the previous two messages form a complete update.
+pub fn nova7gen2_eq_commit_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
+    if bytes.len() < 6 {
+        return vec![bytes.to_vec()];
+    }
+    vec![vec![bytes[0], bytes[5]]]
 }
 
 fn minutes_to_timer_enum(minutes: u8) -> u8 {
@@ -213,7 +285,7 @@ mod tests {
         let db: [f32; 10] = [0.0, -10.0, 10.0, -5.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let mut input = Vec::with_capacity(40);
         for &v in &db {
-            input.extend_from_slice(&v.to_le_bytes());
+            input.extend_from_slice(&v.to_be_bytes());
         }
         assert_eq!(
             gains_to_firmware_values(&input),
@@ -227,7 +299,7 @@ mod tests {
         let db: [f32; 10] = [-100.0; 10];
         let mut input = Vec::with_capacity(40);
         for &v in &db {
-            input.extend_from_slice(&v.to_le_bytes());
+            input.extend_from_slice(&v.to_be_bytes());
         }
         assert!(gains_to_firmware_values(&input).iter().all(|&b| b == 0));
     }
@@ -239,7 +311,7 @@ mod tests {
         let db: [f32; 10] = [-5.5, -4.75, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let mut input = Vec::with_capacity(40);
         for &v in &db {
-            input.extend_from_slice(&v.to_le_bytes());
+            input.extend_from_slice(&v.to_be_bytes());
         }
         let out = gains_to_firmware_values(&input);
         assert_eq!(out[0], 9); // round(9.0) = 9
@@ -357,7 +429,7 @@ mod tests {
         let db = [0.0_f32; 10];
         let mut input = vec![0x06u8, 0x33];
         for &v in &db {
-            input.extend_from_slice(&v.to_le_bytes());
+            input.extend_from_slice(&v.to_be_bytes());
         }
         let result = custom_eq_gains_payload(&input);
         assert_eq!(result.len(), 1);
@@ -372,7 +444,7 @@ mod tests {
         let db: [f32; 10] = [-10.0, 10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let mut input = vec![0x06u8, 0x33];
         for &v in &db {
-            input.extend_from_slice(&v.to_le_bytes());
+            input.extend_from_slice(&v.to_be_bytes());
         }
         let result = custom_eq_gains_payload(&input);
         assert_eq!(result[0][2], 0); // -10 dB
@@ -452,7 +524,7 @@ mod tests {
         let db: [f32; 10] = [0.0, -12.0, 12.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let mut input = Vec::with_capacity(40);
         for &v in &db {
-            input.extend_from_slice(&v.to_le_bytes());
+            input.extend_from_slice(&v.to_be_bytes());
         }
         let out = gains_to_firmware_values_7plus(&input);
         assert_eq!(out[0], 24);
@@ -465,7 +537,7 @@ mod tests {
         let db: [f32; 10] = [-100.0, 100.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let mut input = Vec::with_capacity(40);
         for &v in &db {
-            input.extend_from_slice(&v.to_le_bytes());
+            input.extend_from_slice(&v.to_be_bytes());
         }
         let out = gains_to_firmware_values_7plus(&input);
         assert_eq!(out[0], 0);
@@ -477,7 +549,7 @@ mod tests {
         let db = [0.0_f32; 10];
         let mut input = vec![0x00u8, 0x33];
         for &v in &db {
-            input.extend_from_slice(&v.to_le_bytes());
+            input.extend_from_slice(&v.to_be_bytes());
         }
         let result = eq_gains_7plus_payload(&input);
         assert_eq!(result[0][0], 0x00);
@@ -513,5 +585,88 @@ mod tests {
         let result = muted_mic_brightness_write_payload(&input);
         assert_eq!(result[0][0], 0x00);
         assert_eq!(result[0][1], 0xAE);
+    }
+
+    // ── nova7gen2 parametric EQ (name / bands / commit) ─────────────────────────
+
+    /// Builds a fake `parametric_eq` codec serialisation: 6-byte header, 10
+    /// bands of `(freq: u16 BE, filter_type: u8, gain_db: f32 BE, q: f32 BE)`,
+    /// then the raw name bytes.
+    fn eq_input(
+        connection_type: u8,
+        preset_type: u8,
+        bands: &[(u16, u8, f32, f32); 10],
+        name: &str,
+    ) -> Vec<u8> {
+        let mut b = vec![0x00u8, 0xA7, connection_type, preset_type, 0x33, 0x27];
+        for &(freq, filter_type, gain, q) in bands {
+            b.extend_from_slice(&freq.to_be_bytes());
+            b.push(filter_type);
+            b.extend_from_slice(&gain.to_be_bytes());
+            b.extend_from_slice(&q.to_be_bytes());
+        }
+        b.extend_from_slice(name.as_bytes());
+        b
+    }
+
+    const FLAT_BAND: (u16, u8, f32, f32) = (0, 0, 0.0, 0.0);
+
+    #[test]
+    fn nova7gen2_eq_name_payload_includes_header_and_name() {
+        let bands = [FLAT_BAND; 10];
+        let input = eq_input(0x01, 1, &bands, "EQ1");
+        let result = nova7gen2_eq_name_payload(&input);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], [0x00, 0xA7, 0x01, 0x01, b'E', b'Q', b'1']);
+    }
+
+    #[test]
+    fn nova7gen2_eq_name_payload_empty_name() {
+        let bands = [FLAT_BAND; 10];
+        let input = eq_input(0x00, 0, &bands, "");
+        let result = nova7gen2_eq_name_payload(&input);
+        assert_eq!(result[0], [0x00, 0xA7, 0x00, 0x00]);
+    }
+
+    #[test]
+    fn nova7gen2_eq_bands_payload_converts_gain_and_q_factor() {
+        let mut bands = [FLAT_BAND; 10];
+        // -1.2 dB, 1.414 Q -> gain byte -12 (0xF4), q 1414 LE [0x86, 0x05]
+        bands[0] = (1000, 1, -1.2, 1.414);
+        // +12.0 dB, 10.0 Q -> gain byte 120 (0x78), q 10000 LE [0x10, 0x27]
+        bands[1] = (20000, 6, 12.0, 10.0);
+        let input = eq_input(0x02, 1, &bands, "");
+        let result = nova7gen2_eq_bands_payload(&input);
+        assert_eq!(result.len(), 1);
+        let p = &result[0];
+        assert_eq!(
+            &p[0..3],
+            [0x00, 0x33, 0x02],
+            "report_id, 0x33, connection_type"
+        );
+        // band 1: freq(2) + filter_type(1) + gain(1) + q(2) = 6 bytes, starting at offset 3
+        assert_eq!(&p[3..9], [0x03, 0xE8, 0x01, 0xF4, 0x86, 0x05]);
+        // band 2, offset 3 + 6 = 9
+        assert_eq!(&p[9..15], [0x4E, 0x20, 0x06, 0x78, 0x10, 0x27]);
+        // band 3 (flat/default), offset 15
+        assert_eq!(&p[15..21], [0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+        assert_eq!(p.len(), 3 + 10 * 6);
+    }
+
+    #[test]
+    fn nova7gen2_eq_bands_payload_clamps_out_of_range_gain() {
+        let mut bands = [FLAT_BAND; 10];
+        bands[0] = (100, 1, 100.0, 0.2); // way past ±12dB — must not panic or wrap silently
+        let input = eq_input(0x00, 0, &bands, "");
+        let result = nova7gen2_eq_bands_payload(&input);
+        assert_eq!(result[0][6], 127, "gain byte clamped to i8::MAX");
+    }
+
+    #[test]
+    fn nova7gen2_eq_commit_payload_is_report_id_and_update_complete() {
+        let bands = [FLAT_BAND; 10];
+        let input = eq_input(0x00, 0, &bands, "ignored");
+        let result = nova7gen2_eq_commit_payload(&input);
+        assert_eq!(result, vec![vec![0x00, 0x27]]);
     }
 }
