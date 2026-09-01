@@ -12,6 +12,7 @@ RUN apt-get update && \
         curl \
         pkg-config \
         libudev-dev \
+        libssl-dev \
         python3 \
         python3-venv \
         python3-pip \

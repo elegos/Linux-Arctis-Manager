@@ -7,6 +7,14 @@ License:        MIT
 URL:            https://github.com/elegos/Linux-Arctis-Manager
 Source0:        %{name}-%{version}.tar.gz
 
+# The venv bundles third-party scripts we don't control the shebang of (e.g.
+# PySide6's pyside_tool.py ships a bare `#!/usr/bin/env python`, which
+# brp-mangle-shebangs treats as a hard build error, not a warning, under
+# Fedora's explicit python2-vs-python3 policy). Nothing in this project
+# executes a venv-bundled script via its own shebang — lam-gui always
+# invokes $(VENVDIR)/bin/python3 explicitly — so the whole venv is exempt.
+%global __brp_mangle_shebangs_exclude_from ^/usr/lib(64)?/linux-arctis-manager/venv/.*$
+
 # The Python venv is built with stdlib venv + pip (pip resolves runtime
 # deps straight from pyproject.toml) — no uv binary needed at build time.
 # COPR builds have network access; Koji (official Fedora) does not — pip
@@ -17,6 +25,7 @@ BuildRequires:  rust
 BuildRequires:  python3
 BuildRequires:  python3-pip
 BuildRequires:  systemd-devel
+BuildRequires:  openssl-devel
 BuildRequires:  libcap
 
 Requires:       python3
@@ -41,7 +50,10 @@ equalizer settings, sidetone, ANC, LED profiles, and more.
 make build PREFIX=/usr
 
 %install
-make install DESTDIR=%{buildroot} PREFIX=/usr
+# LIBDIR: the Makefile defaults to $(PREFIX)/lib (correct for Arch/Debian,
+# which don't split lib/lib64); Fedora's own convention is %{_libdir}
+# (/usr/lib64 on x86_64), which %files below actually references.
+make install DESTDIR=%{buildroot} PREFIX=/usr LIBDIR=%{_libdir}
 
 %post
 # setcap cannot be applied during %%install (buildroot is not the live fs).
@@ -68,10 +80,11 @@ fi
 %{_bindir}/lam-gui
 %{_libexecdir}/lam-hidraw-helper
 %{_datadir}/linux-arctis-manager/
+%{_datadir}/applications/*.desktop
 %{_userunitdir}/lam-daemon.service
 %{_userunitdir}/lam-hidraw-helper.service
 %{_libdir}/linux-arctis-manager/
 
 %changelog
-* Mon Aug 25 2026 Giacomo Furlan <g.furlan@accenture.com> - 3.0.0~alpha1-1
+* Tue Aug 25 2026 Giacomo Furlan <g.furlan@accenture.com> - 3.0.0~alpha1-1
 - Initial v3 package: Rust daemon + Python Qt6 GUI, lam-cli removed
