@@ -8,9 +8,9 @@ RUN dnf update -y && \
     dnf install -y \
         rust \
         cargo \
-        uv \
         python3 \
         python3-devel \
+        python3-pip \
         systemd-devel \
         rpm-build \
         rpmdevtools \

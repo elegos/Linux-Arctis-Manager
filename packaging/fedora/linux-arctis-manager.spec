@@ -7,13 +7,15 @@ License:        MIT
 URL:            https://github.com/elegos/Linux-Arctis-Manager
 Source0:        %{name}-%{version}.tar.gz
 
-# uv is used to build the Python venv from the lockfile.
-# COPR builds have network access; Koji (official Fedora) does not — for Koji,
-# pre-generate a vendor tarball with: uv export --frozen --no-dev -o requirements.txt
+# The Python venv is built with stdlib venv + pip (pip resolves runtime
+# deps straight from pyproject.toml) — no uv binary needed at build time.
+# COPR builds have network access; Koji (official Fedora) does not — pip
+# still needs to reach PyPI either way, same as any other Python package
+# with unvendored dependencies.
 BuildRequires:  cargo
 BuildRequires:  rust
-BuildRequires:  uv
 BuildRequires:  python3
+BuildRequires:  python3-pip
 BuildRequires:  systemd-devel
 BuildRequires:  libcap
 
