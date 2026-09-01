@@ -15,6 +15,22 @@ Source0:        %{name}-%{version}.tar.gz
 # invokes $(VENVDIR)/bin/python3 explicitly — so the whole venv is exempt.
 %global __brp_mangle_shebangs_exclude_from ^/usr/lib(64)?/linux-arctis-manager/venv/.*$
 
+# Same reasoning, different check: rpmbuild's automatic dependency generator
+# scans every ELF file for Requires:/Provides:, including the venv's bundled
+# Qt6/PySide6 plugins — pulling in Requires: on things like Oracle/Mimer SQL
+# client libraries and an embedded-KMS Qt platform plugin that a desktop
+# install never has and this app never loads (PySide6 vendors the full Qt6
+# plugin set; nothing here selects a SQL backend or the eglfs-kms platform).
+# install-test's `dnf install` of the built .rpm is what actually caught
+# this — build-pkg alone never installs the package, just builds it.
+# Trade-off: this also drops genuinely-needed Requires: (libGL.so.1,
+# libxkbcommon.so.0, ...) that Qt's *real* platform/widgets code needs, not
+# just the unused plugins — acceptable since any real desktop session
+# already has them (X11/Wayland pulls them in regardless), same call made
+# for Debian's dh_shlibdeps -X venv exclude.
+%global __requires_exclude_from ^/usr/lib(64)?/linux-arctis-manager/venv/.*$
+%global __provides_exclude_from ^/usr/lib(64)?/linux-arctis-manager/venv/.*$
+
 # The Python venv is built with stdlib venv + pip (pip resolves runtime
 # deps straight from pyproject.toml) — no uv binary needed at build time.
 # COPR builds have network access; Koji (official Fedora) does not — pip
