@@ -10,7 +10,7 @@ use device_config::codec::FieldValue;
 use device_config::{DeviceConfig, FieldDef, FieldOrRef, FieldType, StructDef};
 use serde_json::{Map, Value as JsonValue};
 use tokio::sync::{broadcast, Mutex};
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 use zbus::object_server::SignalEmitter;
 use zbus::{connection, interface};
 
@@ -799,6 +799,24 @@ fn save_nc_config(base: &std::path::Path, cfg: &NcConfig) -> bool {
     std::fs::write(&path, json).is_ok()
 }
 
+/// Apply `cfg` to the LADSPA/RNNoise chain and route `mic_router`
+/// accordingly — the part of `SetNCSettings` that isn't JSON
+/// parsing/persistence/signaling, so it's also callable from
+/// [`autostart_nc_and_vc`] at daemon startup.
+async fn apply_and_route_nc(
+    cfg: &NcConfig,
+    nc_runtime: &Arc<Mutex<NcRuntime>>,
+    mic_router: &Arc<Mutex<MicRouterState>>,
+) {
+    let output_source = {
+        let mut rt = nc_runtime.lock().await;
+        crate::nc_manager::apply_nc(cfg, &mut rt).await
+    };
+    let mut mr = mic_router.lock().await;
+    let source = output_source.map(str::to_owned);
+    crate::mic_router::set_nc_source(&mut mr, source).await;
+}
+
 struct NcInterface {
     settings_base_dir: std::path::PathBuf,
     signal_tx: broadcast::Sender<SignalEvent>,
@@ -835,20 +853,18 @@ impl NcInterface {
             }
         };
 
-        if !save_nc_config(&self.settings_base_dir, &cfg) {
+        // See `SetVCSettings`'s identical comment: `autostart: false` means
+        // "off" must be what's persisted, even while `preset` is applied
+        // live for this session.
+        let mut persisted_cfg = cfg.clone();
+        if !persisted_cfg.autostart {
+            persisted_cfg.preset = "off".to_owned();
+        }
+        if !save_nc_config(&self.settings_base_dir, &persisted_cfg) {
             warn!("SetNcSettings: failed to persist config");
         }
 
-        let output_source = {
-            let mut rt = self.nc_runtime.lock().await;
-            crate::nc_manager::apply_nc(&cfg, &mut rt).await
-        };
-
-        {
-            let mut mr = self.mic_router.lock().await;
-            let source = output_source.map(str::to_owned);
-            crate::mic_router::set_nc_source(&mut mr, source).await;
-        }
+        apply_and_route_nc(&cfg, &self.nc_runtime, &self.mic_router).await;
 
         let out_json = serde_json::to_string(&cfg).unwrap_or_else(|_| "{}".to_string());
         let _ = self.signal_tx.send(SE::NCChanged { json: out_json });
@@ -861,15 +877,16 @@ impl NcInterface {
 
 // ── VC interface ──────────────────────────────────────────────────────────────
 //
-// Covers everything server-side today: the LADSPA effect chain, local model
-// management, HuggingFace search/download, base model download, and
-// calibration *recording*. RVC live conversion, RVC metrics/live-param
-// tuning, GPU detection, and calibration *rendering* are not exposed here —
-// they need the inference engine ([E10-S6a]/[E10-S6b], see
-// docs/voice-changing-feature.md). `GetVCCapabilities` reports
-// `rvc.available: false` so clients can gate their RVC UI on it instead of
-// hitting an UnknownMethod error.
+// Covers everything server-side: the LADSPA effect chain, local model
+// management, HuggingFace search/download, base model download, calibration
+// (recording + rendering, [E10-S6b]), and — since [E10-S8] — the live RVC
+// chain (`GetRVCMetrics`/`SetRVCLiveParams`, real mic-in/speaker-out audio
+// via `rvc_live_chain.rs`). GPU detection/dependency install
+// (`DetectGPU`/`InstallAIDeps`) are still not exposed here — see
+// `vc_onnxruntime_detect.rs`/`vc_export.rs`'s own detection-only methods
+// below instead.
 
+use crate::rvc_live_chain::RvcLiveRuntime;
 use crate::vc_config::{VcLadspaConfig, VcSettings};
 
 fn vc_config_path(base: &std::path::Path) -> std::path::PathBuf {
@@ -961,6 +978,7 @@ struct VcInterface {
     settings_base_dir: std::path::PathBuf,
     signal_tx: broadcast::Sender<SignalEvent>,
     vc_runtime: Arc<Mutex<VcLadspaRuntime>>,
+    rvc_live: Arc<Mutex<RvcLiveRuntime>>,
     mic_router: Arc<Mutex<MicRouterState>>,
     calibration: Arc<Mutex<CalibrationSession>>,
 }
@@ -998,6 +1016,12 @@ impl VcInterface {
             .as_ref()
             .map(|(_, cap)| vec![cap.display_name()])
             .unwrap_or_default();
+        // Surfaced here too (not just `DetectOnnxRuntime`'s manually-opened
+        // install dialog) so a CUDA-capable-but-cuDNN-less system doesn't
+        // silently report `available: true` and then hard-fail at the
+        // first real live/calibration session — see `rvc_live_chain.rs`'s
+        // module doc and `cudnn_missing`'s own doc comment.
+        let cudnn_missing = crate::vc_onnxruntime_detect::cudnn_missing(onnxruntime.as_ref());
 
         serde_json::json!({
             "ladspa": ladspa,
@@ -1008,6 +1032,8 @@ impl VcInterface {
                 "base_models": { "rmvpe": rmvpe, "contentvec": contentvec },
                 "models": models,
                 "models_folder": models_folder.display().to_string(),
+                "cudnn_missing": cudnn_missing,
+                "cudnn_hint": crate::vc_onnxruntime_detect::cudnn_install_command().await,
             },
         })
         .to_string()
@@ -1024,9 +1050,9 @@ impl VcInterface {
     /// enable it would otherwise silently run the unrelated LADSPA chain
     /// instead. Never actually activate LADSPA unless `mode` is `"ladspa"`
     /// — the server is the source of truth on what can run, not whatever a
-    /// client happens to send. RVC mode itself doesn't activate anything
-    /// here yet either — see `CalibrationStartRender` for the one RVC path
-    /// that *is* wired ([E10-S6b]); the live chain is [E10-S8], not started.
+    /// client happens to send. Symmetrically, the live RVC chain
+    /// ([E10-S8]) only ever runs when `mode == "rvc"` — switching mode (or
+    /// disabling) tears down whichever of the two was previously active.
     #[zbus(name = "SetVCSettings")]
     async fn set_vc_settings(&self, json: &str) -> bool {
         let cfg: VcSettings = match serde_json::from_str(json) {
@@ -1037,32 +1063,59 @@ impl VcInterface {
             }
         };
 
-        if !save_vc_config(&self.settings_base_dir, &cfg) {
+        // Persist `enabled: false` whenever `autostart` is off — "on for
+        // this session only" must not survive as "on" in the file a future
+        // restart reads, or the GUI would keep showing it checked even
+        // though nothing actually restarted it (this exact confusion is
+        // why the tri-state control exists at all). The *live* apply below
+        // still uses the real `cfg.ladspa.enabled` the client sent, and the
+        // `VCChanged` signal below still echoes the real `cfg`, so this
+        // session's own GUI reflects reality immediately — only what's
+        // written to disk is sanitized.
+        let mut persisted_cfg = cfg.clone();
+        if !persisted_cfg.ladspa.autostart {
+            persisted_cfg.ladspa.enabled = false;
+        }
+        if !save_vc_config(&self.settings_base_dir, &persisted_cfg) {
             warn!("SetVCSettings: failed to persist config");
         }
 
-        let effective_cfg = if cfg.mode == "ladspa" {
-            cfg.ladspa.clone()
-        } else {
-            VcLadspaConfig {
-                enabled: false,
-                ..cfg.ladspa.clone()
-            }
-        };
-        let output_source = {
-            let mut rt = self.vc_runtime.lock().await;
-            crate::vc_ladspa_chain::apply_vc_ladspa(&effective_cfg, &mut rt).await
-        };
-
-        {
-            let mut mr = self.mic_router.lock().await;
-            let source = output_source.map(str::to_owned);
-            crate::mic_router::set_vc_source(&mut mr, source).await;
-        }
+        apply_and_route_vc(
+            &cfg,
+            &self.settings_base_dir,
+            &self.vc_runtime,
+            &self.rvc_live,
+            &self.mic_router,
+            &self.signal_tx,
+        )
+        .await;
 
         let out_json = serde_json::to_string(&cfg).unwrap_or_else(|_| "{}".to_string());
         let _ = self.signal_tx.send(SE::VCChanged { json: out_json });
         true
+    }
+
+    #[zbus(name = "GetRVCMetrics")]
+    async fn get_rvc_metrics(&self) -> String {
+        let rt = self.rvc_live.lock().await;
+        serde_json::to_string(&rt.metrics_snapshot()).unwrap_or_else(|_| "{}".to_string())
+    }
+
+    /// Live tuning update on the running RVC chain — no rebuild. Does NOT
+    /// persist (matches the legacy Python `SetRVCLiveParams`'s own doc
+    /// comment); the GUI persists converged values via `SetVCSettings` once
+    /// an auto-tune session ends. `false` when no live chain is running.
+    #[zbus(name = "SetRVCLiveParams")]
+    async fn set_rvc_live_params(&self, params_json: &str) -> bool {
+        let params: crate::vc_rvc_config::RvcParams = match serde_json::from_str(params_json) {
+            Ok(p) => p,
+            Err(e) => {
+                warn!("SetRVCLiveParams: invalid JSON: {e}");
+                return false;
+            }
+        };
+        let rt = self.rvc_live.lock().await;
+        rt.set_live_params(params)
     }
 
     #[zbus(signal)]
@@ -1509,25 +1562,269 @@ impl VcInterface {
     /// is findable — `engine::init_runtime` self-heals the common "pip
     /// installed but not on the loader's search path" case, but a genuinely
     /// missing cuDNN still needs the same guided-install treatment
-    /// `libonnxruntime` itself gets (see `CUDNN_PIP_HINT`'s doc comment for
-    /// why that's a single command rather than a per-distro tutorial set).
+    /// `libonnxruntime` itself gets (see `cudnn_install_command`'s doc
+    /// comment for why that's a single, CUDA-version-detected `pip`
+    /// command rather than a per-distro tutorial set).
     #[zbus(name = "DetectOnnxRuntime")]
     async fn detect_onnxruntime(&self) -> String {
         let vendor = crate::vc_onnxruntime_detect::detect_gpu_vendor();
         let found = crate::vc_onnxruntime_detect::find_onnxruntime_dylib(vendor);
-        let needs_cudnn = found
-            .as_ref()
-            .is_some_and(|(_, c)| *c == crate::vc_onnxruntime_detect::OnnxRuntimeCapability::Cuda);
-        let cudnn_found = needs_cudnn.then(crate::vc_onnxruntime_detect::find_libcudnn);
         serde_json::json!({
             "found": found.is_some(),
             "path": found.as_ref().map(|(p, _)| p.display().to_string()),
             "capability": found.as_ref().map(|(_, c)| c.display_name()),
             "accelerated": found.as_ref().is_some_and(|(_, c)| c.matches(vendor)),
-            "cudnn_missing": needs_cudnn && cudnn_found.flatten().is_none(),
-            "cudnn_hint": crate::vc_onnxruntime_detect::CUDNN_PIP_HINT,
+            "cudnn_missing": crate::vc_onnxruntime_detect::cudnn_missing(found.as_ref()),
+            "cudnn_hint": crate::vc_onnxruntime_detect::cudnn_install_command().await,
         })
         .to_string()
+    }
+
+    /// Fire-and-forget: re-detects the CUDA major version and runs `pip
+    /// install --user nvidia-cudnn-cuXX` accordingly — only ever called
+    /// after the GUI has shown that exact command (`cudnn_hint` from
+    /// `GetVCCapabilities`/`DetectOnnxRuntime`) and the user agreed to run
+    /// it. Reports via `CudnnInstallProgress`/`CudnnInstallComplete`.
+    #[zbus(name = "InstallCudnn")]
+    async fn install_cudnn(&self) {
+        let signal_tx = self.signal_tx.clone();
+        tokio::spawn(async move {
+            let _ = signal_tx.send(SE::VCCudnnInstallProgress {
+                message: "Installing cuDNN...".to_owned(),
+            });
+            let json = match crate::vc_onnxruntime_detect::install_cudnn().await {
+                Ok(()) => serde_json::json!({
+                    "success": true,
+                    "message": "cuDNN installed.",
+                })
+                .to_string(),
+                Err(e) => serde_json::json!({
+                    "success": false,
+                    "message": e,
+                })
+                .to_string(),
+            };
+            let _ = signal_tx.send(SE::VCCudnnInstallComplete { json });
+        });
+    }
+
+    #[zbus(signal)]
+    async fn cudnn_install_progress(emitter: &SignalEmitter<'_>, message: &str)
+        -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    async fn cudnn_install_complete(
+        emitter: &SignalEmitter<'_>,
+        result_json: &str,
+    ) -> zbus::Result<()>;
+
+    /// The live RVC chain failed — see `rvc_live_chain.rs`'s module doc and
+    /// `apply_rvc`'s doc comment for what's covered (validation failures in
+    /// `try_apply_rvc_live` and background setup failures in
+    /// `run_live_loop` alike).
+    #[zbus(signal)]
+    async fn live_chain_error(emitter: &SignalEmitter<'_>, message: &str) -> zbus::Result<()>;
+}
+
+/// Apply `cfg` (LADSPA and/or the live RVC chain, whichever `cfg.mode`
+/// selects) and route `mic_router` accordingly — the part of
+/// `SetVCSettings` that isn't JSON parsing/persistence/signaling, so it's
+/// also callable from [`autostart_nc_and_vc`] at daemon startup.
+#[allow(clippy::too_many_arguments)]
+async fn apply_and_route_vc(
+    cfg: &VcSettings,
+    settings_base_dir: &std::path::Path,
+    vc_runtime: &Arc<Mutex<VcLadspaRuntime>>,
+    rvc_live: &Arc<Mutex<RvcLiveRuntime>>,
+    mic_router: &Arc<Mutex<MicRouterState>>,
+    signal_tx: &broadcast::Sender<SignalEvent>,
+) {
+    let effective_ladspa = if cfg.mode == "ladspa" {
+        cfg.ladspa.clone()
+    } else {
+        VcLadspaConfig {
+            enabled: false,
+            ..cfg.ladspa.clone()
+        }
+    };
+    let ladspa_output_source = {
+        let mut rt = vc_runtime.lock().await;
+        crate::vc_ladspa_chain::apply_vc_ladspa(&effective_ladspa, &mut rt).await
+    };
+
+    let rvc_active = cfg.mode == "rvc" && cfg.ladspa.enabled;
+    let rvc_output_source = if rvc_active {
+        apply_rvc_live(cfg, settings_base_dir, mic_router, rvc_live, signal_tx).await
+    } else {
+        let mut rt = rvc_live.lock().await;
+        crate::rvc_live_chain::teardown_rvc(&mut rt).await;
+        None
+    };
+
+    let mut mr = mic_router.lock().await;
+    let source = ladspa_output_source
+        .or(rvc_output_source)
+        .map(str::to_owned);
+    crate::mic_router::set_vc_source(&mut mr, source).await;
+}
+
+/// Resolve `cfg.rvc.model` and (re)apply the live chain. Returns
+/// [`crate::rvc_live_chain::RVC_MIC_SOURCE`] on success; on any resolution
+/// failure (no model selected, model not found, not exported, no
+/// onnxruntime), logs why and tears down whatever was previously running
+/// rather than leaving a stale chain active under now-invalid settings.
+async fn apply_rvc_live(
+    cfg: &VcSettings,
+    settings_base_dir: &std::path::Path,
+    mic_router: &Arc<Mutex<MicRouterState>>,
+    rvc_live: &Arc<Mutex<RvcLiveRuntime>>,
+    signal_tx: &broadcast::Sender<SignalEvent>,
+) -> Option<&'static str> {
+    let result = try_apply_rvc_live(cfg, settings_base_dir, mic_router, rvc_live, signal_tx).await;
+    if result.is_none() {
+        let mut rt = rvc_live.lock().await;
+        crate::rvc_live_chain::teardown_rvc(&mut rt).await;
+    }
+    result
+}
+
+/// Logs and sends `VCLiveChainError` — used for every `try_apply_rvc_live`
+/// validation failure below, so a client sees *why* RVC didn't start even
+/// when the cause is resolved before the background chain (and its own
+/// error signal) ever gets a chance to run.
+fn warn_live_error(signal_tx: &broadcast::Sender<SignalEvent>, message: String) {
+    warn!("SetVCSettings: {message}");
+    let _ = signal_tx.send(SE::VCLiveChainError { message });
+}
+
+async fn try_apply_rvc_live(
+    cfg: &VcSettings,
+    settings_base_dir: &std::path::Path,
+    mic_router: &Arc<Mutex<MicRouterState>>,
+    rvc_live: &Arc<Mutex<RvcLiveRuntime>>,
+    signal_tx: &broadcast::Sender<SignalEvent>,
+) -> Option<&'static str> {
+    if cfg.rvc.model.is_empty() {
+        warn_live_error(
+            signal_tx,
+            "RVC mode enabled but no model selected".to_owned(),
+        );
+        return None;
+    }
+    let model = crate::vc_models::find_model(settings_base_dir, &cfg.rvc.model).or_else(|| {
+        warn_live_error(
+            signal_tx,
+            format!("RVC model {:?} not found", cfg.rvc.model),
+        );
+        None
+    })?;
+    let onnx_path = model.onnx_path.clone().or_else(|| {
+        warn_live_error(
+            signal_tx,
+            format!(
+                "RVC model {:?} has no exported .onnx (run export_onnx.py on its .pth first)",
+                model.name
+            ),
+        );
+        None
+    })?;
+    let vendor = crate::vc_onnxruntime_detect::detect_gpu_vendor();
+    let (dylib_path, _) =
+        crate::vc_onnxruntime_detect::find_onnxruntime_dylib(vendor).or_else(|| {
+            warn_live_error(signal_tx, "no onnxruntime library found".to_owned());
+            None
+        })?;
+
+    let snapshot = cfg.rvc.model_params.get(&model.name);
+    let index_path = if cfg.rvc.params.index_rate > 0.0 {
+        crate::vc_models::find_index_path(&model.path)
+    } else {
+        None
+    };
+    let base_models_dir = crate::vc_base_models::base_models_dir(settings_base_dir);
+
+    let source_id = {
+        let mr = mic_router.lock().await;
+        mr.nc_source().map(str::to_owned)
+    }
+    .filter(|s| !s.is_empty())
+    .unwrap_or_else(|| cfg.ladspa.source_id.clone());
+    let source_id = if source_id.is_empty() {
+        match crate::audio::find_physical_source().await {
+            Some(s) => s,
+            None => {
+                warn_live_error(
+                    signal_tx,
+                    "no source_id configured and physical source not found".to_owned(),
+                );
+                return None;
+            }
+        }
+    } else {
+        source_id
+    };
+
+    let mut rt = rvc_live.lock().await;
+    crate::rvc_live_chain::apply_rvc(
+        &cfg.rvc,
+        crate::rvc_live_chain::LiveModel {
+            onnx_path,
+            sample_rate_hint: snapshot.and_then(|s| s.sample_rate_override),
+            index_path,
+        },
+        source_id,
+        base_models_dir,
+        dylib_path,
+        &mut rt,
+        signal_tx.clone(),
+    )
+    .await
+}
+
+/// Called once at daemon startup and on device (re)connect — re-applies
+/// NC/VC if their persisted config has `autostart: true`, mirroring the
+/// treatment device-hardware settings already get (see the "re-applying N
+/// persisted setting(s)" log line in `main.rs`) but that PipeWire-side
+/// NC/VC chains never had: previously, a persisted `enabled: true` was
+/// only ever *acted on* by an explicit `SetNCSettings`/`SetVCSettings`
+/// call, so it silently stopped being true (in effect, if not in the
+/// GUI's checkbox) across every daemon restart.
+#[allow(clippy::too_many_arguments)]
+/// Takes ownership of every argument (rather than the `&`-reference shape
+/// the rest of this module uses) so it can be handed to `tokio::spawn`
+/// directly from `main.rs` without an extra wrapping `async move` block.
+pub async fn autostart_nc_and_vc(
+    settings_base_dir: std::path::PathBuf,
+    nc_runtime: Arc<Mutex<NcRuntime>>,
+    vc_runtime: Arc<Mutex<VcLadspaRuntime>>,
+    rvc_live: Arc<Mutex<RvcLiveRuntime>>,
+    mic_router: Arc<Mutex<MicRouterState>>,
+    signal_tx: broadcast::Sender<SignalEvent>,
+) {
+    let nc_cfg = load_nc_config(&settings_base_dir);
+    if nc_cfg.autostart && nc_cfg.active() {
+        info!(
+            "autostart: re-applying persisted NC config ({})",
+            nc_cfg.preset
+        );
+        apply_and_route_nc(&nc_cfg, &nc_runtime, &mic_router).await;
+    }
+
+    let vc_cfg = load_vc_config(&settings_base_dir);
+    if vc_cfg.ladspa.autostart && vc_cfg.ladspa.enabled {
+        info!(
+            "autostart: re-applying persisted VC config (mode={})",
+            vc_cfg.mode
+        );
+        apply_and_route_vc(
+            &vc_cfg,
+            &settings_base_dir,
+            &vc_runtime,
+            &rvc_live,
+            &mic_router,
+            &signal_tx,
+        )
+        .await;
     }
 }
 
@@ -1550,6 +1847,7 @@ pub async fn start_dbus_service(
     nc_runtime: Arc<Mutex<NcRuntime>>,
     mic_router: Arc<Mutex<MicRouterState>>,
     vc_runtime: Arc<Mutex<VcLadspaRuntime>>,
+    rvc_live: Arc<Mutex<RvcLiveRuntime>>,
     calibration: Arc<Mutex<CalibrationSession>>,
 ) -> zbus::Result<zbus::Connection> {
     let eq_runtime = EqRuntime::new();
@@ -1616,6 +1914,7 @@ pub async fn start_dbus_service(
                 settings_base_dir,
                 signal_tx: signal_tx.clone(),
                 vc_runtime,
+                rvc_live,
                 mic_router,
                 calibration,
             },
@@ -1725,6 +2024,22 @@ pub async fn start_dbus_service(
                 SignalEvent::VCExportComplete { json } => {
                     if let Err(e) = VcInterface::export_complete(&vc_emitter, &json).await {
                         error!("VCExportComplete signal failed: {e}");
+                    }
+                }
+                SignalEvent::VCCudnnInstallProgress { message } => {
+                    if let Err(e) = VcInterface::cudnn_install_progress(&vc_emitter, &message).await
+                    {
+                        error!("VCCudnnInstallProgress signal failed: {e}");
+                    }
+                }
+                SignalEvent::VCCudnnInstallComplete { json } => {
+                    if let Err(e) = VcInterface::cudnn_install_complete(&vc_emitter, &json).await {
+                        error!("VCCudnnInstallComplete signal failed: {e}");
+                    }
+                }
+                SignalEvent::VCLiveChainError { message } => {
+                    if let Err(e) = VcInterface::live_chain_error(&vc_emitter, &message).await {
+                        error!("VCLiveChainError signal failed: {e}");
                     }
                 }
                 SignalEvent::DeviceConnected {

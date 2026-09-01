@@ -13,6 +13,7 @@ mod ladspa_util;
 mod mic_router;
 mod nc_config;
 mod nc_manager;
+mod rvc_live_chain;
 mod state;
 mod stream_monitor;
 mod vc;
@@ -244,7 +245,14 @@ async fn run_device(
         let fd = match hidraw_client::request_fd(&helper_sock, &path_str).await {
             Ok(fd) => fd,
             Err(e) => {
-                warn!("fd request failed for {path_str}: {e}");
+                // Expected/routine while the headset is off or disconnected
+                // — this loop retries every 3s for as long as that's true,
+                // same "not ready, retrying" situation the sibling
+                // `device_init` timeout case below already logs at `info!`
+                // rather than `warn!`. At `warn!` this spammed hundreds of
+                // identical lines for a headset left off for any length of
+                // time; `debug!` still shows it with `--log-level debug`.
+                debug!("fd request failed for {path_str}: {e}");
                 tokio::time::sleep(Duration::from_secs(3)).await;
                 continue 'reconnect;
             }
@@ -600,12 +608,28 @@ async fn main() {
             }
         });
 
-    let filter = if let Some(ref level) = log_level {
-        tracing_subscriber::EnvFilter::new(level)
+    // `ort` bridges ONNX Runtime's own C++ logging into `tracing` at `info`
+    // (`ort::logging`/`ort::ep`/`ort::load_dynamic` targets) — graph
+    // optimizer/session-init internals, not this daemon's own operational
+    // log, hundreds of lines per RVC chain (re)build. Quieted by appending
+    // `ort=warn` to whatever base filter is in effect — *appending*, not
+    // just as an unreachable fallback default, because an explicit
+    // `--log-level`/`RUST_LOG` (e.g. the installed systemd unit's own
+    // `RUST_LOG=info,lam_daemon::focus_monitor=debug`) would otherwise
+    // bypass the plain-"info" fallback entirely and this daemon's own
+    // targeted overrides would keep letting ort's flood straight through.
+    // Skipped only when the base filter already mentions `ort` itself
+    // (e.g. `RUST_LOG=ort=debug` to deliberately see it again) — an
+    // explicit ask always wins.
+    let base_filter = log_level
+        .or_else(|| std::env::var("RUST_LOG").ok())
+        .unwrap_or_else(|| "info".to_owned());
+    let filter_str = if base_filter.contains("ort") {
+        base_filter
     } else {
-        tracing_subscriber::EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
+        format!("{base_filter},ort=warn")
     };
+    let filter = tracing_subscriber::EnvFilter::new(filter_str);
 
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
@@ -652,6 +676,8 @@ async fn main() {
         Arc::new(Mutex::new(nc_manager::NcRuntime::new()));
     let vc_runtime: Arc<Mutex<vc_ladspa_chain::VcLadspaRuntime>> =
         Arc::new(Mutex::new(vc_ladspa_chain::VcLadspaRuntime::new()));
+    let rvc_live_runtime: Arc<Mutex<rvc_live_chain::RvcLiveRuntime>> =
+        Arc::new(Mutex::new(rvc_live_chain::RvcLiveRuntime::new()));
     let mic_router: Arc<Mutex<mic_router::MicRouterState>> =
         Arc::new(Mutex::new(mic_router::MicRouterState::new()));
 
@@ -665,11 +691,25 @@ async fn main() {
         Arc::clone(&nc_runtime),
         Arc::clone(&mic_router),
         Arc::clone(&vc_runtime),
+        Arc::clone(&rvc_live_runtime),
         Arc::new(Mutex::new(vc_calibration::CalibrationSession::new())),
     )
     .await
     {
         Ok(c) => {
+            // Fire-and-forget: re-apply NC/VC if their persisted config has
+            // `autostart: true` — see `dbus::autostart_nc_and_vc`'s doc
+            // comment. Spawned rather than awaited so a slow/absent
+            // physical mic (`find_physical_source`'s own retry loop)
+            // doesn't delay the rest of startup.
+            tokio::spawn(dbus::autostart_nc_and_vc(
+                user_settings_base_dir(),
+                Arc::clone(&nc_runtime),
+                Arc::clone(&vc_runtime),
+                Arc::clone(&rvc_live_runtime),
+                Arc::clone(&mic_router),
+                signal_tx.clone(),
+            ));
             info!("D-Bus service registered");
             Some(c)
         }
@@ -687,6 +727,7 @@ async fn main() {
         audio_shared,
         nc_runtime,
         vc_runtime,
+        rvc_live_runtime,
         mic_router,
     )
     .await;
@@ -781,6 +822,7 @@ async fn run_main_loop(
     audio_shared: Arc<Mutex<Option<audio::AudioSetup>>>,
     nc_runtime: Arc<Mutex<nc_manager::NcRuntime>>,
     vc_runtime: Arc<Mutex<vc_ladspa_chain::VcLadspaRuntime>>,
+    rvc_live_runtime: Arc<Mutex<rvc_live_chain::RvcLiveRuntime>>,
     mic_router: Arc<Mutex<mic_router::MicRouterState>>,
 ) {
     let existing = match hotplug::scan_existing(&[]) {
@@ -963,6 +1005,7 @@ async fn run_main_loop(
                         mic_router::teardown(&mut *mic_router.lock().await).await;
                         nc_manager::teardown_nc(&mut *nc_runtime.lock().await).await;
                         vc_ladspa_chain::teardown_vc_ladspa(&mut *vc_runtime.lock().await).await;
+                        rvc_live_chain::teardown_rvc(&mut *rvc_live_runtime.lock().await).await;
                         cleanup_device(&app_state, &dev.hidraw_path, dev.pid, &signal_tx).await;
                     }
                 }
@@ -989,4 +1032,5 @@ async fn run_main_loop(
     mic_router::teardown(&mut *mic_router.lock().await).await;
     nc_manager::teardown_nc(&mut *nc_runtime.lock().await).await;
     vc_ladspa_chain::teardown_vc_ladspa(&mut *vc_runtime.lock().await).await;
+    rvc_live_chain::teardown_rvc(&mut *rvc_live_runtime.lock().await).await;
 }

@@ -144,6 +144,9 @@ class DbusWrapper(QObject):
     sig_export_deps_complete = Signal(bool, str)
     sig_export_progress = Signal(str)
     sig_export_complete = Signal(bool, str, str)  # (success, message, model_name)
+    sig_cudnn_install_progress = Signal(str)
+    sig_cudnn_install_complete = Signal(bool, str)
+    sig_live_chain_error = Signal(str)
 
     logger = logging.getLogger('DbusWrapper')
 
@@ -320,6 +323,20 @@ class DbusWrapper(QObject):
                 except Exception:
                     self.sig_export_complete.emit(False, result_json, '')
 
+            def on_cudnn_install_progress(message: str) -> None:
+                self.sig_cudnn_install_progress.emit(message)
+
+            def on_cudnn_install_complete(result_json: str) -> None:
+                try:
+                    data = json.loads(result_json)
+                    self.sig_cudnn_install_complete.emit(
+                        data.get('success', False), data.get('message', ''))
+                except Exception:
+                    self.sig_cudnn_install_complete.emit(False, result_json)
+
+            def on_live_chain_error(message: str) -> None:
+                self.sig_live_chain_error.emit(message)
+
             # No InstallProgress/InstallComplete subscription: the v3 Rust
             # daemon has no runtime Python deps to install, so VcInterface
             # doesn't declare those signals — dbus_next raises AttributeError
@@ -334,6 +351,9 @@ class DbusWrapper(QObject):
             iface.on_export_deps_complete(on_export_deps_complete)       # type: ignore
             iface.on_export_progress(on_export_progress)                 # type: ignore
             iface.on_export_complete(on_export_complete)                 # type: ignore
+            iface.on_cudnn_install_progress(on_cudnn_install_progress)   # type: ignore
+            iface.on_cudnn_install_complete(on_cudnn_install_complete)   # type: ignore
+            iface.on_live_chain_error(on_live_chain_error)               # type: ignore
 
             self._vc_signal_loop = asyncio.get_running_loop()
             self._stop_vc_signal_future = self._vc_signal_loop.create_future()
@@ -756,6 +776,11 @@ class DbusWrapper(QObject):
     def install_export_deps() -> None:
         Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async(
             'InstallExportDeps', '', []))).start()
+
+    @staticmethod
+    def install_cudnn() -> None:
+        Thread(target=lambda: asyncio.run(DbusWrapper._call_vc_async(
+            'InstallCudnn', '', []))).start()
 
     @staticmethod
     def ensure_model_exported(name: str, qt_signal: SignalInstance) -> None:

@@ -172,6 +172,28 @@ impl Pipeline {
         self
     }
 
+    /// Live tuning update — `rvc_live_chain.rs`'s inference loop calls this
+    /// once per hop with whatever `SetRVCLiveParams` last pushed, so a
+    /// running conversion picks up new params without a chain rebuild.
+    pub fn set_params(&mut self, params: RvcParams) {
+        self.params = params;
+    }
+
+    /// Runtime counterpart to [`Self::with_gate_calibration`] — same
+    /// effect, callable after construction. `rvc_live_chain.rs`'s
+    /// inference loop uses this once, early in a session, after measuring
+    /// the real capture's own leading noise floor (`vc_dsp::
+    /// detect_leading_noise_floor`/`calibrate_gate_from_noise_floor`): the
+    /// hardcoded defaults assume input already normalized to roughly the
+    /// model's target level (as calibration *rendering* does, up front, on
+    /// the whole recording) — a raw, unboosted live mic capture can sit
+    /// well under them even during loud, sustained speech, found live via
+    /// the VAD gate never once opening across thousands of consecutive
+    /// hops.
+    pub fn set_gate_calibration(&mut self, gate: GateCalibration) {
+        self.gate = gate;
+    }
+
     /// `audio`: mono float32 `[-1,1]` at `sr` (always 16kHz in this
     /// daemon's real usage — kept as a parameter for fidelity with the
     /// Python reference, which does too). `pitch_offset`: semitones.

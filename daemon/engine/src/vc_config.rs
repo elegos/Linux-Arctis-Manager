@@ -174,6 +174,14 @@ impl Default for ReverbConfig {
 #[serde(default)]
 pub struct VcLadspaConfig {
     pub enabled: bool,
+    /// When `true` *and* `enabled`, the daemon re-applies this config on its
+    /// own startup (and on device reconnect) instead of staying inactive
+    /// until a client calls `SetVCSettings` again — the tri-state "off /
+    /// this session only / always" the GUI's Enable control exposes.
+    /// `false` (the default) matches the pre-existing behavior: `enabled`
+    /// is remembered for display, but only ever *acted on* by an explicit
+    /// client call.
+    pub autostart: bool,
     /// Stable ALSA `node.name` of the physical mic source to process.
     pub source_id: String,
     pub pitch: PitchConfig,
@@ -262,6 +270,20 @@ mod tests {
     }
 
     #[test]
+    fn autostart_defaults_to_false() {
+        assert!(!VcLadspaConfig::default().autostart);
+    }
+
+    #[test]
+    fn autostart_missing_from_json_deserializes_to_false() {
+        // Old persisted configs written before `autostart` existed —
+        // `#[serde(default)]` must fill it in as `false`, not fail to parse.
+        let cfg: VcLadspaConfig = serde_json::from_str(r#"{"enabled": true}"#).unwrap();
+        assert!(!cfg.autostart);
+        assert!(cfg.enabled);
+    }
+
+    #[test]
     fn active_when_enabled() {
         let cfg = VcLadspaConfig {
             enabled: true,
@@ -315,6 +337,7 @@ mod tests {
     fn roundtrip_full_config() {
         let cfg = VcLadspaConfig {
             enabled: true,
+            autostart: true,
             source_id: "alsa_input.usb-SteelSeries-00.mono-fallback".to_owned(),
             pitch: PitchConfig {
                 enabled: true,
