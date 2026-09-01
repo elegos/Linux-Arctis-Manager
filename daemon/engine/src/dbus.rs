@@ -74,6 +74,13 @@ impl StatusInterface {
 
     #[zbus(signal)]
     async fn device_disconnected(emitter: &SignalEmitter<'_>, product_id: u16) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    async fn device_firmware_update_mode(
+        emitter: &SignalEmitter<'_>,
+        product_id: u16,
+        name: &str,
+    ) -> zbus::Result<()>;
 }
 
 // ── Settings interface ────────────────────────────────────────────────────────
@@ -2091,6 +2098,14 @@ pub async fn start_dbus_service(
                     if let Err(e) = StatusInterface::device_disconnected(&status_emitter, pid).await
                     {
                         error!("DeviceDisconnected signal failed: {e}");
+                    }
+                }
+                SignalEvent::DeviceFirmwareUpdateMode { pid, name } => {
+                    if let Err(e) =
+                        StatusInterface::device_firmware_update_mode(&status_emitter, pid, &name)
+                            .await
+                    {
+                        error!("DeviceFirmwareUpdateMode signal failed: {e}");
                     }
                 }
             }

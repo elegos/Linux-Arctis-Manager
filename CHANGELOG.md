@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - EQ presets (10-band and 15-band), saved as YAML, with a curve editor and per-band reset to 0 dB.
 - Audio output can be redirected automatically on headset connect/disconnect (General settings).
 - Device settings now persist across daemon restarts.
+- The daemon now recognises a device that re-enumerates in firmware update mode (bootloader PID) instead of treating it as an unknown device: no init sequence is run and no settings are exposed while it's in that state, and a new D-Bus signal (`DeviceFirmwareUpdateMode`) lets the GUI warn against unplugging it. Not present in v2.
 - GUI shows both the UI and daemon versions and upgrades the background service automatically on a version mismatch; starts the service itself if it isn't already running.
 
 ### Changed
