@@ -1,0 +1,413 @@
+# The richest family so far: real ANC (off/transparent/on + level), two
+# independent sidetone paths (boom mic vs on-ear mic), Bluetooth, and a
+# station display with home-screen/screensaver settings. Report id 0x01
+# (not 0x06 like the Nova Pro family), chunk_size 64.
+#
+# EQ (wireless/Bluetooth/microphone, all three domains) is entirely out of
+# scope this pass, not just curve editing: unlike every other family so far,
+# there is no simple "select preset by id" write command at all — presets are
+# read/written as full named slots (`parametric_eq`/`ten_band_eq_mic`/
+# `ten_band_eq_bt`, HID_FEATURE payloads of 1036 bytes with alias+name
+# strings) via `0x1B`/`0x1D`/`0x1F`. v2's `equalizer_wireless`/
+# `equalizer_bluetooth`/`equalizer_mic` settings (`update_sequence:
+# [0x01, 0x2d/0x2e/0x2f, 'value']`) don't correspond to anything in this
+# spec — no 0x2D/0x2E/0x2F command exists anywhere in it. See the v3 backlog.
+#
+# Also out of scope: the bulk `audio_settings` read (mic volume/sidetone/
+# line-out/stream-mix/chatmix snapshot) uses the same 1036-byte HID_FEATURE
+# read as the EQ structs — 12 bytes over hid-transport's
+# REPORT_SIZE_HID_FEATURE_MAX (1024). Can't be read at all without extending
+# the transport layer, so none of those settings have a startup snapshot;
+# same "write-only, engine's own persistence is the source of truth on
+# restart" situation as Nova 5/Arctis 7+, but here it's a transport
+# limitation, not just an absent device-side read API. Battery/connection/
+# ANC-related fields and OLED/station-screen settings are unaffected — both
+# `wireless_settings` and `ux_settings` read normally (64 bytes).
+
+transforms:
+  connection_status_to_label:
+    type: case_int_to_str
+    default: UNKNOWN
+    values: {1: NOT_PAIRED_NOT_SEARCHING, 2: NOT_PAIRED_SEARCHING, 4: PAIRED_NOT_CONNECTED, 8: PAIRED_CONNECTED}
+
+  charging_status_to_label:
+    type: case_int_to_str
+    default: UNKNOWN
+    values: {1: UNKNOWN_OR_HEADSET_NOT_CONNECTED, 2: PLUGGED_IN_CHARGING, 4: PLUGGED_IN_NOT_CHARGING, 8: DISCHARGING}
+
+  timer_enum_to_minutes:
+    type: case_int_to_int
+    default: 30
+    values: {0: 0, 1: 1, 2: 5, 3: 10, 4: 15, 5: 30, 6: 60}
+
+structs:
+  volume_limiter:
+    - {name: report_id, type: uint8, constant: 0x01}
+    - {name: command,   type: uint8, constant: 0x27}
+    - {name: enabled,   type: uint8, range: [0, 1]}
+
+  mic_volume:
+    - {name: report_id,  type: uint8, constant: 0x01}
+    - {name: command,    type: uint8, constant: 0x37}
+    - {name: mic_volume, type: uint8, range: [1, 10]}
+
+  # Two independent sidetone paths — a detachable boom mic and the headset's
+  # own on-ear mic. Each has its own enable state plus level.
+  boom_mic_sidetone:
+    - {name: report_id, type: uint8, constant: 0x01}
+    - {name: command,   type: uint8, constant: 0x38}
+    - {name: state,     type: uint8, range: [0, 1]}
+    - {name: level,     type: uint8, range: [1, 10]}
+
+  on_ear_sidetone:
+    - {name: report_id, type: uint8, constant: 0x01}
+    - {name: command,   type: uint8, constant: 0x39}
+    - {name: state,     type: uint8, range: [0, 1]}
+    - {name: level,     type: uint8, range: [1, 10]}
+
+  muted_mic_brightness:
+    - {name: report_id, type: uint8, constant: 0x01}
+    - {name: command,   type: uint8, constant: 0xBF}
+    - {name: level,     type: uint8, range: [0, 10]}
+
+  # [0] All off, [1] transparent-level mode, [2] ANC mode. The active level
+  # within whichever mode is active is set separately via `transparent`
+  # (0-10%) or `active_noise_cancellation` (low/medium/high).
+  transparent_anc_mode:
+    - {name: report_id, type: uint8, constant: 0x01}
+    - {name: command,   type: uint8, constant: 0xBD}
+    - name: mode
+      type: uint8
+      range: [0, 2]
+      values_mapping: {"0": "off", "1": "transparent", "2": "anc"}
+
+  active_noise_cancellation:
+    - {name: report_id, type: uint8, constant: 0x01}
+    - {name: command,   type: uint8, constant: 0xB8}
+    - name: level
+      type: uint8
+      range: [1, 3]
+      values_mapping: {"1": "low", "2": "medium", "3": "high"}
+
+  transparent:
+    - {name: report_id, type: uint8, constant: 0x01}
+    - {name: command,   type: uint8, constant: 0xB9}
+    - {name: level,     type: uint8, range: [1, 10]}
+
+  inactivity_timer:
+    - {name: report_id, type: uint8, constant: 0x01}
+    - {name: command,   type: uint8, constant: 0xC1}
+    - {name: minutes,   type: uint8, values: [0, 1, 5, 10, 15, 30, 60]}
+
+  # NOTE: v2 labelled these values "Speaker"/"Stream", same guess it made for
+  # Nova Pro Wired's line_out_mode (corrected there against an explicit
+  # vendor comment). This struct has no such comment in the spec, so unlike
+  # the wired Nova Pro, there's nothing here to confirm or correct v2's
+  # labels against — kept as-is, flagged as unconfirmed.
+  line_out_mode:
+    - {name: report_id,     type: uint8, constant: 0x01}
+    - {name: command,       type: uint8, constant: 0x43}
+    - {name: line_out_mode, type: uint8, range: [1, 2], values_mapping: {"1": "speaker", "2": "stream"}}
+
+  # Spec bug carried over faithfully in intent, not literally: the vendor
+  # struct declares `main` twice back-to-back instead of `main`+`unused`
+  # (copy-paste error). Modelled with the correct 4-byte layout (matches
+  # every other stream_mix in this codebase) since that's what the firmware
+  # actually expects on the wire.
+  stream_mix:
+    - {name: report_id,   type: uint8, constant: 0x01}
+    - {name: command,     type: uint8, constant: 0x47}
+    - {name: stream_main, type: uint8, range: [0, 100]}
+    - {name: unused,      type: uint8, constant: 0x00}
+    - {name: stream_aux,  type: uint8, range: [0, 100]}
+    - {name: stream_mic,  type: uint8, range: [0, 100]}
+
+  oled_screen_brightness:
+    - {name: report_id,       type: uint8, constant: 0x01}
+    - {name: command,         type: uint8, constant: 0x85}
+    - {name: oled_brightness, type: uint8, range: [1, 10]}
+
+  oled_screen_saver_timer:
+    - {name: report_id, type: uint8, constant: 0x01}
+    - {name: command,   type: uint8, constant: 0x83}
+    - {name: minutes,   type: uint8, values: [0, 1, 5, 10, 15, 30, 60]}
+
+  oled_screen_saver_mode:
+    - {name: report_id, type: uint8, constant: 0x01}
+    - {name: command,   type: uint8, constant: 0x88}
+    - {name: mode,      type: uint8, range: [0, 1], values_mapping: {"0": "off", "1": "dim"}}
+
+  home_screen_view:
+    - {name: report_id, type: uint8, constant: 0x01}
+    - {name: command,   type: uint8, constant: 0x89}
+    - {name: mode,      type: uint8, range: [0, 1], values_mapping: {"0": "detailed", "1": "simple"}}
+
+  home_screen_option:
+    - {name: report_id, type: uint8, constant: 0x01}
+    - {name: command,   type: uint8, constant: 0x8A}
+    - name: mode
+      type: uint8
+      range: [0, 2]
+      values_mapping: {"0": "stereo", "1": "preset", "2": "meters"}
+
+  bt_power_default:
+    - {name: report_id, type: uint8, constant: 0x01}
+    - {name: command,   type: uint8, constant: 0xB2}
+    - {name: enabled,   type: uint8, range: [0, 1]}
+
+  bt_call_default:
+    - {name: report_id, type: uint8, constant: 0x01}
+    - {name: command,   type: uint8, constant: 0xB3}
+    - name: mode
+      type: uint8
+      range: [0, 2]
+      values_mapping: {"0": "off", "1": "attenuate", "2": "mute"}
+
+  # No write command exists for wireless_mode (v2 assumed one at 0xC3; no
+  # such command appears anywhere in this spec) — read-only via
+  # wireless_settings below, not exposed as a setting.
+  wireless_settings:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x01}
+      - {name: command,   type: uint8, constant: 0xB0}
+    incoming:
+      - {name: report_id,              type: uint8, constant: 0x01}
+      - {name: command,                type: uint8, constant: 0xB0}
+      - {name: bt_power_default,       type: uint8, range: [0, 1]}
+      - {name: bt_call_default,        type: uint8, range: [0, 2]}
+      - {name: bt_connection_mode,     type: uint8, range: [1, 4]}
+      - {name: bt_connection_status,   type: uint8, range: [1, 8]}
+      - {name: headset_batt_level,     type: uint8, range: [0, 100]}
+      - {name: charger_batt_level,     type: uint8, range: [0, 100]}
+      - {name: transparent_level,      type: uint8, range: [1, 10]}
+      - {name: mic_muted,              type: uint8, range: [0, 1]}
+      - {name: transparent_anc_mode,   type: uint8, range: [0, 2]}
+      - {name: muted_mic_brightness,   type: uint8, range: [1, 10]}
+      - {name: inactivity_timer,       type: uint8, range: [0, 6]}
+      - {name: wireless_mode,          type: uint8, range: [0, 1]}
+      - {name: radio_connection_status, type: uint8, values: [1, 2, 4, 8]}
+      - {name: charging_status,        type: uint8, values: [1, 2, 4, 8]}
+      - {name: active_noise_cancellation, type: uint8, range: [1, 3]}
+
+  ux_settings:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x01}
+      - {name: command,   type: uint8, constant: 0x80}
+    incoming:
+      - {name: report_id,             type: uint8, constant: 0x01}
+      - {name: command,               type: uint8, constant: 0x80}
+      - {name: oled_screen_saver_timer, type: uint8, range: [0, 6]}
+      - {name: oled_brightness,       type: uint8, range: [1, 10]}
+      - {name: unused,                type: uint8}
+      - {name: home_screen_view,      type: uint8, range: [0, 1]}
+      - {name: unused2,               type: bytearray, size: 4}
+      - {name: oled_screen_saver_mode, type: uint8, range: [0, 1]}
+      - {name: home_screen_option,    type: uint8, range: [0, 2]}
+
+  # TODO(action-commands, [E7-S9]): one-shot factory-reset trigger, same
+  # "fire and forget" shape as Arctis 7+'s pairing_mode — no DSL primitive
+  # for this yet. Declared so the struct/API exist; not wired to D-Bus.
+  restore_factory_default:
+    - {name: report_id, type: uint8, constant: 0x01}
+    - {name: command,   type: uint8, constant: 0xFD}
+
+apis:
+  volume_limiter:
+    write: {transport: HID_IO, chunk_size: 64}
+  mic_volume:
+    write: {transport: HID_IO, chunk_size: 64}
+  boom_mic_sidetone:
+    write: {transport: HID_IO, chunk_size: 64}
+  on_ear_sidetone:
+    write: {transport: HID_IO, chunk_size: 64}
+  muted_mic_brightness:
+    write: {transport: HID_IO, chunk_size: 64}
+  transparent_anc_mode:
+    write: {transport: HID_IO, chunk_size: 64}
+  active_noise_cancellation:
+    write: {transport: HID_IO, chunk_size: 64}
+  transparent:
+    write: {transport: HID_IO, chunk_size: 64}
+  inactivity_timer:
+    write:
+      transport: HID_IO
+      chunk_size: 64
+      payload_transform: "builtin:power_timer_write"
+  line_out_mode:
+    write: {transport: HID_IO, chunk_size: 64}
+  stream_mix:
+    write: {transport: HID_IO, chunk_size: 64}
+  oled_screen_brightness:
+    write: {transport: HID_IO, chunk_size: 64}
+  oled_screen_saver_timer:
+    write:
+      transport: HID_IO
+      chunk_size: 64
+      payload_transform: "builtin:power_timer_write"
+  oled_screen_saver_mode:
+    write: {transport: HID_IO, chunk_size: 64}
+  home_screen_view:
+    write: {transport: HID_IO, chunk_size: 64}
+  home_screen_option:
+    write: {transport: HID_IO, chunk_size: 64}
+  bt_power_default:
+    write: {transport: HID_IO, chunk_size: 64}
+  bt_call_default:
+    write: {transport: HID_IO, chunk_size: 64}
+  wireless_settings:
+    read: {transport: HID_IO, chunk_size: 64}
+  ux_settings:
+    read: {transport: HID_IO, chunk_size: 64}
+  restore_factory_default:
+    write: {transport: HID_IO, chunk_size: 64}
+
+sync_events:
+  0x27:
+    emit: volume_limiter_changed
+    fields:
+      - {name: enabled, byte: 2, display_type: on_off}
+
+  0x37:
+    emit: mic_volume_changed
+    fields:
+      - {name: mic_volume, byte: 2}
+
+  0x38:
+    emit: boom_mic_sidetone_changed
+    fields:
+      - {name: state, byte: 2}
+      - {name: level, byte: 3}
+
+  0x39:
+    emit: on_ear_sidetone_changed
+    fields:
+      - {name: state, byte: 2}
+      - {name: level, byte: 3}
+
+  0x43:
+    emit: line_out_mode_changed
+    fields:
+      - {name: line_out_mode, byte: 2}
+
+  0x45:
+    emit: chatmix_changed
+    fields:
+      - {name: game_attenuation, byte: 2}
+      - {name: chat_attenuation, byte: 3}
+
+  0x47:
+    emit: stream_mix_changed
+    fields:
+      - {name: stream_main, byte: 2}
+      - {name: stream_aux,  byte: 4}
+      - {name: stream_mic,  byte: 5}
+
+  0x83:
+    emit: oled_screen_saver_timer_changed
+    fields:
+      - {name: minutes, byte: 2, transform: timer_enum_to_minutes}
+
+  0x85:
+    emit: oled_brightness_changed
+    fields:
+      - {name: level, byte: 2, display_type: percentage}
+
+  0x88:
+    emit: oled_screen_saver_mode_changed
+    fields:
+      - {name: mode, byte: 2}
+
+  0x89:
+    emit: home_screen_view_changed
+    fields:
+      - {name: mode, byte: 2}
+
+  0x8A:
+    emit: home_screen_option_changed
+    fields:
+      - {name: mode, byte: 2}
+
+  0xB2:
+    emit: bt_power_default_changed
+    fields:
+      - {name: enabled, byte: 2, display_type: on_off}
+
+  0xB3:
+    emit: bt_call_default_changed
+    fields:
+      - {name: mode, byte: 2}
+
+  0xB5:
+    emit: connection_changed
+    fields:
+      - {name: radio_connection_status, byte: 4, transform: connection_status_to_label}
+    side_effects:
+      - call: sync_all
+
+  0xB7:
+    emit: battery_changed
+    fields:
+      - {name: headset_batt_level, byte: 2, display_type: percentage}
+      - {name: charger_batt_level, byte: 3, display_type: percentage}
+      - {name: charging_status,    byte: 4, transform: charging_status_to_label}
+
+  0xB8:
+    emit: active_noise_cancellation_changed
+    fields:
+      - {name: level, byte: 2}
+
+  0xB9:
+    emit: transparent_changed
+    fields:
+      - {name: level, byte: 2, display_type: percentage}
+
+  0xBB:
+    emit: mic_muted_changed
+    fields:
+      - {name: muted, byte: 2, display_type: on_off}
+
+  0xBD:
+    emit: transparent_anc_mode_changed
+    fields:
+      - {name: mode, byte: 2}
+
+  0xBF:
+    emit: muted_mic_brightness_changed
+    fields:
+      - {name: level, byte: 2}
+
+  0xC1:
+    emit: inactivity_timer_changed
+    fields:
+      - {name: minutes, byte: 2, transform: timer_enum_to_minutes}
+
+sync_read:
+  - struct: wireless_settings
+    maps:
+      - {emit: bt_power_default_changed,          field: bt_power_default,       display_type: on_off}
+      - {emit: bt_call_default_changed,            field: bt_call_default}
+      - {emit: transparent_changed,                field: transparent_level,      display_type: percentage}
+      - {emit: mic_muted_changed,                  field: mic_muted,              display_type: on_off}
+      - {emit: transparent_anc_mode_changed,       field: transparent_anc_mode}
+      - {emit: muted_mic_brightness_changed,       field: muted_mic_brightness}
+      - {emit: inactivity_timer_changed,           field: inactivity_timer,       transform: timer_enum_to_minutes}
+      - {emit: connection_changed,                 field: radio_connection_status, transform: connection_status_to_label}
+      - {emit: battery_changed,                    field: headset_batt_level,     display_type: percentage}
+      - {emit: active_noise_cancellation_changed,  field: active_noise_cancellation}
+
+  - struct: ux_settings
+    maps:
+      - {emit: oled_screen_saver_timer_changed, field: oled_screen_saver_timer, transform: timer_enum_to_minutes}
+      - {emit: oled_brightness_changed,         field: oled_brightness,         display_type: percentage}
+      - {emit: home_screen_view_changed,        field: home_screen_view}
+      - {emit: oled_screen_saver_mode_changed,  field: oled_screen_saver_mode}
+      - {emit: home_screen_option_changed,      field: home_screen_option}
+
+lifecycle:
+  init:
+    # LAM does not provide SteelSeries Sonar.
+    - call: discord_certified_set_attributes
+      args: {echo_cancellation: true, noise_suppression: true}
+  shutdown:
+    - call: disable_chatmix
+    - call: disable_sonar
