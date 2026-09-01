@@ -1,10 +1,20 @@
 #!/usr/bin/make -f
 export DH_VERBOSE = 1
+# rustup installs here; needs to be visible to every recipe below, not just
+# the one that runs it.
+export PATH := $(HOME)/.cargo/bin:$(PATH)
 
 %:
 	dh $@
 
 override_dh_auto_build:
+	# Debian stable's own rustc is routinely behind this project's MSRV
+	# (transitive deps such as ort/zbus/icu_* already need newer than
+	# Debian 13's 1.85) — same reason cargo/rustc aren't Build-Depends:
+	# below. rustup keeps this working across Debian/Ubuntu/Mint alike
+	# instead of chasing each release's packaged rustc version.
+	command -v cargo >/dev/null || \
+		curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
 	make build PREFIX=/usr
 
 override_dh_auto_install:

@@ -3,9 +3,9 @@ Section: utils
 Priority: optional
 Maintainer: Giacomo Furlan <g.furlan@accenture.com>
 Build-Depends: debhelper-compat (= 13),
-               cargo,
-               rustc,
-               uv,
+               curl,
+               pkg-config,
+               libudev-dev,
                python3,
                python3-venv,
                libcap2-bin

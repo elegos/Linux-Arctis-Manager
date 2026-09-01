@@ -8,7 +8,6 @@ RUN pacman -Syu --noconfirm && \
         rust \
         cargo \
         python \
-        uv \
         base-devel \
         git && \
     pacman -Sc --noconfirm

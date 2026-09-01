@@ -117,22 +117,24 @@ $(GUI_WRAPPER_OUT): $(GUI_WRAPPER_IN) Makefile
 	chmod +x $@
 
 # ── Install Python venv + GUI wrapper ─────────────────────────────────────────
+# Plain stdlib venv + pip, not uv: uv itself isn't packaged (or isn't
+# packaged under that name) on every distro, which turns "is uv on this
+# machine" into its own per-distro compatibility problem — exactly the kind
+# of thing this step exists to avoid. venv (python3-venv on Debian/Ubuntu)
+# and pip are universal. pyproject.toml's build-system backend is still
+# uv_build, but that's fetched by pip's own build isolation on demand, not a
+# system-wide `uv` binary — unaffected by this.
 install-python: generate-gui-wrapper
 	install -dm755 $(DESTDIR)$(dir $(VENVDIR))
-	$(UV) venv --python python3 --clear $(DESTDIR)$(VENVDIR)
+	python3 -m venv --clear $(DESTDIR)$(VENVDIR)
 	# activate/activate.{csh,fish,nu,bat} bake in an absolute VIRTUAL_ENV path
 	# at creation time (here, the DESTDIR buildroot) and are never sourced —
 	# lam-gui invokes $(VENVDIR)/bin/python3 directly. Left in place, rpmbuild's
 	# check-buildroot fails the package: the buildroot path leaks into an
 	# installed file.
 	rm -f $(DESTDIR)$(VENVDIR)/bin/activate*
-	$(UV) export --frozen --no-dev --no-emit-project \
-		| $(UV) pip install \
-			--python $(DESTDIR)$(VENVDIR)/bin/python \
-			--disable-pip-version-check -q -r /dev/stdin
-	$(UV) pip install \
-		--python $(DESTDIR)$(VENVDIR)/bin/python \
-		--no-deps --disable-pip-version-check -q .
+	$(DESTDIR)$(VENVDIR)/bin/pip install --disable-pip-version-check -q --upgrade pip
+	$(DESTDIR)$(VENVDIR)/bin/pip install --disable-pip-version-check -q .
 ifdef DESTDIR
 	find $(DESTDIR)$(VENVDIR)/bin -maxdepth 1 -type f \
 		-exec sed -i "1s|#!$(DESTDIR)|#!|" {} \;
