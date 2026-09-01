@@ -46,6 +46,15 @@ jobs:
             arch)
               pacman -Syu --noconfirm
               pacman -S --noconfirm --needed base-devel git sudo
+              # CachyOS's own makepkg.conf defaults CFLAGS to -march=native,
+              # correct for a real user (same machine builds and runs it),
+              # wrong here: build-pkg and install-test land on different
+              # runner VMs, so a package built with the *builder's* exact
+              # CPU features can hit SIGILL on the *installer's* CPU. Force
+              # a portable baseline for this CI verification build only —
+              # not something to change in the PKGBUILD itself, which
+              # correctly defers to the ambient system's own makepkg.conf.
+              sed -i 's/-march=native/-march=x86-64/' /etc/makepkg.conf
               useradd -m builder
               echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
 
