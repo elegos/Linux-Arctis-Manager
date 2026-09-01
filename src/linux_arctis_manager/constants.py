@@ -24,8 +24,8 @@ DBUS_VC_OBJECT_PATH = f'{DBUS_OBJECT_BASE_PATH}/VC'
 # ./DBus
 
 # Systemd
-SYSTEMD_SERVICE_NAME = 'arctis-manager.service'
-HOME_SYSTEMD_SERVICE_FOLDER = Path.home() / '.config' / 'systemd' / 'user'
+SYSTEMD_SERVICE_NAME = 'lam-daemon.service'
+SYSTEMD_HELPER_SERVICE_NAME = 'lam-hidraw-helper.service'
 # ./Systemd
 
 PULSE_MEDIA_NODE_NAME = 'Arctis_Media'

@@ -46,35 +46,18 @@ An open-source replacement for SteelSeries GG, to manage your Arctis headset on 
 | ➖ | **N/A:** not physically supported by this headset model |
 | ❓ | **Missing Data:** product ID is not yet known. [Help us find it!](https://github.com/elegos/Linux-Arctis-Manager/blob/develop/docs/device_support.md) |
 
-## ⌨️ CLI Commands
+## ⌨️ Components
 
-- `lam-daemon`: the background service that communicates with your headset, managed by systemd
-- `lam-cli`: command-line utilities for setup tasks like installing udev rules and desktop entries
-- `lam-gui`: the graphical interface to configure your headset and view its status
-
-> [!TIP]
-> Not sure what a command does? Run it with `-h` or `--help` to see all available options.
+- `lam-daemon`: the background service (Rust) that communicates with your headset, managed by systemd
+- `lam-hidraw-helper`: a minimal privileged sidecar that opens `/dev/hidraw*` on the daemon's behalf — the only process that needs elevated capability
+- `lam-gui`: the graphical interface (Python/Qt6) to configure your headset and view its status
 
 ## 📦 Install & Setup
 
 Choose the installation method that fits your setup:
 
-- **[Distrobox](#distrobox)** - recommended for immutable distros (Bazzite, Fedora Silverblue, etc.)
 - **[Arch Linux (AUR)](#arch-linux-aur)** - community-maintained package for Arch users
-- **[Manual install](#manual-install)** - for all other Linux distros
-
----
-
-### Distrobox
-
-Run the following script to install:
-
-```bash
-curl -LsSf https://raw.githubusercontent.com/elegos/Linux-Arctis-Manager/refs/heads/develop/scripts/distrobox.sh | sh
-```
-
-> [!NOTE]
-> For Immutable Distros (Bazzite, Fedora Silverblue, etc.), the app behaves like a native installation rather than an isolated container. Because Distrobox mounts your `/home`, `/var`, and `/etc` directly, the manager can interact with the system services and configuration files it needs to function.
+- **[Build from source](#build-from-source)** - for all other Linux distros (Fedora, Bazzite, Debian, Ubuntu, ...)
 
 ---
 
@@ -90,10 +73,12 @@ yay -S linux-arctis-manager
 # using paru: paru -S linux-arctis-manager
 ```
 
-Start the background service automatically on startup:
+The package's post-install hook applies the required capability to
+`lam-hidraw-helper` and prints the two commands to enable the services:
 
 ```bash
-systemctl --user enable arctis-manager
+systemctl --user daemon-reload
+systemctl --user enable --now lam-hidraw-helper.service lam-daemon.service
 ```
 
 > [!TIP]
@@ -107,186 +92,100 @@ systemctl --user enable arctis-manager
 
 ---
 
-### Manual Install
+### Build from source
+
+Prebuilt RPM/deb packages aren't published yet (Fedora/Bazzite users can build
+the `.spec` in `packaging/fedora/` locally with `make container-build-rpm`,
+which produces a `.rpm` under `dist/`). Until then, building straight from
+source with the provided `Makefile` is the supported path everywhere except
+Arch.
 
 #### Prerequisites
 
-Install `pipx` with your package manager.
+- [`cargo`/`rustc`](https://rustup.rs/) (stable toolchain)
+- [`uv`](https://docs.astral.sh/uv/getting-started/installation/)
+- Python 3.10+
+- `libcap` (for `setcap`) — usually already installed
+- Kernel headers for `hidraw`/`udev`: `libudev-dev` (Debian/Ubuntu), `systemd-devel` (Fedora), `udev` (Arch, already present)
 
-> [!NOTE]
-> `pip` can be used instead of `pipx`, but `pipx` is recommended for better dependency isolation. Some distros will require `pipx`.
-
-#### Option A: Quick Install (Recommended)
-
-Run the automated install script:
-
-```bash
-curl -LsSf https://raw.githubusercontent.com/elegos/Linux-Arctis-Manager/refs/heads/main/scripts/install.sh | sh
-```
-> [!TIP]
-> If you use the automated script, you can skip the Final Setup section entirely.
-
-#### Option B: Install from Release
-
-1. Download the latest `.whl` from the [releases page](../../releases)
-2. From the directory you downloaded it to, install it:
-
-   ```bash
-   pipx install linux_arctis_manager-*.whl
-
-   # using pip: pip install --user linux_arctis_manager-*.whl
-   ```
-
-3. Continue to [Final Setup](#final-setup)
-
-#### Option C: Install from Source
-
-1. Install `uv` ([installation guide](https://docs.astral.sh/uv/getting-started/installation/)) and create the applications directory:
-
-   ```bash
-   mkdir -p $HOME/.local/share/applications
-   ```
-
-2. Get the source:
-
-   ```bash
-   git clone https://github.com/elegos/Linux-Arctis-Manager.git
-   cd Linux-Arctis-Manager
-   git pull
-   ```
-
-3. Build:
-
-   ```bash
-   rm -rf dist
-   uv build
-   ```
-
-4. Install:
-
-   ```bash
-   find ./dist -name "*.whl" | head -n1 | xargs pipx install --force
-
-   # using pip: find ./dist -name "*.whl" | head -n1 | xargs pip install --user --force-reinstall
-   ```
-
-#### Final Setup
+#### Install
 
 ```bash
-lam-cli setup --start-now
+git clone https://github.com/elegos/Linux-Arctis-Manager.git
+cd Linux-Arctis-Manager
+
+make build            # cargo build --release + uv sync
+sudo make install     # installs binaries, systemd units, desktop entries; applies setcap
+make enable           # enable + start lam-hidraw-helper and lam-daemon (no sudo)
 ```
+
+`make install` accepts the usual `PREFIX`/`DESTDIR` overrides — see `make help`
+for the full variable list, or the packaging recipes in `packaging/arch/PKGBUILD`
+and `packaging/fedora/linux-arctis-manager.spec` for reference.
 
 > [!TIP]
 > To launch the system tray app automatically on login:
 >
 > ```bash
-> lam-cli setup --systray-autostart
-> ```
->
-> You can also setup everything at once in one line:
->
-> ```bash
-> lam-cli setup --systray-autostart --start-now
+> ln -sf /usr/share/applications/ArctisManagerSystray.desktop ~/.config/autostart/
+> # or, if installed with PREFIX=/usr/local:
+> ln -sf /usr/local/share/applications/ArctisManagerSystray.desktop ~/.config/autostart/
 > ```
 
 ## 🧹 Uninstall / Cleanup
 
 Choose the method that matches your installation method:
 
-- **[Distrobox](#distrobox-1)**
 - **[Arch Linux (AUR)](#arch-linux-aur-1)**
-- **[Manual install](#manual-install-1)**
-
-### Distrobox
-
-1. Stop and disable the service:
-
-   ```bash
-   systemctl --user disable --now arctis-manager
-   rm ~/.config/systemd/user/arctis-manager.service
-   ```
-
-3. Remove the container:
-
-   ```bash
-   distrobox-rm -f arctis-manager
-   ```
-
-5. Remove leftover host files:
-
-   ```bash
-   # desktop menu entries
-   rm -f ~/.local/share/applications/ArctisManager.desktop
-   rm -f ~/.local/share/applications/ArctisManagerSystray.desktop
-   rm -f ~/.config/autostart/ArctisManagerSystray.desktop
-
-   # udev rules
-   sudo rm -f /etc/udev/rules.d/91-steelseries-arctis.rules
-
-   # user preferences and virtual environment
-   rm -rf ~/.config/arctis_manager
-   rm -rf ~/.local/share/pipx/venvs/linux-arctis-manager
-   ```   
+- **[Build from source](#build-from-source-1)**
 
 ### Arch Linux (AUR)
-Use the system package manager:
+Use the system package manager — the pre-removal hook stops and disables the services for you:
 
 ```bash
 sudo pacman -Rns linux-arctis-manager
 ```
 
-### Manual Install
+### Build from source
 
-1. Stop and disable the service:
+From the cloned repository:
 
-   ```bash
-   systemctl --user disable --now arctis-manager
-   rm ~/.config/systemd/user/arctis-manager.service
-   ```
+```bash
+make disable          # stop + disable the services (no sudo)
+sudo make uninstall   # remove binaries, systemd units, desktop entries
+```
 
-2. Remove leftover files:
+Then remove your local settings if you don't intend to reinstall:
 
-   ```bash
-   # desktop menu entries
-   lam-cli desktop remove
+```bash
+rm -rf ~/.config/arctis_manager
+```
 
-   # udev rules
-   sudo rm -f /etc/udev/rules.d/91-steelseries-arctis.rules
-   sudo rm -f /usr/lib/udev/rules.d/91-steelseries-arctis.rules
-
-   # user preferences and device files
-   rm -rf ~/.config/arctis_manager
-   ```
-
-3. Uninstall the package:
-
-   ```bash
-   pipx uninstall linux_arctis_manager
-
-   # using pip: pip uninstall linux_arctis_manager
-   ```
+> [!NOTE]
+> If you're coming from a v2 install, also remove the old udev rule — v3 doesn't need one:
+> `sudo rm -f /etc/udev/rules.d/91-steelseries-arctis.rules /usr/lib/udev/rules.d/91-steelseries-arctis.rules`
 
 ## 🛠️ Development
 
 ### Basic Commands
 
-- Run the daemon: `uv run lam-daemon`
-- Run the CLI: `uv run lam-cli`
-- Run the GUI: `uv run lam-gui [--no-enforce-systemd]` (use this option to avoid force enabling the daemon, in case you're working on it)
+- Run the daemon: `cargo run --release --manifest-path daemon/Cargo.toml --bin lam-daemon`
+- Run the GUI against it: `uv run lam-gui --no-enforce-systemd` (skips the systemd-managed-daemon check, since you're running one by hand)
+- Run the daemon's tests: `cargo test --manifest-path daemon/Cargo.toml`
 
 ### Documentation
 
+- [Architecture overview](docs/ARCHITECTURE.md)
+- [Device DSL reference](docs/DEVICE_DSL.md) — the YAML format used to describe a device
+- [D-Bus interface reference](docs/dbus.md)
 - [How to add support for a new device](docs/device_support.md)
 - [Wireshark tutorial](https://www.youtube.com/watch?v=zWbdnHwTr3M)
-- [Device configuration specs](docs/device_configuration_file_specs.md)
-- [Dbus messaging](docs/dbus.md)
+- [Migrating from v2 to v3](docs/migration-v2-to-v3.md)
 
 ## ⚠️ Troubleshooting
 
-- App or headset becomes unresponsive: `systemctl --user restart --now arctis-manager`
-- Newly supported device does not appear after an update:
-  - Manual install/Distrobox: `lam-cli setup`
-  - AUR: `lam-cli setup --rules-path /usr/lib/udev/rules.d/91-steelseries-arctis.rules`
+- App or headset becomes unresponsive: `systemctl --user restart lam-hidraw-helper.service lam-daemon.service`
+- Newly supported device does not appear after an update: `systemctl --user daemon-reload && systemctl --user restart lam-daemon.service`, or call the `ReloadConfigs` D-Bus method to pick up new/changed device YAML files without a restart.
 - App fails to start with a Qt xcb platform error: install `libxcb-cursor0` (Debian/Ubuntu) or `xcb-util-cursor` (Arch/Fedora). Required on non-Qt desktop environments like Cinnamon.
 
 ## 💬 Community & Support

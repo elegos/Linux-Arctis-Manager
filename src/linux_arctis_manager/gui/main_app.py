@@ -281,8 +281,8 @@ class QMainApp(QBaseDesktopApp):
         from linux_arctis_manager.scripts.gui import _wait_for_dbus_service
         from linux_arctis_manager.systemd import ensure_systemd_unit
         try:
-            # ensure_systemd_unit rewrites the service file with the current
-            # binary path before restarting, so the new version is actually used.
+            # The packaged unit's ExecStart path is fixed at install time, so a
+            # plain restart is enough to pick up a freshly reinstalled binary.
             ensure_systemd_unit(enable=True, restart=True)
         except Exception as e:
             self.logger.warning('Service restart failed: %s', e)

@@ -62,13 +62,15 @@ This keeps the checklist honest and makes blocked work immediately visible witho
   - [x] [E4-S5] `ReloadConfigs`
   - [x] [E4-S6] Version property and mismatch detection
 - [ ] **[E5] systemd user service and packaging**
-  - [ ] [E5-S1] systemd user service unit
-  - [ ] [E5-S2] Helper installation target
-  - [ ] [E5-S3] AUR package update
-  - [ ] [E5-S4] Migration guide from v2
+  - [x] [E5-S1] systemd user service unit
+  - [x] [E5-S2] Helper installation target
+  - [x] [E5-S3] AUR package update
+  - [x] [E5-S4] Migration guide from v2
   - [ ] [E5-S5] Python engine cleanup
-  - [ ] [E5-S6] README and docs refresh
+    > Deliberately deferred: keep the old Python v2 device YAML files (`src/linux_arctis_manager/devices/`) as a cross-check reference for the new-DSL conversions in [E7] — a real discrepancy already caught a bug on the Nova Pro Wireless. Do the rest of the cleanup once E7's device ports are done and the comparison is no longer needed.
+  - [x] [E5-S6] README and docs refresh
   - [ ] [E5-S7] RPM spec for Fedora and Bazzite *(stretch)*
+    > Spec is written and builds locally (`make container-build-rpm`); not yet submitted to COPR, so README points users at the local build instead of a `dnf copr` one-liner.
 - [ ] **[E6] Nova Pro Wireless — full protocol parity**
   - [x] [E6-S1] Rewrite `nova_pro_wireless.yaml`
   - [x] [E6-S2] Write `base_arctis_nova_pro_wireless.yaml`
@@ -261,27 +263,21 @@ Exposes the engine's state and settings to GUI clients and CLI tools on the sess
 
 Makes the engine trivial to install, start, and keep running across reboots without requiring root or system-level service management.
 
-- **[E5-S1] systemd user service unit**
-  Write `lam-daemon.service` targeting the user session (`[Install] WantedBy=default.target`). Set `Restart=on-failure` and `RestartSec=2`. Document enabling with `systemctl --user enable --now lam-daemon`.
+- **[E5-S1] systemd user service unit** — Done.
+  `lam-daemon.service`/`lam-hidraw-helper.service` (generated from `.in` templates by the Makefile, `Restart=on-failure`, correct `Requires=`/`After=` ordering between the two) are installed and enabled via `make install && make enable`.
 
-- **[E5-S2] Helper installation target**
-  Add a `make install-helper` target (or equivalent) that copies `lam-hidraw-helper` to `/usr/local/libexec/`, sets ownership and permissions, and runs `setcap`. Require `sudo` only for this step.
-  > Partial: `lam-hidraw-helper.service` (systemd user unit) exists (commit `0354a77`). Makefile install target and `setcap` step still missing.
+- **[E5-S2] Helper installation target** — Done, folded into the main `install` target rather than a separate `install-helper` one (the `.PHONY` line still named a nonexistent `install-helper` target; removed). `make install` copies `lam-hidraw-helper`, then (outside `DESTDIR`, i.e. not a packaging build) chowns it `root:root` and applies `setcap cap_dac_override+eip`; packaging recipes (Arch `lam.install`, Fedora `%post`) do the equivalent in their own post-install hooks since `setcap` can't run against a `DESTDIR` buildroot.
 
-- **[E5-S3] AUR package update**
-  Update the existing AUR `PKGBUILD` to build the Rust engine, install the helper with correct permissions, and install the systemd user unit. Remove the udev rule from the package since it is no longer required.
+- **[E5-S3] AUR package update** — Done. `packaging/arch/PKGBUILD` builds via `make build`/`make install`; `lam.install` reapplies `CAP_DAC_OVERRIDE` on every install/upgrade (setcap is stored in the inode xattr and lost on package replacement) and stops/disables both units on removal. No udev rule in the package.
 
-- **[E5-S4] Migration guide from v2**
-  Write a short migration note: stop the v2 service, install v3, run `make install-helper`, enable the new unit. Note that existing device YAML files in `~/.config/arctis_manager/devices/` are superseded by the bundled v3 files and should be removed.
+- **[E5-S4] Migration guide from v2** — Done: [`docs/migration-v2-to-v3.md`](migration-v2-to-v3.md). Stop `arctis-manager.service`, install v3, enable the new units, drop the old udev rule and any `~/.config/arctis_manager/devices/` overrides (incompatible with the new DSL — see [E5-S5]'s deferral note for why the source tree still keeps its own copies).
 
-- **[E5-S5] Python engine cleanup**
-  Once `lam-daemon` is functional and the D-Bus interface is validated end-to-end, remove the Python engine layer that it replaces. Specifically: delete `core.py`, `config.py`, `status_parser_fn.py`, `eq_manager.py`, `app_matcher.py`, `cli_tools.py`, `dbus_service.py`, and `constants.py`. Remove the `usb` and `pyserial` dependencies from `pyproject.toml`. Keep `gui/` and `eq_preset.py` — they remain in Python. `ai_deps.py` and `voice_changer/` are removed once [E10] lands (superseded by `vc/inference/providers.rs` and the rest of the Rust `vc/` module); only the one-shot `.pth → ONNX` conversion script stays Python. Update the `lam-gui` entry point to connect to the session bus (replacing the in-process engine startup it currently does) and remove the `--no-daemon` / `--daemon` CLI flags that are no longer meaningful.
+- **[E5-S5] Python engine cleanup** — deliberately not started this round, see the checklist note above.
 
-- **[E5-S6] README and docs refresh**
-  Update `README.md` to describe v3: new prerequisites (`lam-hidraw-helper` + `setcap`), installation steps, D-Bus interface overview, supported devices list, and a link to `DEVICE_DSL.md` for adding new devices. Remove or rewrite any section that references the v2 Python engine. Audit `docs/`: retire files that described v2-only concerns (e.g. old architecture notes, the old status-parser reference if present), and confirm that `ARCHITECTURE.md`, `DEVICE_DSL.md`, and `dbus.md` are accurate against the shipped code.
+- **[E5-S6] README and docs refresh** — Done. `README.md`'s install/uninstall/troubleshooting/development sections rewritten for v3 (Makefile-based build+install, correct unit names, no udev rules, `lam-hidraw-helper` prerequisite); the v2 wheel/pipx quick-install script and the Distrobox script are gone (`scripts/install.sh`, `scripts/distrobox.sh` — neither could work against v3's split Rust daemon + helper, and nothing referenced them anymore once the README stopped pointing at them). `docs/v2-v3-gaps.md` retired (a scratch V2→V3 parity tracker, superseded by this file and already stale/wrong by the time it was reread). `ARCHITECTURE.md`/`DEVICE_DSL.md`/`dbus.md` spot-checked against the shipped code, no drift found. **Found and fixed along the way**, not just docs: the GUI's auto-restart-on-version-mismatch path (`main_app.py`) called `systemd.py`'s `ensure_systemd_unit`, which self-authored and restarted a *different*, ad-hoc unit (`arctis-manager.service`, `graphical-session.target`, no `Requires=` on the helper) instead of the real packaged `lam-daemon.service` — a leftover from v2's single-binary self-installing service, now stale/wrong against v3's two-unit, package-installed model. Fixed: `SYSTEMD_SERVICE_NAME` now names the real unit, `ensure_systemd_unit` no longer writes a unit file at all (enables/starts/restarts the two packaged units and lets a missing-unit `systemctl` error surface directly instead of masking it with a duplicate).
+  **Not done here**: `docs/device_support.md` still documents the old per-field v2 DSL (`command_padding`, `status_parse`, `lam-cli tools arctis-devices`, ...) — a bigger rewrite tied to [E7]'s new-DSL device-porting workflow, not a docs-wording fix; left as a known gap for [E7-S1].
 
-- **[E5-S7] RPM spec for Fedora and Bazzite** *(stretch)*
-  Write an RPM `.spec` file for `lam-daemon` and `lam-hidraw-helper`. Target Fedora 40+ and Bazzite (which uses Fedora RPM infrastructure). The spec must: build from source via `cargo build --release`, install the helper with `%caps(cap_dac_override=eip)` in the `%files` section (Fedora's RPM macros honour this), install the systemd user unit under `%{_userunitdir}`, and declare `Requires: systemd`. Submit to COPR as the initial distribution channel; provide a one-liner install command in the README.
+- **[E5-S7] RPM spec for Fedora and Bazzite** *(stretch)* — Spec written (`packaging/fedora/linux-arctis-manager.spec`) and builds locally via `make container-build-rpm`: `cargo build --release`, `%caps(cap_dac_override=eip)` on the helper, systemd user unit under `%{_userunitdir}`. Not yet submitted to COPR — README points Fedora/Bazzite users at the local container build instead of a `dnf copr enable` one-liner until that happens.
 
 ---
 
