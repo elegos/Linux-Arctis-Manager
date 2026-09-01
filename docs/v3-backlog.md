@@ -89,6 +89,7 @@ This keeps the checklist honest and makes blocked work immediately visible witho
   - [ ] [E7-S5] Arctis 7+ family
   - [x] [E7-S6] Bootloader and upgrade PID registration
   - [ ] [E7-S7] Device compatibility matrix
+  - [ ] [E7-S8] Nova 5 parametric EQ
 - [ ] **[E8] OLED display** *(stretch)*
   - [ ] [E8-S1] `draw_bitmap` API
   - [ ] [E8-S2] `reload_display` API
@@ -332,7 +333,8 @@ Extend coverage to all Arctis headset families present in the official spec, sta
   Translate the existing `nova_pro_wired.yaml` to the new DSL. Wired device has no wireless_settings struct; validate that sync events and capabilities reflect this correctly.
 
 - **[E7-S4] Arctis Nova 5 and Nova Elite**
-  Translate the existing YAML files for these simpler devices. Confirm capability lists are minimal (no OLED, no wireless settings, no chatmix).
+  Translate the existing YAML files for these simpler devices.
+  > Nova 5 done: `base_arctis_nova_5.yaml` / `nova_5.yaml`, covering all three SKUs (Nova 5 `0x2232`, Nova 5X `0x2253`, Nova 5X white `0x2264`). The story's original assumption ("no wireless settings, no chatmix") was wrong — corrected against the real spec: this device *does* have a wireless mode toggle (speed/range) and hardware ChatMix (`game_chatmix_level`/`chat_chatmix_level` on `headset_status`); it has no OLED, confirmed. Parametric EQ intentionally not included — see [E7-S8]. `command_interface: {interface: 3}` was carried over from the v2 config (empirically validated on real hardware) rather than derived from the spec, which only declares `sync_interface: 5` and no command-interface number at all; wants confirming on real hardware before this ships. Nova Elite not started.
 
 - **[E7-S5] Arctis 7+ family**
   Translate the existing `arctis_7_plus.yaml` and verify against the spec files for the 7+ and its variants.
@@ -342,6 +344,9 @@ Extend coverage to all Arctis headset families present in the official spec, sta
 
 - **[E7-S7] Device compatibility matrix**
   Maintain `docs/device_support.md` with a table listing all supported devices, their PID(s), supported capabilities, and known gaps. Auto-generate the table from the YAML files as part of the CI build.
+
+- **[E7-S8] Nova 5 parametric EQ**
+  The Nova 5 family's EQ is a 10-band *parametric* EQ (per-band frequency, filter type, gain, and Q factor — commands `0x33`/`0x34` write, `0xA5` preset name, `0xA6` read preset names), a different shape from the Nova Pro family's fixed-frequency graphic EQ (`builtin:custom_eq_gains`, [E6-S3]). Needs: a new struct shape for a parametric EQ band, a new Rust `payload_transform` builtin to serialise it, and — once implemented — an `init` lifecycle call resetting it to flat (matching the no-Sonar/flat-EQ-on-init convention used elsewhere) plus removal of the `eq_data_raw` placeholder bytes reserved for it in `audio_settings` ([E7-S4]). Likely relevant beyond Nova 5 — Nova 3/4 look like they may share the same parametric scheme, worth checking when picked up.
 
 ---
 
