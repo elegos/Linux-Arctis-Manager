@@ -44,6 +44,33 @@ transforms:
     values: {0: 0, 1: 1, 2: 5, 3: 10, 4: 15, 5: 30, 6: 60}
 
 structs:
+  # Found missing from this device's original conversion pass while auditing
+  # save_to_flash: the raw spec's shutdown lifecycle calls disable-sonar and
+  # (via the settings write path) toggles software chatmix, but neither
+  # `set_sonar_present` nor `software_chatmix_status` was ever modelled here
+  # — the `disable_chatmix`/`disable_sonar` lifecycle calls below would have
+  # failed at runtime with an unknown-API error. Same command bytes/shapes as
+  # Nova Pro Wireless's own (0x8D/0x49), just this device's own report_id.
+  set_sonar_present:
+    - {name: report_id,  type: uint8, constant: 0x01}
+    - {name: command,    type: uint8, constant: 0x8D}
+    - {name: is_present, type: uint8, range: [0, 1]}
+
+  software_chatmix_status:
+    - {name: report_id, type: uint8, constant: 0x01}
+    - {name: command,   type: uint8, constant: 0x49}
+    - {name: status,    type: uint8, range: [0, 1]}
+
+  # Also found missing in the same audit: no save_to_flash at all, so no
+  # setting written during a session ever survived a power cycle. The spec
+  # requires a 500ms delay BEFORE the write (comment: "FW needs time to
+  # process the previous setting command") — the opposite order from Nova 7
+  # Gen2's save_to_flash, which sleeps AFTER. Expressed below as a two-step
+  # write sequence (sleep, then write).
+  save_to_flash:
+    - {name: report_id, type: uint8, constant: 0x01}
+    - {name: command,   type: uint8, constant: 0x09}
+
   volume_limiter:
     - {name: report_id, type: uint8, constant: 0x01}
     - {name: command,   type: uint8, constant: 0x27}
@@ -258,6 +285,15 @@ structs:
     - {name: command,   type: uint8, constant: 0xFD}
 
 apis:
+  set_sonar_present:
+    write: {transport: HID_IO, chunk_size: 64}
+  software_chatmix_status:
+    write: {transport: HID_IO, chunk_size: 64}
+  save_to_flash:
+    write:
+      steps:
+        - {sleep_ms: 500}
+        - {transport: HID_IO, chunk_size: 64}
   volume_limiter:
     write: {transport: HID_IO, chunk_size: 64}
   mic_volume:
@@ -479,3 +515,4 @@ lifecycle:
   shutdown:
     - call: disable_chatmix
     - call: disable_sonar
+    - call: save_to_flash

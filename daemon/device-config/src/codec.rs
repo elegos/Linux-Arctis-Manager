@@ -18,6 +18,8 @@ pub enum FieldValue {
     U32(u32),
     F32(f32),
     Bytes(Vec<u8>),
+    /// `varstring` field value (decoded UTF-8, trailing NUL padding trimmed).
+    Str(String),
     /// Produced when the field has `repeat: n > 1`.
     Array(Vec<FieldValue>),
 }
@@ -247,6 +249,16 @@ impl<'a> Codec<'a> {
                     struct_name: struct_name.to_string(),
                     field_name: def.name.clone(),
                 })?;
+            if let (FieldType::VarString, Some(max), FieldValue::Str(s)) =
+                (&def.field_type, def.size, fv)
+            {
+                if s.len() > max as usize {
+                    return Err(CodecError::ConstraintViolation {
+                        field: def.name.clone(),
+                        detail: format!("{} bytes exceeds max size {max}", s.len()),
+                    });
+                }
+            }
             match (count, fv) {
                 (1, _) => write_fv(fv, buf),
                 (_, FieldValue::Array(arr)) => {
@@ -430,6 +442,10 @@ fn yaml_to_fv(v: &Yaml, ft: &FieldType, field_name: &str) -> Result<FieldValue, 
             field: field_name.to_string(),
             detail: "bytearray fields cannot be constants".to_string(),
         }),
+        FieldType::VarString => Err(CodecError::InvalidValue {
+            field: field_name.to_string(),
+            detail: "varstring fields cannot be constants".to_string(),
+        }),
     }
 }
 
@@ -440,6 +456,7 @@ fn write_fv(fv: &FieldValue, buf: &mut Vec<u8>) {
         FieldValue::U32(v) => buf.extend_from_slice(&v.to_be_bytes()),
         FieldValue::F32(v) => buf.extend_from_slice(&v.to_be_bytes()),
         FieldValue::Bytes(v) => buf.extend_from_slice(v),
+        FieldValue::Str(s) => buf.extend_from_slice(s.as_bytes()),
         FieldValue::Array(arr) => arr.iter().for_each(|elem| write_fv(elem, buf)),
     }
 }
@@ -451,6 +468,20 @@ fn read_fv(
     size: Option<u32>,
     field_name: &str,
 ) -> Result<FieldValue, CodecError> {
+    // varstring consumes every remaining byte in the buffer — it doesn't have
+    // a declared size, and it's always the last field in its layout.
+    if matches!(ft, FieldType::VarString) {
+        let raw = &bytes[*cursor..];
+        *cursor = bytes.len();
+        let trimmed = match raw.iter().position(|&b| b == 0) {
+            Some(nul_at) => &raw[..nul_at],
+            None => raw,
+        };
+        return Ok(FieldValue::Str(
+            String::from_utf8_lossy(trimmed).into_owned(),
+        ));
+    }
+
     let needed = field_byte_size(ft, size, field_name)?;
     let available = bytes.len().saturating_sub(*cursor);
     if available < needed {
@@ -464,6 +495,7 @@ fn read_fv(
         FieldType::Uint32 => FieldValue::U32(u32::from_be_bytes(slice.try_into().unwrap())),
         FieldType::Float32 => FieldValue::F32(f32::from_be_bytes(slice.try_into().unwrap())),
         FieldType::ByteArray => FieldValue::Bytes(slice.to_vec()),
+        FieldType::VarString => unreachable!("handled above"),
     })
 }
 
@@ -480,6 +512,7 @@ fn field_byte_size(
         FieldType::ByteArray => size
             .map(|s| s as usize)
             .ok_or_else(|| CodecError::MissingSize(field_name.to_string())),
+        FieldType::VarString => unreachable!("read_fv special-cases varstring before this call"),
     }
 }
 

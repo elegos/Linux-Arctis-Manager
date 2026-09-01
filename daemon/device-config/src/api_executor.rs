@@ -5,9 +5,10 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::OnceLock;
+use std::time::Duration;
 
 use crate::codec::{Codec, CodecError, FieldValue};
-use crate::{ApiDef, ApiOp, DeviceConfig, Transport};
+use crate::{ApiDef, ApiOp, DeviceConfig, Transport, WriteApi, WriteStep};
 
 // ── Error ─────────────────────────────────────────────────────────────────────
 
@@ -50,13 +51,27 @@ impl From<CodecError> for ApiError {
 
 // ── Pending operations ────────────────────────────────────────────────────────
 
-/// Serialised and padded byte payloads ready to transmit for a write API call.
-/// Most API calls produce exactly one payload; multi-packet APIs (e.g. draw_bitmap)
-/// produce more than one, each of which must be sent as a separate HID report.
+/// One physical action to perform, in order, to carry out a write API call.
+#[derive(Debug, PartialEq)]
+pub enum WriteAction {
+    /// Send `payload` over `transport`.
+    Send {
+        payload: Vec<u8>,
+        transport: Transport,
+    },
+    /// Pause before the next action (e.g. the 1.5s the firmware blocks
+    /// commands for after `save_to_flash` on some devices).
+    Sleep(Duration),
+}
+
+/// Ordered actions ready to execute for a write API call. Most API calls
+/// produce a single `Send`; multi-packet APIs (e.g. `draw_bitmap`) or
+/// multi-message protocols (e.g. a parametric EQ band write split into a
+/// name message, a data message, and a commit message) produce more, with
+/// `Sleep` actions interleaved where the device needs a pause between them.
 #[derive(Debug)]
 pub struct WriteOp {
-    pub payloads: Vec<Vec<u8>>,
-    pub transport: Transport,
+    pub actions: Vec<WriteAction>,
 }
 
 /// Serialised request bytes and metadata for a read API call.
@@ -109,23 +124,48 @@ impl<'a> ApiExecutor<'a> {
         self.builtins.insert(name.into(), Box::new(f));
     }
 
-    /// Serialise `values`, apply any `payload_transform`, and pad to
-    /// `chunk_size`.  Constant fields are filled automatically.
+    /// Serialise `values` once, then run every step of the write API's
+    /// action sequence against that same serialisation — matching the
+    /// vendor spec's convention of several `api-write`/`chunk` calls sharing
+    /// one `payload` variable. Each step applies its own `payload_transform`
+    /// and pads to its own `chunk_size`; constant fields are filled
+    /// automatically.
     pub fn prepare_write(
         &self,
         api_name: &str,
         values: &HashMap<String, FieldValue>,
     ) -> Result<WriteOp, ApiError> {
-        let op = self.write_op(api_name)?;
+        let write_api = self.write_api(api_name)?;
         let bytes = self.codec.serialize(api_name, values)?;
-        let mut payloads = self.apply_transform(bytes, &op.payload_transform)?;
-        for p in &mut payloads {
-            pad(p, op.chunk_size as usize);
+
+        let mut actions = Vec::new();
+        match write_api {
+            WriteApi::Single(op) => {
+                self.push_op_actions(op, &bytes, &mut actions)?;
+            }
+            WriteApi::Sequence { steps } => {
+                for step in steps {
+                    match step {
+                        WriteStep::Op {
+                            transport,
+                            chunk_size,
+                            payload_transform,
+                        } => {
+                            let op = ApiOp {
+                                transport: transport.clone(),
+                                chunk_size: *chunk_size,
+                                payload_transform: payload_transform.clone(),
+                            };
+                            self.push_op_actions(&op, &bytes, &mut actions)?;
+                        }
+                        WriteStep::Sleep { sleep_ms } => {
+                            actions.push(WriteAction::Sleep(Duration::from_millis(*sleep_ms)));
+                        }
+                    }
+                }
+            }
         }
-        Ok(WriteOp {
-            payloads,
-            transport: op.transport.clone(),
-        })
+        Ok(WriteOp { actions })
     }
 
     /// Build the padded request bytes for a read API call.
@@ -154,13 +194,33 @@ impl<'a> ApiExecutor<'a> {
 
     // ── Private ───────────────────────────────────────────────────────────────
 
-    fn write_op(&self, api_name: &str) -> Result<&ApiOp, ApiError> {
+    fn write_api(&self, api_name: &str) -> Result<&WriteApi, ApiError> {
         self.apis
             .get(api_name)
             .ok_or_else(|| ApiError::UnknownApi(api_name.to_string()))?
             .write
             .as_ref()
             .ok_or_else(|| ApiError::NoWriteOp(api_name.to_string()))
+    }
+
+    /// Apply `op`'s payload transform to `bytes` and pad each resulting
+    /// payload to `op.chunk_size`, pushing one `WriteAction::Send` per
+    /// payload.
+    fn push_op_actions(
+        &self,
+        op: &ApiOp,
+        bytes: &[u8],
+        actions: &mut Vec<WriteAction>,
+    ) -> Result<(), ApiError> {
+        let mut payloads = self.apply_transform(bytes.to_vec(), &op.payload_transform)?;
+        for p in &mut payloads {
+            pad(p, op.chunk_size as usize);
+            actions.push(WriteAction::Send {
+                payload: std::mem::take(p),
+                transport: op.transport.clone(),
+            });
+        }
+        Ok(())
     }
 
     fn read_op(&self, api_name: &str) -> Result<&ApiOp, ApiError> {
@@ -205,6 +265,25 @@ mod tests {
         serde_yaml::from_str(yaml).unwrap()
     }
 
+    /// Extract the `Send` payloads from a `WriteOp`, in order, ignoring any
+    /// `Sleep` actions.
+    fn send_payloads(op: &WriteOp) -> Vec<&[u8]> {
+        op.actions
+            .iter()
+            .filter_map(|a| match a {
+                WriteAction::Send { payload, .. } => Some(payload.as_slice()),
+                WriteAction::Sleep(_) => None,
+            })
+            .collect()
+    }
+
+    fn send_transport(op: &WriteOp, i: usize) -> &Transport {
+        match &op.actions[i] {
+            WriteAction::Send { transport, .. } => transport,
+            WriteAction::Sleep(_) => panic!("action {i} is a Sleep, not a Send"),
+        }
+    }
+
     #[test]
     fn prepare_write_fills_constants_and_pads() {
         let c = cfg(r#"
@@ -220,11 +299,12 @@ apis:
         let op = exec
             .prepare_write("save_to_flash", &HashMap::new())
             .unwrap();
-        assert_eq!(op.payloads.len(), 1);
-        assert_eq!(op.payloads[0].len(), 8);
-        assert_eq!(&op.payloads[0][..2], [0x06, 0x09]);
-        assert_eq!(&op.payloads[0][2..], [0u8; 6]);
-        assert_eq!(op.transport, Transport::HidIo);
+        let payloads = send_payloads(&op);
+        assert_eq!(payloads.len(), 1);
+        assert_eq!(payloads[0].len(), 8);
+        assert_eq!(&payloads[0][..2], [0x06, 0x09]);
+        assert_eq!(&payloads[0][2..], [0u8; 6]);
+        assert_eq!(*send_transport(&op, 0), Transport::HidIo);
     }
 
     #[test]
@@ -242,8 +322,9 @@ apis:
         let mut values = HashMap::new();
         values.insert("gain".to_string(), FieldValue::U8(0x42));
         let op = exec.prepare_write("set_gain", &values).unwrap();
-        assert_eq!(op.payloads[0][0], 0x06);
-        assert_eq!(op.payloads[0][1], 0x42);
+        let payloads = send_payloads(&op);
+        assert_eq!(payloads[0][0], 0x06);
+        assert_eq!(payloads[0][1], 0x42);
     }
 
     #[test]
@@ -266,7 +347,73 @@ apis:
         let mut values = HashMap::new();
         values.insert("val".to_string(), FieldValue::U8(3));
         let op = exec.prepare_write("cmd", &values).unwrap();
-        assert_eq!(op.payloads[0][0], 6, "transform doubled the byte");
+        assert_eq!(send_payloads(&op)[0][0], 6, "transform doubled the byte");
+    }
+
+    #[test]
+    fn prepare_write_sequence_runs_steps_in_order_with_sleep() {
+        let c = cfg(r#"
+structs:
+  save_to_flash:
+    - {name: report_id, type: uint8, constant: 0x06}
+    - {name: command,   type: uint8, constant: 0x09}
+apis:
+  save_to_flash:
+    write:
+      steps:
+        - {transport: HID_IO, chunk_size: 4}
+        - {sleep_ms: 1500}
+"#);
+        let exec = ApiExecutor::new(&c);
+        let op = exec
+            .prepare_write("save_to_flash", &HashMap::new())
+            .unwrap();
+        assert_eq!(op.actions.len(), 2);
+        assert_eq!(
+            op.actions[0],
+            WriteAction::Send {
+                payload: vec![0x06, 0x09, 0, 0],
+                transport: Transport::HidIo,
+            }
+        );
+        assert_eq!(
+            op.actions[1],
+            WriteAction::Sleep(Duration::from_millis(1500))
+        );
+    }
+
+    #[test]
+    fn prepare_write_sequence_multi_message_each_step_own_transform() {
+        let c = cfg(r#"
+structs:
+  parametric_eq:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: name,       type: varstring, size: 4}
+apis:
+  parametric_eq:
+    write:
+      steps:
+        - transport: HID_IO
+          chunk_size: 4
+          payload_transform: "builtin:first_byte_only"
+        - transport: HID_IO
+          chunk_size: 2
+          payload_transform: "builtin:last_byte_only"
+"#);
+        let mut exec = ApiExecutor::new(&c);
+        exec.register_builtin("builtin:first_byte_only", |b| vec![vec![b[0]]]);
+        exec.register_builtin("builtin:last_byte_only", |b| vec![vec![*b.last().unwrap()]]);
+        let mut values = HashMap::new();
+        values.insert("name".to_string(), FieldValue::Str("EQ1".to_string()));
+        let op = exec.prepare_write("parametric_eq", &values).unwrap();
+        let payloads = send_payloads(&op);
+        assert_eq!(payloads.len(), 2);
+        assert_eq!(
+            payloads[0],
+            [0x00, 0, 0, 0],
+            "step 1: first byte, padded to 4"
+        );
+        assert_eq!(payloads[1], [b'1', 0], "step 2: last byte, padded to 2");
     }
 
     #[test]
@@ -356,8 +503,8 @@ apis:
             FieldValue::Bytes(vec![0xDE, 0xAD, 0xBE, 0xEF]),
         );
         let op = exec.prepare_write("draw_bitmap", &values).unwrap();
-        assert_eq!(op.transport, Transport::HidFeature);
-        assert_eq!(op.payloads[0], [0xDE, 0xAD, 0xBE, 0xEF]);
+        assert_eq!(*send_transport(&op, 0), Transport::HidFeature);
+        assert_eq!(send_payloads(&op)[0], [0xDE, 0xAD, 0xBE, 0xEF]);
     }
 
     #[test]

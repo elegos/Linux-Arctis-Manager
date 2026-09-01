@@ -66,6 +66,13 @@ pub enum FieldType {
     Uint32,
     Float32,
     ByteArray,
+    /// Variable-length string, always the last field in its layout. On
+    /// decode it consumes every remaining byte in the response and trims
+    /// trailing NUL padding (matches the vendor spec's `varstring`, e.g. a
+    /// free-text EQ preset name). On encode, `size` (if set) caps the byte
+    /// length — writing a longer value is a `ConstraintViolation`, not a
+    /// silent truncation.
+    VarString,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -86,7 +93,9 @@ pub struct FieldDef {
     pub values_mapping: Option<std::collections::HashMap<String, String>>,
     #[serde(default)]
     pub repeat: Option<u32>,
-    /// Required for `bytearray` fields.
+    /// Required for `bytearray` fields (fixed size). Optional for
+    /// `varstring` fields (max size on encode; ignored on decode, which
+    /// always consumes to the end of the buffer).
     #[serde(default)]
     pub size: Option<u32>,
 }
@@ -133,12 +142,42 @@ pub struct ApiOp {
     pub payload_transform: Option<String>,
 }
 
+/// One step of a multi-message write (`WriteApi::Sequence`): either a
+/// physical HID write, or a pause before the next step. Mirrors the vendor
+/// spec's `(chunk HIDIO ...)` / `(chunk HIDSLEEP ...)` chunk list, and the
+/// pattern of several independent `api-write` calls sharing one logical
+/// setting (e.g. a parametric EQ band write: name, then band data, then a
+/// commit trigger).
+#[derive(Deserialize, Serialize, Debug, Clone)]
+#[serde(untagged)]
+pub enum WriteStep {
+    Op {
+        transport: Transport,
+        chunk_size: u32,
+        #[serde(default)]
+        payload_transform: Option<String>,
+    },
+    Sleep {
+        sleep_ms: u64,
+    },
+}
+
+/// A write API is either the common single-message shorthand, or an
+/// explicit ordered sequence of steps for devices whose protocol needs more
+/// than one physical HID transaction per logical setting change.
+#[derive(Deserialize, Serialize, Debug, Clone)]
+#[serde(untagged)]
+pub enum WriteApi {
+    Single(ApiOp),
+    Sequence { steps: Vec<WriteStep> },
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
 pub struct ApiDef {
     #[serde(default)]
     pub read: Option<ApiOp>,
     #[serde(default)]
-    pub write: Option<ApiOp>,
+    pub write: Option<WriteApi>,
 }
 
 // ── Transform types ───────────────────────────────────────────────────────────
