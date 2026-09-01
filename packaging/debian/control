@@ -6,6 +6,7 @@ Build-Depends: debhelper-compat (= 13),
                curl,
                pkg-config,
                libudev-dev,
+               libssl-dev,
                python3,
                python3-venv,
                libcap2-bin
@@ -15,7 +16,8 @@ Rules-Requires-Root: no
 
 Package: linux-arctis-manager
 Architecture: amd64
-Depends: ${misc:Depends},
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
          python3,
          libcap2-bin
 Recommends: python3-torch

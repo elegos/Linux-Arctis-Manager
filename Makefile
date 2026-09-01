@@ -131,8 +131,11 @@ install-python: generate-gui-wrapper
 	# at creation time (here, the DESTDIR buildroot) and are never sourced —
 	# lam-gui invokes $(VENVDIR)/bin/python3 directly. Left in place, rpmbuild's
 	# check-buildroot fails the package: the buildroot path leaks into an
-	# installed file.
+	# installed file. pyvenv.cfg's `command =` line (Python 3.11+, records
+	# the exact `python -m venv <path>` invocation) leaks the same buildroot
+	# path and is just as cosmetic — nothing reads it back at runtime.
 	rm -f $(DESTDIR)$(VENVDIR)/bin/activate*
+	sed -i '/^command = /d' $(DESTDIR)$(VENVDIR)/pyvenv.cfg
 	$(DESTDIR)$(VENVDIR)/bin/pip install --disable-pip-version-check -q --upgrade pip
 	$(DESTDIR)$(VENVDIR)/bin/pip install --disable-pip-version-check -q .
 ifdef DESTDIR
