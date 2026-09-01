@@ -139,8 +139,12 @@ install-python: generate-gui-wrapper
 	$(DESTDIR)$(VENVDIR)/bin/pip install --disable-pip-version-check -q --upgrade pip
 	$(DESTDIR)$(VENVDIR)/bin/pip install --disable-pip-version-check -q .
 ifdef DESTDIR
+	# Whole-file, not just the shebang line: a long enough buildroot path
+	# pushes pip's generated console-script shebang past the kernel's ~127
+	# byte limit, and pip falls back to a `#!/bin/sh` + `'''exec' <path> ...`
+	# wrapper with the interpreter path on line 2, not line 1.
 	find $(DESTDIR)$(VENVDIR)/bin -maxdepth 1 -type f \
-		-exec sed -i "1s|#!$(DESTDIR)|#!|" {} \;
+		-exec sed -i "s|$(DESTDIR)||g" {} \;
 endif
 	install -Dm755 $(GUI_WRAPPER_OUT) $(DESTDIR)$(BINDIR)/lam-gui
 
