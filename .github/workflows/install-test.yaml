@@ -1,0 +1,73 @@
+name: Distro install test (Linux)
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  resolve-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.resolve.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - id: resolve
+        run: python3 .github/scripts/resolve_distro_matrix.py >> "$GITHUB_OUTPUT"
+
+  install-test:
+    needs: resolve-matrix
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.resolve-matrix.outputs.matrix) }}
+
+    container:
+      image: ${{ matrix.image }}
+      # setcap/chown need root; not every base image (e.g. Bazzite's) defaults to it.
+      options: --user root
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install system dependencies
+        run: |
+          set -e
+          if command -v apt-get >/dev/null; then
+            DEBIAN_FRONTEND="noninteractive" apt-get update
+            DEBIAN_FRONTEND="noninteractive" apt-get install -y \
+              build-essential curl pkg-config libudev-dev libcap2-bin \
+              python3 python3-pip python3-venv
+          elif command -v dnf >/dev/null; then
+            dnf install -y \
+              gcc gcc-c++ make curl pkgconf-pkg-config systemd-devel libcap \
+              python3 python3-pip
+          elif command -v pacman >/dev/null; then
+            pacman -Sy --noconfirm base-devel curl pkgconf libcap python python-pip
+          else
+            echo "Unsupported package manager"
+            exit 1
+          fi
+
+      - name: Install Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build
+        run: make build
+
+      - name: Install
+        run: make install
+
+      - name: Install test
+        run: |
+          chmod +x tests/install-test.sh
+          ./tests/install-test.sh
