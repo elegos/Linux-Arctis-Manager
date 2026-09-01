@@ -22,27 +22,27 @@ Cross-checked against SteelSeries' own device specs, not just the previous v2 li
 
 | Device | Supported | Notes |
 |---|:---:|---|
-| Arctis 1 Wireless (+ Xbox, + Cyberpunk 2077 Edition) | ❌ | No hardware EQ (fixed on the AVNERA DSP chip, not adjustable); no ChatMix; no ANC. |
-| Arctis 5 (+ 2018, Dota 2 Edition, PUBG 2018 Edition) | ❌ | No ChatMix; no ANC. |
-| Arctis 7 (+ 2019 refresh) | ❌ | No hardware EQ (2018 original has none at all; 2019 refresh has a fixed AVNERA curve, not adjustable); no ANC. |
-| Arctis 7+ / Destiny 2 Edition | ✅ | No ANC. |
-| Arctis 7X+ (Xbox) | ✅ | No ChatMix (Xbox tier); no ANC. |
-| Arctis 7P+ (PlayStation) | ✅ | No ChatMix, no sidetone; no ANC. |
-| Arctis 9 / 9X | ❌ | No ANC. |
-| Arctis Pro (wired) + Pro GameDAC | ❌ | Wired — no battery/wireless status; no ANC. |
-| Arctis Pro Wireless | ❌ | No ANC. |
-| Arctis Nova 3 (wired) | ❌ | No ChatMix; no ANC. |
-| Arctis Nova 3 / 3X Wireless | ❌ | No ANC. |
-| Arctis Nova 4 / 4X | ❌ | No ANC. |
-| Arctis Nova 5 / 5X / 5X White | ✅ | No ANC. |
-| Arctis Nova 7 / 7X / WoW / Diablo IV (original firmware) | ✅ | No ANC. |
-| Arctis Nova 7 / 7X / 7P Gen 2 (native hardware *or* Gen 2 upgrade firmware) | ✅ | No ANC. |
-| Arctis Nova 7P (original firmware) | ✅ | No ANC. |
+| Arctis 1 Wireless (+ Xbox, + Cyberpunk 2077 Edition) | ❌ | Hardware EQ is a fixed AVNERA DSP curve, not software-adjustable. |
+| Arctis 5 (+ 2018, Dota 2 Edition, PUBG 2018 Edition) | ❌ | — |
+| Arctis 7 (+ 2019 refresh) | ❌ | 2018 original has no hardware EQ; 2019 refresh has a fixed AVNERA curve, not software-adjustable. |
+| Arctis 7+ / Destiny 2 Edition | ✅ | — |
+| Arctis 7X+ (Xbox) | ✅ | — |
+| Arctis 7P+ (PlayStation) | ✅ | — |
+| Arctis 9 / 9X | ❌ | — |
+| Arctis Pro (wired) + Pro GameDAC | ❌ | — |
+| Arctis Pro Wireless | ❌ | — |
+| Arctis Nova 3 (wired) | ❌ | — |
+| Arctis Nova 3 / 3X Wireless | ❌ | — |
+| Arctis Nova 4 / 4X | ❌ | — |
+| Arctis Nova 5 / 5X / 5X White | ✅ | — |
+| Arctis Nova 7 / 7X / WoW / Diablo IV (original firmware) | ✅ | — |
+| Arctis Nova 7 / 7X / 7P Gen 2 (native hardware *or* Gen 2 upgrade firmware) | ✅ | — |
+| Arctis Nova 7P (original firmware) | ✅ | — |
 | Arctis Nova Elite (+ SNG SKU) | ✅ | — |
-| Arctis Nova Pro (wired, GameDAC Gen 2, incl. v2 / Xbox) | ✅ | Wired — no battery/wireless status; no ANC. |
-| Arctis Nova Pro Omni | ✅ | No on-ear mic sidetone (unlike Nova Elite). |
+| Arctis Nova Pro (wired, GameDAC Gen 2, incl. v2 / Xbox) | ✅ | — |
+| Arctis Nova Pro Omni | ✅ | — |
 | Arctis Nova Pro Wireless (+ X, + X White) | ✅ | — |
-| Arctis GameBuds (+ X) | ❌ | True wireless earbuds, not a headset — no ChatMix dial. Out of scope for now; flagging since they're in SteelSeries' own Arctis lineup. |
+| Arctis GameBuds (+ X) | ❌ | True wireless earbuds, not a headset — different product category, not planned. |
 
 > **Note:** software EQ (10/15-band, applied via PipeWire regardless of what the headset itself supports) is always available as a substitute for hardware EQ. "No hardware EQ" above only means that headset's own onboard curve isn't adjustable — not that EQ itself is unavailable.
 
