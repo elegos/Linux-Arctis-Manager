@@ -1,0 +1,64 @@
+extends: base_arctis_nova_7_gen2
+
+# Real Gen 2 hardware and gen1-hardware-with-"upgrade"-firmware share the
+# exact same wire protocol — confirmed by diffing the raw specs, each
+# "upgrade" .device file `include`s the same base_arctis_nova_7_gen2_tx as
+# the native Gen 2 SKUs, only its PID differs (and it keeps its gen1-era
+# bootloader PID for the in-place flash step). No per-SKU protocol
+# differences found anywhere in this family (unlike gen1's 7P, sidetone is
+# defined in the shared base here, not per-SKU) — one device file for all
+# 9 PIDs. One raw discrepancy needing hardware confirmation before this
+# ships: v2's product_ids list includes 0x22a4, which the raw spec assigns
+# to the 7X upgrade *RX* (not TX) — possibly a v2 typo (0x22a5 is the
+# matching TX PID), possibly a real enumeration quirk of this specific SKU.
+
+device:
+  name: "SteelSeries Arctis Nova 7 (Gen 2 protocol)"
+  vendor_id: 0x1038
+
+  # See nova_7.yaml for the command_interface/sync_interface note — same
+  # family, same v2-vs-spec interface discrepancy (v2's gen2 config uses the
+  # identical [0, 3] / [3] interface numbers as its gen1 config).
+  variants:
+    - product_id: 0x227E
+      name: "Arctis Nova 7 Gen 2"
+      bootloader_pid: 0x227F
+    - product_id: 0x229E
+      name: "Arctis Nova 7X Gen 2"
+      bootloader_pid: 0x229F
+    - product_id: 0x2298
+      name: "Arctis Nova 7P Gen 2"
+      bootloader_pid: 0x2299
+    - product_id: 0x22A1
+      name: "Arctis Nova 7 (Gen 2 firmware)"
+      bootloader_pid: 0x2203
+    - product_id: 0x22A5
+      name: "Arctis Nova 7X (Gen 2 firmware)"
+      bootloader_pid: 0x2207
+    - product_id: 0x22AD
+      name: "Arctis Nova 7X White (Gen 2 firmware)"
+      bootloader_pid: 0x2259
+    - product_id: 0x22A7
+      name: "Arctis Nova 7P (Gen 2 firmware)"
+      bootloader_pid: 0x220B
+    - product_id: 0x22AB
+      name: "Arctis Nova 7 WoW Edition (Gen 2 firmware)"
+      bootloader_pid: 0x227B
+    - product_id: 0x22A9
+      name: "Arctis Nova 7 Diablo IV Edition (Gen 2 firmware)"
+      bootloader_pid: 0x223B
+
+  hid:
+    usage_page: 0xFFC0
+    usage: 0x0001
+    command_interface:
+      interface: 3
+    sync_interface:
+      interface: 3
+
+  capabilities:
+    - battery
+    - bluetooth
+    - chatmix
+    - custom_eq
+    - microphone

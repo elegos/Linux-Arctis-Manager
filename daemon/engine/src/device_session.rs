@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::os::unix::io::OwnedFd;
 use std::time::Duration;
 
-use device_config::api_executor::{ApiExecutor, ReadOp};
+use device_config::api_executor::{ApiExecutor, ReadOp, WriteAction};
 use device_config::codec::FieldValue;
 use device_config::sync_dispatcher::{DispatchResult, EmitEvent, SyncDispatcher};
 use device_config::sync_reader::SyncReader;
@@ -326,18 +326,23 @@ impl DeviceSession {
             api.prepare_write(api_name, values)
                 .map_err(EngineError::Api)?
         };
-        for payload in &op.payloads {
-            match op.transport {
-                Transport::HidIo => {
-                    self.transport
-                        .write_interrupt(payload)
-                        .await
-                        .map_err(EngineError::Io)?;
-                }
-                Transport::HidFeature => {
-                    self.transport
-                        .write_feature(payload)
-                        .map_err(EngineError::Io)?;
+        for action in &op.actions {
+            match action {
+                WriteAction::Send { payload, transport } => match transport {
+                    Transport::HidIo => {
+                        self.transport
+                            .write_interrupt(payload)
+                            .await
+                            .map_err(EngineError::Io)?;
+                    }
+                    Transport::HidFeature => {
+                        self.transport
+                            .write_feature(payload)
+                            .map_err(EngineError::Io)?;
+                    }
+                },
+                WriteAction::Sleep(duration) => {
+                    tokio::time::sleep(*duration).await;
                 }
             }
         }
@@ -400,7 +405,8 @@ impl DeviceSession {
 fn make_api_executor(config: &DeviceConfig) -> ApiExecutor<'_> {
     use device_config::builtins::{
         custom_eq_gains_payload, dim_timer_write_payload, eq_gains_7plus_payload,
-        high_gain_write_payload, muted_mic_brightness_write_payload, power_timer_write_payload,
+        high_gain_write_payload, muted_mic_brightness_write_payload, nova7gen2_eq_bands_payload,
+        nova7gen2_eq_commit_payload, nova7gen2_eq_name_payload, power_timer_write_payload,
     };
     let mut exec = ApiExecutor::new(config);
     exec.register_builtin("builtin:custom_eq_gains", custom_eq_gains_payload);
@@ -412,6 +418,9 @@ fn make_api_executor(config: &DeviceConfig) -> ApiExecutor<'_> {
         muted_mic_brightness_write_payload,
     );
     exec.register_builtin("builtin:eq_gains_7plus", eq_gains_7plus_payload);
+    exec.register_builtin("builtin:nova7gen2_eq_name", nova7gen2_eq_name_payload);
+    exec.register_builtin("builtin:nova7gen2_eq_bands", nova7gen2_eq_bands_payload);
+    exec.register_builtin("builtin:nova7gen2_eq_commit", nova7gen2_eq_commit_payload);
     exec
 }
 
@@ -868,6 +877,186 @@ apis:
             &[20u8; 10],
             "all 0 dB gains → firmware 20"
         );
+    }
+
+    /// Regression test for a real bug found while building Nova 7 Gen2's EQ
+    /// builtins: `codec::write_fv` serialises float32 fields big-endian, but
+    /// `gains_to_firmware_values`/`gains_to_firmware_values_7plus` used to
+    /// decode them little-endian — silently corrupting every non-zero gain
+    /// sent through the real `prepare_write` pipeline (0.0 dB is
+    /// endianness-blind, which is why the test above never caught it). Uses
+    /// non-zero, asymmetric gains specifically so a BE/LE mismatch fails loudly.
+    #[tokio::test]
+    async fn write_custom_eq_nonzero_gains_survive_the_full_pipeline() {
+        let (engine_fd, peer_fd) = make_pair();
+        let config = cfg(r#"
+structs:
+  custom_eq:
+    - {name: report_id, type: uint8,   constant: 0x06}
+    - {name: command,   type: uint8,   constant: 0x33}
+    - {name: gain1,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain2,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain3,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain4,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain5,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain6,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain7,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain8,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain9,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain10,    type: float32, range: [-10.0, 10.0]}
+apis:
+  custom_eq:
+    write:
+      transport: HID_IO
+      chunk_size: 64
+      payload_transform: "builtin:custom_eq_gains"
+"#);
+        let mut values = HashMap::new();
+        // -10 dB -> 0, +10 dB -> 40, -5 dB -> 10, +5 dB -> 30, rest flat (20).
+        let gains_db = [-10.0, 10.0, -5.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        for (i, db) in gains_db.iter().enumerate() {
+            values.insert(format!("gain{}", i + 1), FieldValue::F32(*db));
+        }
+        let task = tokio::spawn(async move {
+            let mut s = DeviceSession::new(config, engine_fd).expect("from_fd");
+            s.write_api_direct("custom_eq", values).await
+        });
+
+        let mut peer = HidTransport::from_fd(peer_fd).expect("from_fd");
+        let received = peer
+            .read_interrupt(Duration::from_millis(500))
+            .await
+            .expect("read failed");
+        task.await.unwrap().unwrap();
+
+        assert_eq!(
+            &received[2..12],
+            &[0, 40, 10, 30, 20, 20, 20, 20, 20, 20],
+            "non-zero gains must round-trip through the real codec (big-endian) \
+             encoding, not the little-endian shape the builtin used to assume"
+        );
+    }
+
+    // ── Nova 7 Gen2: parametric EQ multi-step write ───────────────────────────
+
+    /// End-to-end proof of the new `write.steps` sequence primitive: one
+    /// logical `SetSettings` call for `parametric_eq` must reach the device
+    /// as three separate physical HID reports, in order, each built from the
+    /// same serialised struct via its own `payload_transform` builtin.
+    #[tokio::test]
+    async fn write_parametric_eq_sends_three_messages_in_order() {
+        let (engine_fd, peer_fd) = make_pair();
+        let config = cfg(r#"
+structs:
+  parametric_eq:
+    - {name: report_id,        type: uint8, constant: 0x00}
+    - {name: eq_name_command,  type: uint8, constant: 0xA7}
+    - {name: connection_type,  type: uint8, constant: 0x00}
+    - {name: preset_type,      type: uint8, range: [0, 1]}
+    - {name: eqband_command,   type: uint8, constant: 0x33}
+    - {name: update_complete,  type: uint8, constant: 0x27}
+    - {name: band1_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band1_filter_type, type: uint8,   range: [0, 6]}
+    - {name: band1_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band1_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band2_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band2_filter_type, type: uint8,   range: [0, 6]}
+    - {name: band2_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band2_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band3_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band3_filter_type, type: uint8,   range: [0, 6]}
+    - {name: band3_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band3_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band4_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band4_filter_type, type: uint8,   range: [0, 6]}
+    - {name: band4_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band4_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band5_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band5_filter_type, type: uint8,   range: [0, 6]}
+    - {name: band5_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band5_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band6_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band6_filter_type, type: uint8,   range: [0, 6]}
+    - {name: band6_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band6_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band7_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band7_filter_type, type: uint8,   range: [0, 6]}
+    - {name: band7_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band7_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band8_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band8_filter_type, type: uint8,   range: [0, 6]}
+    - {name: band8_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band8_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band9_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band9_filter_type, type: uint8,   range: [0, 6]}
+    - {name: band9_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band9_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band10_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band10_filter_type, type: uint8,   range: [0, 6]}
+    - {name: band10_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band10_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: name, type: varstring, size: 60}
+apis:
+  parametric_eq:
+    write:
+      steps:
+        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:nova7gen2_eq_name"}
+        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:nova7gen2_eq_bands"}
+        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:nova7gen2_eq_commit"}
+"#);
+        let mut values = HashMap::new();
+        values.insert("preset_type".to_string(), FieldValue::U8(1));
+        values.insert(
+            "name".to_string(),
+            FieldValue::Str("Bass Boost".to_string()),
+        );
+        for band in 1..=10u8 {
+            let (freq, filter_type, gain, q) = if band == 1 {
+                (1000u16, 1u8, -1.2f32, 1.414f32)
+            } else {
+                (0u16, 0u8, 0.0f32, 0.0f32)
+            };
+            values.insert(format!("band{band}_frequency"), FieldValue::U16(freq));
+            values.insert(
+                format!("band{band}_filter_type"),
+                FieldValue::U8(filter_type),
+            );
+            values.insert(format!("band{band}_gain"), FieldValue::F32(gain));
+            values.insert(format!("band{band}_q_factor"), FieldValue::F32(q));
+        }
+
+        let task = tokio::spawn(async move {
+            let mut s = DeviceSession::new(config, engine_fd).expect("from_fd");
+            s.write_api_direct("parametric_eq", values).await
+        });
+
+        let mut peer = HidTransport::from_fd(peer_fd).expect("from_fd");
+        let msg1 = peer
+            .read_interrupt(Duration::from_millis(500))
+            .await
+            .expect("message 1 (name)");
+        let msg2 = peer
+            .read_interrupt(Duration::from_millis(500))
+            .await
+            .expect("message 2 (bands)");
+        let msg3 = peer
+            .read_interrupt(Duration::from_millis(500))
+            .await
+            .expect("message 3 (commit)");
+        task.await.unwrap().unwrap();
+
+        // Message 1: report_id, 0xA7, connection_type, preset_type, name bytes.
+        assert_eq!(&msg1[0..4], [0x00, 0xA7, 0x00, 0x01]);
+        assert_eq!(&msg1[4..14], b"Bass Boost");
+
+        // Message 2: report_id, 0x33, connection_type, then band1's re-encoded
+        // data (freq 1000 = 0x03E8 BE, filter 1, gain -1.2dB -> -12 (0xF4),
+        // Q 1.414 -> 1414 little-endian [0x86, 0x05]).
+        assert_eq!(&msg2[0..3], [0x00, 0x33, 0x00]);
+        assert_eq!(&msg2[3..9], [0x03, 0xE8, 0x01, 0xF4, 0x86, 0x05]);
+
+        // Message 3: report_id, 0x27 (commit).
+        assert_eq!(&msg3[0..2], [0x00, 0x27]);
     }
 
     // ── E6-S4: EQ preset selection ────────────────────────────────────────────

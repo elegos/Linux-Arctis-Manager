@@ -2390,6 +2390,7 @@ pub(crate) fn parse_setting_value(
         FieldType::Uint32 => Some(FieldValue::U32(json_val.as_u64()? as u32)),
         FieldType::Float32 => Some(FieldValue::F32(json_val.as_f64()? as f32)),
         FieldType::ByteArray => None, // byte-array fields are not settable via D-Bus
+        FieldType::VarString => Some(FieldValue::Str(json_val.as_str()?.to_string())),
     }
 }
 
@@ -2480,6 +2481,9 @@ pub(crate) fn build_write_values_with_defaults(
             FieldType::Uint32 => FieldValue::U32(range_min_u64 as u32),
             FieldType::Float32 => FieldValue::F32(range_min_f64 as f32),
             FieldType::ByteArray => continue,
+            // No sensible numeric default for a free-text field; the caller
+            // is expected to always supply varstring values explicitly.
+            FieldType::VarString => continue,
         };
         warn!(
             "build_write_values_with_defaults: field '{}' for api '{}' not in persisted map, using default {:?}",
@@ -2523,7 +2527,7 @@ mod tests {
             _ => panic!("wrong variant"),
         }
     }
-    use device_config::{ApiDef, ApiOp, FieldType, Transport};
+    use device_config::{ApiDef, ApiOp, FieldType, Transport, WriteApi};
     use std::path::PathBuf;
     use tokio::sync::mpsc;
 
@@ -2682,11 +2686,11 @@ mod tests {
             "set_vol".to_string(),
             ApiDef {
                 read: None,
-                write: Some(ApiOp {
+                write: Some(WriteApi::Single(ApiOp {
                     transport: Transport::HidIo,
                     chunk_size: 64,
                     payload_transform: None,
-                }),
+                })),
             },
         );
         let config = DeviceConfig {

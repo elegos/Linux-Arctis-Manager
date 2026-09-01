@@ -144,6 +144,9 @@ pub fn event_value_to_json(ev: &EventValue, display_type: Option<&str>) -> JsonV
         EventValue::Field(FieldValue::Bytes(v)) => {
             serde_json::json!({"value": v, "type": "bytes"})
         }
+        EventValue::Field(FieldValue::Str(v)) => {
+            serde_json::json!({"value": v, "type": "string"})
+        }
         EventValue::Field(FieldValue::Array(v)) => {
             let arr: Vec<JsonValue> = v
                 .iter()
