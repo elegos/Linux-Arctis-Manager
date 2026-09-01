@@ -89,11 +89,13 @@ structs:
     - {name: state,     type: uint8, range: [0, 1]}
     - {name: level,     type: uint8, range: [1, 10]}
 
-  on_ear_sidetone:
-    - {name: report_id, type: uint8, constant: 0x01}
-    - {name: command,   type: uint8, constant: 0x39}
-    - {name: state,     type: uint8, range: [0, 1]}
-    - {name: level,     type: uint8, range: [1, 10]}
+  # NOT here: `on_ear_sidetone` (0x39). Only Nova Elite proper has a second,
+  # detachable on-ear mic; Nova Pro Omni's raw spec has no 0x39 handling and
+  # no on-ear fields in its own `audio_settings` redefinition at all — this
+  # struct lives in nova_elite.yaml instead so Omni (which also extends this
+  # base) doesn't inherit a write command its hardware doesn't have. Structs/
+  # apis merge by key with no delete, so anything genuinely Elite-only must
+  # not live here.
 
   muted_mic_brightness:
     - {name: report_id, type: uint8, constant: 0x01}
@@ -300,8 +302,6 @@ apis:
     write: {transport: HID_IO, chunk_size: 64}
   boom_mic_sidetone:
     write: {transport: HID_IO, chunk_size: 64}
-  on_ear_sidetone:
-    write: {transport: HID_IO, chunk_size: 64}
   muted_mic_brightness:
     write: {transport: HID_IO, chunk_size: 64}
   transparent_anc_mode:
@@ -365,12 +365,6 @@ sync_events:
     fields:
       - {name: boom_sidetone_state, byte: 2}
       - {name: boom_sidetone_level, byte: 3}
-
-  0x39:
-    emit: on_ear_sidetone_changed
-    fields:
-      - {name: on_ear_sidetone_state, byte: 2}
-      - {name: on_ear_sidetone_level, byte: 3}
 
   0x43:
     emit: line_out_mode_changed

@@ -118,6 +118,23 @@ pub fn muted_mic_brightness_write_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
     vec![out]
 }
 
+/// Full-payload transform for Nova Pro Omni's `mic_noise_reduction` write.
+/// The struct exposes a single user-facing `level` field (0–3, 0 = off), but
+/// the wire format is two bytes: an enabled flag derived from whether `level`
+/// is 0, and the level itself clamped to at least 1 (the vendor spec always
+/// sends a non-zero level byte even when disabling, per its own `api-let*`).
+/// Input: `[report_id, command, level]`. Output: `[report_id, command,
+/// enabled, level.max(1)]`.
+pub fn nova_pro_omni_mic_noise_reduction_write_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
+    if bytes.len() < 3 {
+        return vec![bytes.to_vec()];
+    }
+    let level = bytes[2];
+    let enabled = if level == 0 { 0 } else { 1 };
+    let clamped_level = level.max(1);
+    vec![vec![bytes[0], bytes[1], enabled, clamped_level]]
+}
+
 /// Layout of the `parametric_eq`/`_bt`/`_mic` struct as serialised by the
 /// codec (see `base_arctis_nova_7_gen2.yaml`): `[report_id, eq_name_command,
 /// connection_type, preset_type, eqband_command, update_complete, 10 ×
@@ -585,6 +602,24 @@ mod tests {
         let result = muted_mic_brightness_write_payload(&input);
         assert_eq!(result[0][0], 0x00);
         assert_eq!(result[0][1], 0xAE);
+    }
+
+    // ── nova_pro_omni_mic_noise_reduction_write_payload ─────────────────────────
+
+    #[test]
+    fn mic_noise_reduction_write_payload_off_forces_level_1() {
+        let input = vec![0x01u8, 0x3C, 0];
+        let result = nova_pro_omni_mic_noise_reduction_write_payload(&input);
+        assert_eq!(result[0], vec![0x01, 0x3C, 0, 1]);
+    }
+
+    #[test]
+    fn mic_noise_reduction_write_payload_nonzero_levels_enable() {
+        for level in 1..=3u8 {
+            let input = vec![0x01u8, 0x3C, level];
+            let result = nova_pro_omni_mic_noise_reduction_write_payload(&input);
+            assert_eq!(result[0], vec![0x01, 0x3C, 1, level]);
+        }
     }
 
     // ── nova7gen2 parametric EQ (name / bands / commit) ─────────────────────────
