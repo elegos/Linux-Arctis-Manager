@@ -279,10 +279,24 @@ impl CalibrationSession {
             return false;
         }
 
+        // `--target <name>` was found live to sometimes mis-resolve to a
+        // different node entirely (see `audio::resolve_source_numeric_id`'s
+        // doc comment) — the numeric object index resolves reliably.
+        let capture_target = match crate::audio::resolve_source_numeric_id(source_id).await {
+            Some(id) => id.to_string(),
+            None => source_id.to_owned(),
+        };
+
         let mut child = match Command::new("pw-record")
             .args([
                 "--target",
-                source_id,
+                &capture_target,
+                // See `rvc_live_chain.rs`'s identical flag for why: the
+                // default "Music" role can get silently hijacked by a
+                // stale `module-stream-restore` entry, overriding
+                // `--target` entirely.
+                "--media-role",
+                "production",
                 "--rate",
                 &RECORD_SAMPLE_RATE.to_string(),
                 "--channels",

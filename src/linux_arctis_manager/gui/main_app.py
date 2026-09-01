@@ -92,6 +92,9 @@ class QMainApp(QBaseDesktopApp):
         self.dbus_wrapper.sig_export_deps_complete.connect(self._on_export_deps_complete)
         self.dbus_wrapper.sig_export_progress.connect(self._on_export_progress)
         self.dbus_wrapper.sig_export_complete.connect(self._on_export_complete)
+        self.dbus_wrapper.sig_cudnn_install_progress.connect(self._on_cudnn_install_progress)
+        self.dbus_wrapper.sig_cudnn_install_complete.connect(self._on_cudnn_install_complete)
+        self.dbus_wrapper.sig_live_chain_error.connect(self._on_live_chain_error)
 
         self._ui_version = project_version()
         self._service_restart_attempted = False
@@ -370,6 +373,22 @@ class QMainApp(QBaseDesktopApp):
         self._ai_status_label.setText(f'Export: {message}')
         QTimer.singleShot(5000, lambda: self._ai_status_label.setVisible(False))
         self.mic_widget.vc_widget.on_export_complete(success, message, name)
+
+    @Slot(str)
+    def _on_cudnn_install_progress(self, message: str) -> None:
+        self._ai_status_label.setVisible(True)
+        self._ai_status_label.setText(f'cuDNN: {message}')
+        self.mic_widget.vc_widget.on_cudnn_install_progress(message)
+
+    @Slot(bool, str)
+    def _on_cudnn_install_complete(self, success: bool, message: str) -> None:
+        self._ai_status_label.setText(f'cuDNN: {message}')
+        QTimer.singleShot(5000, lambda: self._ai_status_label.setVisible(False))
+        self.mic_widget.vc_widget.on_cudnn_install_complete(success, message)
+
+    @Slot(str)
+    def _on_live_chain_error(self, message: str) -> None:
+        self.mic_widget.vc_widget.on_live_chain_error(message)
 
     @Slot(str, str)
     def _show_error_dialog(self, title: str, message: str) -> None:

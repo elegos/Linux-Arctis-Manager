@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 import logging
-import threading
-
-import pulsectl
 import subprocess
 
 from PySide6.QtCore import Qt, QTimer, Signal
@@ -114,6 +111,20 @@ class QVCWidget(QWidget):
         self._apply_timer.setSingleShot(True)
         self._apply_timer.setInterval(500)
 
+        # Re-fetches settings only (not the full `refresh()`) every few
+        # seconds while this tab is visible — `showEvent` alone only
+        # catches a stale display when the tab is switched away from and
+        # back; a daemon restart while the user stays on this tab the
+        # whole time (a real, repeatedly-hit case while debugging VC in
+        # this same session) otherwise leaves e.g. the tri-state Enable
+        # checkbox showing a persisted-but-no-longer-true "on for this
+        # session" indefinitely. Started/stopped in show/hideEvent so it
+        # doesn't poll while the tab isn't in view.
+        self._settings_poll_timer = QTimer(self)
+        self._settings_poll_timer.setInterval(5000)
+        self._settings_poll_timer.timeout.connect(
+            lambda: DbusWrapper.request_vc_settings(self.sig_vc_settings))
+
         # Auto-tune controller state
         self._tune_timer = QTimer(self)
         self._tune_timer.setInterval(800)
@@ -162,13 +173,25 @@ class QVCWidget(QWidget):
         gl.setContentsMargins(0, 0, 0, 0)
         global_box.setLayout(gl)
 
+        # Tri-state: unchecked = off, partially checked = on for this
+        # session only (default daemon-restart behavior before this
+        # existed — the daemon never re-applied a persisted "enabled" on
+        # its own), checked = on and stays on across daemon restarts
+        # (`autostart`, re-applied at daemon startup — see
+        # `dbus.rs::autostart_nc_and_vc`). Clicking cycles through the
+        # three states in that order, Qt's own default tri-state behavior.
         en_row = QHBoxLayout()
         en_lbl = QLabel(_T('ui', 'vc_enable'))
         en_lbl.setFixedWidth(110)
         en_row.addWidget(en_lbl)
         self._enable_check = QCheckBox()
+        self._enable_check.setTristate(True)
+        self._enable_check.setToolTip(_T('ui', 'vc_enable_tristate_tooltip'))
         self._enable_check.stateChanged.connect(self._on_enable_changed)
         en_row.addWidget(self._enable_check)
+        self._enable_state_lbl = QLabel()
+        self._enable_state_lbl.setStyleSheet('color: palette(mid);')
+        en_row.addWidget(self._enable_state_lbl)
         en_row.addStretch()
         gl.addLayout(en_row)
 
@@ -193,6 +216,12 @@ class QVCWidget(QWidget):
         mode_row.addWidget(self._mode_combo)
         mode_row.addStretch()
         gl.addLayout(mode_row)
+
+        self._live_chain_error_lbl = QLabel('')
+        self._live_chain_error_lbl.setWordWrap(True)
+        self._live_chain_error_lbl.setStyleSheet('color: red;')
+        self._live_chain_error_lbl.setVisible(False)
+        gl.addWidget(self._live_chain_error_lbl)
 
         outer.addWidget(global_box)
 
@@ -485,6 +514,34 @@ class QVCWidget(QWidget):
 
         self._rvc_no_backend_frame.setVisible(False)
         cl.addWidget(self._rvc_no_backend_frame)
+
+        # cuDNN missing warning — a CUDA-capable onnxruntime that is found
+        # (so `rvc_avail` is true, the panel above stays hidden) but has no
+        # cuDNN to actually run a kernel on: registers fine, then hard-fails
+        # the first time a real session runs — silently, unless surfaced
+        # here (found live via the sidetone preview going silent).
+        self._rvc_cudnn_frame = QFrame()
+        self._rvc_cudnn_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        cf = QVBoxLayout()
+        cf.setContentsMargins(10, 8, 10, 8)
+        cf.setSpacing(8)
+        self._rvc_cudnn_frame.setLayout(cf)
+        self._rvc_cudnn_lbl = QLabel(_T('ui', 'vc_rvc_cudnn_missing'))
+        self._rvc_cudnn_lbl.setWordWrap(True)
+        cf.addWidget(self._rvc_cudnn_lbl)
+        cudnn_row = QHBoxLayout()
+        cudnn_row.addStretch(1)
+        self._rvc_cudnn_install_btn = QPushButton(_T('ui', 'vc_rvc_cudnn_install_btn'))
+        self._rvc_cudnn_install_btn.clicked.connect(self._prompt_cudnn_install)
+        cudnn_row.addWidget(self._rvc_cudnn_install_btn)
+        cf.addLayout(cudnn_row)
+        self._rvc_cudnn_status_lbl = QLabel('')
+        self._rvc_cudnn_status_lbl.setWordWrap(True)
+        self._rvc_cudnn_status_lbl.setVisible(False)
+        cf.addWidget(self._rvc_cudnn_status_lbl)
+        self._rvc_cudnn_frame.setVisible(False)
+        cl.addWidget(self._rvc_cudnn_frame)
+        self._cudnn_hint = ''
 
         # ── Base AI Models ─────────────────────────────────────────────
         self._rvc_base_frame = QFrame()
@@ -800,29 +857,37 @@ class QVCWidget(QWidget):
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
         self.refresh()
+        self._settings_poll_timer.start()
+
+    def hideEvent(self, event) -> None:  # noqa: N802
+        super().hideEvent(event)
+        self._settings_poll_timer.stop()
 
     def refresh(self) -> None:
-        threading.Thread(target=self._load_sources_thread, daemon=True).start()
+        DbusWrapper.request_list_options('pulse_audio_sources', self._sig_sources_loaded)
         DbusWrapper.request_vc_capabilities(self.sig_vc_capabilities)
         DbusWrapper.request_vc_settings(self.sig_vc_settings)
         DbusWrapper.get_hf_token(self.sig_hf_token)
 
-    # ── Source loading ─────────────────────────────────────────────────
-
-    def _load_sources_thread(self) -> None:
-        try:
-            with pulsectl.Pulse('lam-vc-sources') as pulse:
-                default_name = pulse.server_info().default_source_name
-                sources = [s for s in pulse.source_list() if not s.name.endswith('.monitor')]
-            self._sig_sources_loaded.emit({
-                'sources': [{'id': s.name, 'name': s.description} for s in sources],
-                'default': default_name,
-            })
-        except Exception as e:
-            logger.warning('Failed to load PulseAudio sources: %s', e)
-
+    # ── Source loading (daemon GetListOptions("pulse_audio_sources")) ───
+    #
+    # Goes through the daemon (`audio::list_audio_sources`/`parse_audio_sources`,
+    # same call `nc_widget.py` already uses) rather than a direct GUI-side
+    # `pulsectl` call — that direct call only filtered `.monitor` sources,
+    # not the daemon's own managed virtual mics (`Arctis_Manager_Mic`,
+    # `Arctis_NC_Mic`, ...). Found live: `Arctis_Manager_Mic` had become the
+    # system default input at some point (it's deliberately made a normal,
+    # selectable device — see `mic_router.rs`'s `device.class=sound`
+    # comment), so this widget's own "prefer the default source" logic
+    # pre-selected it as the VC *input*. Enabling VC then had `pw-record`
+    # capture from `Arctis_Manager_Mic` while `mic_router` simultaneously
+    # pointed that same node at `Arctis_VC_Sink.monitor` (VC's own output)
+    # — a silent feedback loop with no real microphone audio ever entering
+    # it, not a crash, so nothing surfaced it: total silence, no error.
     def _on_sources_loaded(self, data: dict) -> None:
-        self._populate_sources(data.get('sources', []), prefer_id=data.get('default', ''))
+        sources: list[dict] = data.get('list', [])
+        default_id = next((s['id'] for s in sources if s.get('is_default')), '')
+        self._populate_sources(sources, prefer_id=default_id)
 
     def _populate_sources(self, sources: list[dict], prefer_id: str = '') -> None:
         self._sources = sources
@@ -890,6 +955,10 @@ class QVCWidget(QWidget):
         self._rvc_model_combo.setEnabled(rvc_avail)
         self._calib_btn.setEnabled(rvc_avail)
 
+        cudnn_missing = bool(self._rvc_caps.get('cudnn_missing', False))
+        self._cudnn_hint = str(self._rvc_caps.get('cudnn_hint', ''))
+        self._rvc_cudnn_frame.setVisible(rvc_avail and cudnn_missing)
+
         models: list[dict] = self._rvc_caps.get('models', [])
         self._refresh_rvc_models(models, self._rvc_caps.get('models_folder', ''))
 
@@ -948,8 +1017,10 @@ class QVCWidget(QWidget):
         self._loading = True
 
         self._enable_check.blockSignals(True)
-        self._enable_check.setChecked(bool(settings.get('enabled', False)))
+        self._set_enable_state(
+            bool(settings.get('enabled', False)), bool(settings.get('autostart', False)))
         self._enable_check.blockSignals(False)
+        self._update_global_state()
 
         source_id = settings.get('source_id', '')
         if source_id:
@@ -1093,6 +1164,42 @@ class QVCWidget(QWidget):
         self._rvc_export_status_lbl.setVisible(bool(message))
         if success:
             self.refresh_models()
+
+    def _prompt_cudnn_install(self) -> None:
+        reply = QMessageBox.question(
+            self,
+            _T('ui', 'vc_rvc_cudnn_install_title'),
+            _T('ui', 'vc_rvc_cudnn_install_msg').format(command=self._cudnn_hint),
+            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Ok:
+            return
+        self._rvc_cudnn_install_btn.setEnabled(False)
+        self._rvc_cudnn_status_lbl.setText(_T('ui', 'vc_rvc_cudnn_installing'))
+        self._rvc_cudnn_status_lbl.setVisible(True)
+        DbusWrapper.install_cudnn()
+
+    def on_cudnn_install_progress(self, message: str) -> None:
+        """Called by main_app while InstallCudnn's background task is running."""
+        self._rvc_cudnn_status_lbl.setText(message)
+        self._rvc_cudnn_status_lbl.setVisible(True)
+
+    def on_cudnn_install_complete(self, success: bool, message: str) -> None:
+        """Called by main_app after InstallCudnn completes."""
+        self._rvc_cudnn_install_btn.setEnabled(True)
+        if success:
+            # A cuDNN wheel just landed in the user's site-packages — the
+            # daemon's own self-heal (`engine::init_runtime`'s
+            # `preload_cudnn`) picks it up on the next session load, no
+            # daemon restart needed. Re-toggling Enable is enough to force
+            # a fresh chain build; re-fetch capabilities so the warning
+            # banner clears once the daemon itself confirms it's gone.
+            self._rvc_cudnn_status_lbl.setText(_T('ui', 'vc_rvc_cudnn_install_done'))
+            DbusWrapper.request_vc_capabilities(self.sig_vc_capabilities)
+        else:
+            self._rvc_cudnn_status_lbl.setText(
+                _T('ui', 'vc_rvc_cudnn_install_failed').format(message=message))
+        self._rvc_cudnn_status_lbl.setVisible(True)
 
     def _restore_model_params(self, mp: dict) -> None:
         """Set the per-model tunable controls from a saved snapshot (no signals)."""
@@ -1280,11 +1387,35 @@ class QVCWidget(QWidget):
         self._update_global_state()
         self._apply()
 
+    def _enable_state(self) -> tuple[bool, bool]:
+        """(enabled, autostart) from the tri-state Enable checkbox."""
+        state = self._enable_check.checkState()
+        if state == Qt.CheckState.Unchecked:
+            return False, False
+        if state == Qt.CheckState.PartiallyChecked:
+            return True, False
+        return True, True  # Checked
+
+    def _set_enable_state(self, enabled: bool, autostart: bool) -> None:
+        if not enabled:
+            state = Qt.CheckState.Unchecked
+        elif autostart:
+            state = Qt.CheckState.Checked
+        else:
+            state = Qt.CheckState.PartiallyChecked
+        self._enable_check.setCheckState(state)
+
     def _update_global_state(self) -> None:
-        enabled = self._enable_check.isChecked()
+        enabled, autostart = self._enable_state()
         self._source_combo.setEnabled(enabled)
         self._mode_combo.setEnabled(enabled)
         self._stack.setEnabled(enabled)
+        if not enabled:
+            self._enable_state_lbl.setText(_T('ui', 'vc_enable_state_off'))
+        elif autostart:
+            self._enable_state_lbl.setText(_T('ui', 'vc_enable_state_always'))
+        else:
+            self._enable_state_lbl.setText(_T('ui', 'vc_enable_state_session'))
 
     @staticmethod
     def _set_fslider(sl: QSlider, value: float, minimum: float, maximum: float) -> None:
@@ -1295,15 +1426,29 @@ class QVCWidget(QWidget):
 
     # ── Apply / retry ──────────────────────────────────────────────────
 
+    def on_live_chain_error(self, message: str) -> None:
+        """Called by main_app on `LiveChainError` — the live RVC chain
+        failed (validation, or the background inference loop dying after
+        `SetVCSettings` already returned `true`). Persists until the next
+        `_apply()`, unlike the transient status labels elsewhere in this
+        panel, since this is a "what's currently broken" state, not
+        "operation in progress" feedback.
+        """
+        self._live_chain_error_lbl.setText(_T('ui', 'vc_rvc_live_error').format(message=message))
+        self._live_chain_error_lbl.setVisible(True)
+
     def _apply(self) -> None:
         if self._loading:
             return
+        self._live_chain_error_lbl.setVisible(False)
         rvc_model = self._rvc_model_combo.currentData() or ''
         rvc_params = self._current_model_params()
         if rvc_model:
             self._rvc_model_params[rvc_model] = dict(rvc_params)
+        enabled, autostart = self._enable_state()
         DbusWrapper.set_vc_settings({
-            'enabled':   self._enable_check.isChecked(),
+            'enabled':   enabled,
+            'autostart': autostart,
             'mode':      self._mode_combo.currentData() or 'ladspa',
             'source_id': self._source_combo.currentData() or '',
             'pitch': {
