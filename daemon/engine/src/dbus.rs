@@ -2426,6 +2426,9 @@ pub(crate) fn parse_setting_value(
         FieldType::Uint8 => Some(FieldValue::U8(json_val.as_u64()? as u8)),
         FieldType::Uint16 => Some(FieldValue::U16(json_val.as_u64()? as u16)),
         FieldType::Uint32 => Some(FieldValue::U32(json_val.as_u64()? as u32)),
+        FieldType::Int8 => Some(FieldValue::I8(json_val.as_i64()? as i8)),
+        FieldType::Int16 => Some(FieldValue::I16(json_val.as_i64()? as i16)),
+        FieldType::Int32 => Some(FieldValue::I32(json_val.as_i64()? as i32)),
         FieldType::Float32 => Some(FieldValue::F32(json_val.as_f64()? as f32)),
         FieldType::ByteArray => None, // byte-array fields are not settable via D-Bus
         FieldType::VarString => Some(FieldValue::Str(json_val.as_str()?.to_string())),
@@ -2507,6 +2510,12 @@ pub(crate) fn build_write_values_with_defaults(
             .and_then(|r| r.first())
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
+        let range_min_i64 = fdef
+            .range
+            .as_ref()
+            .and_then(|r| r.first())
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
         let range_min_f64 = fdef
             .range
             .as_ref()
@@ -2517,6 +2526,9 @@ pub(crate) fn build_write_values_with_defaults(
             FieldType::Uint8 => FieldValue::U8(range_min_u64 as u8),
             FieldType::Uint16 => FieldValue::U16(range_min_u64 as u16),
             FieldType::Uint32 => FieldValue::U32(range_min_u64 as u32),
+            FieldType::Int8 => FieldValue::I8(range_min_i64 as i8),
+            FieldType::Int16 => FieldValue::I16(range_min_i64 as i16),
+            FieldType::Int32 => FieldValue::I32(range_min_i64 as i32),
             FieldType::Float32 => FieldValue::F32(range_min_f64 as f32),
             FieldType::ByteArray => continue,
             // No sensible numeric default for a free-text field; the caller

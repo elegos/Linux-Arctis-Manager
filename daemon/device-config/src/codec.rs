@@ -16,6 +16,9 @@ pub enum FieldValue {
     U8(u8),
     U16(u16),
     U32(u32),
+    I8(i8),
+    I16(i16),
+    I32(i32),
     F32(f32),
     Bytes(Vec<u8>),
     /// `varstring` field value (decoded UTF-8, trailing NUL padding trimmed).
@@ -30,16 +33,26 @@ impl FieldValue {
             Self::U8(v) => Some(*v as f64),
             Self::U16(v) => Some(*v as f64),
             Self::U32(v) => Some(*v as f64),
+            Self::I8(v) => Some(*v as f64),
+            Self::I16(v) => Some(*v as f64),
+            Self::I32(v) => Some(*v as f64),
             Self::F32(v) => Some(*v as f64),
             _ => None,
         }
     }
 
+    /// `None` for a negative signed value — there is no lossless `u64`
+    /// representation of it (used for exact constant-match comparisons,
+    /// where a signed field is rare and never negative in practice; range
+    /// checks go through `as_f64` instead, which handles negatives fine).
     pub fn as_u64(&self) -> Option<u64> {
         match self {
             Self::U8(v) => Some(*v as u64),
             Self::U16(v) => Some(*v as u64),
             Self::U32(v) => Some(*v as u64),
+            Self::I8(v) => u64::try_from(*v).ok(),
+            Self::I16(v) => u64::try_from(*v).ok(),
+            Self::I32(v) => u64::try_from(*v).ok(),
             Self::F32(v) => Some(*v as u64),
             _ => None,
         }
@@ -430,6 +443,9 @@ fn yaml_to_fv(v: &Yaml, ft: &FieldType, field_name: &str) -> Result<FieldValue, 
         FieldType::Uint8 => Ok(FieldValue::U8(v.as_u64().ok_or_else(not_int)? as u8)),
         FieldType::Uint16 => Ok(FieldValue::U16(v.as_u64().ok_or_else(not_int)? as u16)),
         FieldType::Uint32 => Ok(FieldValue::U32(v.as_u64().ok_or_else(not_int)? as u32)),
+        FieldType::Int8 => Ok(FieldValue::I8(v.as_i64().ok_or_else(not_int)? as i8)),
+        FieldType::Int16 => Ok(FieldValue::I16(v.as_i64().ok_or_else(not_int)? as i16)),
+        FieldType::Int32 => Ok(FieldValue::I32(v.as_i64().ok_or_else(not_int)? as i32)),
         FieldType::Float32 => {
             Ok(FieldValue::F32(
                 v.as_f64().ok_or_else(|| CodecError::InvalidValue {
@@ -454,6 +470,9 @@ fn write_fv(fv: &FieldValue, buf: &mut Vec<u8>) {
         FieldValue::U8(v) => buf.push(*v),
         FieldValue::U16(v) => buf.extend_from_slice(&v.to_be_bytes()),
         FieldValue::U32(v) => buf.extend_from_slice(&v.to_be_bytes()),
+        FieldValue::I8(v) => buf.push(*v as u8),
+        FieldValue::I16(v) => buf.extend_from_slice(&v.to_be_bytes()),
+        FieldValue::I32(v) => buf.extend_from_slice(&v.to_be_bytes()),
         FieldValue::F32(v) => buf.extend_from_slice(&v.to_be_bytes()),
         FieldValue::Bytes(v) => buf.extend_from_slice(v),
         FieldValue::Str(s) => buf.extend_from_slice(s.as_bytes()),
@@ -493,6 +512,9 @@ fn read_fv(
         FieldType::Uint8 => FieldValue::U8(slice[0]),
         FieldType::Uint16 => FieldValue::U16(u16::from_be_bytes(slice.try_into().unwrap())),
         FieldType::Uint32 => FieldValue::U32(u32::from_be_bytes(slice.try_into().unwrap())),
+        FieldType::Int8 => FieldValue::I8(slice[0] as i8),
+        FieldType::Int16 => FieldValue::I16(i16::from_be_bytes(slice.try_into().unwrap())),
+        FieldType::Int32 => FieldValue::I32(i32::from_be_bytes(slice.try_into().unwrap())),
         FieldType::Float32 => FieldValue::F32(f32::from_be_bytes(slice.try_into().unwrap())),
         FieldType::ByteArray => FieldValue::Bytes(slice.to_vec()),
         FieldType::VarString => unreachable!("handled above"),
@@ -508,6 +530,9 @@ fn field_byte_size(
         FieldType::Uint8 => Ok(1),
         FieldType::Uint16 => Ok(2),
         FieldType::Uint32 => Ok(4),
+        FieldType::Int8 => Ok(1),
+        FieldType::Int16 => Ok(2),
+        FieldType::Int32 => Ok(4),
         FieldType::Float32 => Ok(4),
         FieldType::ByteArray => size
             .map(|s| s as usize)
@@ -667,6 +692,61 @@ mod tests {
     }
 
     #[test]
+    fn serialize_int8_two_complement() {
+        let structs = single_struct("s", vec![field("gain", FieldType::Int8)]);
+        let codec = Codec::new(&structs, no_consts());
+        let mut values = HashMap::new();
+        values.insert("gain".to_string(), FieldValue::I8(-12));
+        // -12 in two's complement is 0xF4, same bit pattern as 244u8.
+        assert_eq!(codec.serialize("s", &values).unwrap(), [0xF4]);
+    }
+
+    #[test]
+    fn deserialize_int8_negative_value() {
+        let structs = single_struct("s", vec![field("gain", FieldType::Int8)]);
+        let codec = Codec::new(&structs, no_consts());
+        let decoded = codec.deserialize("s", &[0xF4]).unwrap();
+        assert_eq!(decoded["gain"], FieldValue::I8(-12));
+    }
+
+    #[test]
+    fn deserialize_int8_positive_value() {
+        let structs = single_struct("s", vec![field("gain", FieldType::Int8)]);
+        let codec = Codec::new(&structs, no_consts());
+        let decoded = codec.deserialize("s", &[0x0C]).unwrap();
+        assert_eq!(decoded["gain"], FieldValue::I8(12));
+    }
+
+    #[test]
+    fn serialize_int16_big_endian_negative() {
+        let structs = single_struct("s", vec![field("v", FieldType::Int16)]);
+        let codec = Codec::new(&structs, no_consts());
+        let mut values = HashMap::new();
+        values.insert("v".to_string(), FieldValue::I16(-2));
+        // -2 i16 big-endian is 0xFFFE.
+        assert_eq!(codec.serialize("s", &values).unwrap(), [0xFF, 0xFE]);
+    }
+
+    #[test]
+    fn deserialize_int16_big_endian_negative() {
+        let structs = single_struct("s", vec![field("v", FieldType::Int16)]);
+        let codec = Codec::new(&structs, no_consts());
+        let decoded = codec.deserialize("s", &[0xFF, 0xFE]).unwrap();
+        assert_eq!(decoded["v"], FieldValue::I16(-2));
+    }
+
+    #[test]
+    fn int32_roundtrip_negative() {
+        let structs = single_struct("s", vec![field("v", FieldType::Int32)]);
+        let codec = Codec::new(&structs, no_consts());
+        let mut values = HashMap::new();
+        values.insert("v".to_string(), FieldValue::I32(-70000));
+        let bytes = codec.serialize("s", &values).unwrap();
+        let decoded = codec.deserialize("s", &bytes).unwrap();
+        assert_eq!(decoded["v"], FieldValue::I32(-70000));
+    }
+
+    #[test]
     fn serialize_float32() {
         let structs = single_struct("s", vec![field("gain", FieldType::Float32)]);
         let codec = Codec::new(&structs, no_consts());
@@ -775,6 +855,22 @@ mod tests {
         assert_eq!(
             codec.deserialize("s", &[8]).unwrap()["level"],
             FieldValue::U8(8)
+        );
+    }
+
+    #[test]
+    fn range_constraint_enforced_on_negative_int8_range() {
+        let structs = single_struct("s", vec![range_field("gain", FieldType::Int8, -12.0, 12.0)]);
+        let codec = Codec::new(&structs, no_consts());
+        // -13 (0xF3) is out of [-12, 12].
+        assert!(matches!(
+            codec.deserialize("s", &[0xF3]).unwrap_err(),
+            CodecError::ConstraintViolation { .. }
+        ));
+        // -12 (0xF4) is OK.
+        assert_eq!(
+            codec.deserialize("s", &[0xF4]).unwrap()["gain"],
+            FieldValue::I8(-12)
         );
     }
 

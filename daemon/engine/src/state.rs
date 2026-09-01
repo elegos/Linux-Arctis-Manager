@@ -138,6 +138,15 @@ pub fn event_value_to_json(ev: &EventValue, display_type: Option<&str>) -> JsonV
         EventValue::Field(FieldValue::U32(v)) => {
             serde_json::json!({"value": v, "type": "uint32"})
         }
+        EventValue::Field(FieldValue::I8(v)) => {
+            serde_json::json!({"value": v, "type": "int8"})
+        }
+        EventValue::Field(FieldValue::I16(v)) => {
+            serde_json::json!({"value": v, "type": "int16"})
+        }
+        EventValue::Field(FieldValue::I32(v)) => {
+            serde_json::json!({"value": v, "type": "int32"})
+        }
         EventValue::Field(FieldValue::F32(v)) => {
             serde_json::json!({"value": v, "type": "float32"})
         }
