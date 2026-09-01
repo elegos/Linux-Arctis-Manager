@@ -1,0 +1,158 @@
+extends: base_arctis_nova_elite
+
+# Nova Pro Omni's raw spec (`arctis_nova_pro_omni_tx.device`) includes
+# `base_arctis_nova_elite_tx` directly ("Arctis Nova Pro Omni reuses most of
+# Nova Elite APIs/functions") — same hardware family, not just a shared code
+# style. Reused as-is from base_arctis_nova_elite: ANC/transparent, both
+# Bluetooth defaults, inactivity timer, boom mic sidetone, muted-mic
+# brightness, station display (brightness/screensaver/home-screen), volume
+# limiter, line-out mode, stream mix, battery/connection/charging sync — same
+# commands, same byte positions, confirmed against the raw spec's own
+# `translate_sync_data` table.
+#
+# Real differences from Nova Elite, all modelled below:
+# - Adds `mic_noise_reduction` (0x3C) — not present on Nova Elite at all.
+# - No on-ear mic / `on_ear_sidetone` (0x39) — absent from Omni's own spec
+#   entirely (no case in its sync handler, no fields in its own
+#   `audio_settings` redefinition). Deliberately not inherited: see the note
+#   in nova_elite.yaml for why that struct lives there instead of the shared
+#   base.
+# - `audio_settings` (the startup snapshot) is redefined with a different
+#   field layout — no on-ear fields, real (if still unused) per-band EQ/gain
+#   fields instead of Elite's raw placeholder split, one extra onboard mic
+#   EQ preset slot (0-9 vs Elite's 0-8). Per the raw spec, its `incoming`
+#   direction also has no leading `report_id` byte, unlike every other
+#   struct in this family (including Elite's own `audio_settings`) — kept
+#   as literally specified rather than assumed to be a copy-paste slip,
+#   since there's no hardware to verify against.
+#
+# EQ (parametric/10-band, all three domains: radio/Bluetooth/mic) is real on
+# this device too (`parametric_eq`/`ten_band_eq_mic`/`ten_band_eq_bt`,
+# `read_radio_eq_settings`, name lookups by index) but shares Nova Elite's
+# entirely-deferred named-slot preset system — not a simple "select by id"
+# write. Deferred here for the same reason, tracked as [E7-S10] (now also
+# applies to this device).
+
+structs:
+  # New vs. Nova Elite: firmware combines an enable flag and a 1-3 level into
+  # one wire write, single user-facing `level` field (0 = off). See
+  # `builtin:nova_pro_omni_mic_noise_reduction_write`.
+  mic_noise_reduction:
+    - {name: report_id, type: uint8, constant: 0x01}
+    - {name: command,   type: uint8, constant: 0x3C}
+    - {name: level,     type: uint8, range: [0, 3]}
+
+  # Startup snapshot, Omni's own layout (see header note). The EQ-band region
+  # (custom + measured bands, 10 BT gains, 10 mic gains — same 140-byte total
+  # as Elite's own placeholder split) stays opaque since EQ is deferred here
+  # too; unused/reserved bytes kept for alignment only.
+  audio_settings:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x01}
+      - {name: command,   type: uint8, constant: 0x20}
+    incoming:
+      - {name: command,                       type: uint8, constant: 0x20}
+      - {name: eq_region_raw,                 type: bytearray, size: 140}
+      - {name: audio_input,                   type: uint8, range: [0, 3]}
+      - {name: station_volume,                type: uint8, range: [0, 38]}
+      - {name: volume_limiter,                type: uint8, range: [0, 1]}
+      - {name: surround_mode,                 type: uint8, range: [0, 1]}
+      - {name: mic_volume,                    type: uint8, range: [1, 10]}
+      - {name: boom_sidetone_level,           type: uint8, range: [1, 10]}
+      - {name: line_out_mode,                 type: uint8, range: [1, 2]}
+      - {name: radio_selected_eq_preset,      type: uint8, range: [0, 5]}
+      - {name: microphone_selected_eq_preset, type: uint8, range: [0, 9]}
+      - {name: bluetooth_selected_eq_preset,  type: uint8, range: [0, 4]}
+      - {name: chatmix_game,                  type: uint8, range: [0, 100]}
+      - {name: chatmix_chat,                  type: uint8, range: [0, 100]}
+      - {name: unused1,                       type: bytearray, size: 2}
+      - {name: stream_main,                   type: uint8, range: [0, 100]}
+      - {name: unused2,                       type: uint8}
+      - {name: stream_aux,                    type: uint8, range: [0, 100]}
+      - {name: stream_mic,                    type: uint8, range: [0, 100]}
+      - {name: unused3,                       type: bytearray, size: 5}
+      - {name: mic_noise_reduction_state,     type: uint8, range: [0, 1]}
+      - {name: mic_noise_reduction_level,     type: uint8, range: [0, 3]}
+      - {name: unused4,                       type: bytearray, size: 3}
+      - {name: boom_sidetone_state,           type: uint8, range: [0, 1]}
+
+apis:
+  mic_noise_reduction:
+    write:
+      transport: HID_IO
+      chunk_size: 64
+      payload_transform: "builtin:nova_pro_omni_mic_noise_reduction_write"
+  audio_settings:
+    read: {transport: HID_FEATURE, chunk_size: 1036}
+
+sync_events:
+  # Not on Nova Elite at all — genuinely new here.
+  0x3C:
+    emit: mic_noise_reduction_changed
+    fields:
+      - {name: mic_noise_reduction_state, byte: 2, display_type: on_off}
+      - {name: mic_noise_reduction_level, byte: 3}
+
+sync_read:
+  - struct: wireless_settings
+    maps:
+      - {emit: bt_power_default_changed,          field: bt_power_default,       display_type: on_off}
+      - {emit: bt_call_default_changed,            field: bt_call_default}
+      - {emit: transparent_changed,                field: transparent_level,      display_type: percentage}
+      - {emit: mic_muted_changed,                  field: mic_muted,              display_type: on_off}
+      - {emit: transparent_anc_mode_changed,       field: transparent_anc_mode}
+      - {emit: muted_mic_brightness_changed,       field: muted_mic_brightness}
+      - {emit: inactivity_timer_changed,           field: inactivity_timer,       transform: timer_enum_to_minutes}
+      - {emit: connection_changed,                 field: radio_connection_status, transform: connection_status_to_label}
+      - {emit: battery_changed,                    field: headset_batt_level,     display_type: percentage}
+      - {emit: active_noise_cancellation_changed,  field: active_noise_cancellation}
+
+  - struct: ux_settings
+    maps:
+      - {emit: oled_screen_saver_timer_changed, field: oled_screen_saver_timer, transform: timer_enum_to_minutes}
+      - {emit: oled_brightness_changed,         field: oled_brightness,         display_type: percentage}
+      - {emit: home_screen_view_changed,        field: home_screen_view}
+      - {emit: oled_screen_saver_mode_changed,  field: oled_screen_saver_mode}
+      - {emit: home_screen_option_changed,      field: home_screen_option}
+
+  - struct: audio_settings
+    maps:
+      - {emit: mic_volume_changed,           field: mic_volume}
+      - {emit: volume_limiter_changed,       field: volume_limiter, display_type: on_off}
+      - {emit: line_out_mode_changed,        field: line_out_mode}
+      - {emit: station_volume_changed,       field: station_volume, display_type: percentage}
+      - {emit: surround_changed,             field: surround_mode,  display_type: on_off}
+      - emit: boom_mic_sidetone_changed
+        fields: [boom_sidetone_state, boom_sidetone_level]
+      - emit: stream_mix_changed
+        fields: [stream_main, stream_aux, stream_mic]
+      - emit: chatmix_changed
+        fields: [chatmix_game, chatmix_chat]
+      - emit: mic_noise_reduction_changed
+        fields: [mic_noise_reduction_state, mic_noise_reduction_level]
+
+device:
+  name: "SteelSeries Arctis Nova Pro Omni"
+  vendor_id: 0x1038
+
+  variants:
+    - product_id: 0x2290
+      name: "Arctis Nova Pro Omni"
+      bootloader_pid: 0x2291
+
+  hid:
+    usage_page: 0xFFC0
+    usage: 0x0001
+    command_interface:
+      interface: 3
+    sync_interface:
+      interface: 3
+      usage_page: 0xFF00
+      usage: 0x0001
+
+  capabilities:
+    - battery
+    - bluetooth
+    - chatmix
+    - microphone
+    - noise_cancelling

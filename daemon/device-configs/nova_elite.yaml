@@ -3,6 +3,28 @@ extends: base_arctis_nova_elite
 # Both PIDs are protocol-identical (confirmed by diff, no struct/api/sync_event
 # differences at all) — standard and the "sng" cosmetic/regional SKU.
 
+# `on_ear_sidetone` (a second, detachable on-ear mic's sidetone path) lives
+# here rather than in base_arctis_nova_elite.yaml: Nova Pro Omni extends the
+# same base but has no on-ear mic in its own raw spec at all, and the merge
+# model has no way to remove an inherited struct/api/sync_event by key.
+structs:
+  on_ear_sidetone:
+    - {name: report_id, type: uint8, constant: 0x01}
+    - {name: command,   type: uint8, constant: 0x39}
+    - {name: state,     type: uint8, range: [0, 1]}
+    - {name: level,     type: uint8, range: [1, 10]}
+
+apis:
+  on_ear_sidetone:
+    write: {transport: HID_IO, chunk_size: 64}
+
+sync_events:
+  0x39:
+    emit: on_ear_sidetone_changed
+    fields:
+      - {name: on_ear_sidetone_state, byte: 2}
+      - {name: on_ear_sidetone_level, byte: 3}
+
 device:
   name: "SteelSeries Arctis Nova Elite"
   vendor_id: 0x1038

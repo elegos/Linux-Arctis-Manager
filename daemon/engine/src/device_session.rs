@@ -406,7 +406,8 @@ fn make_api_executor(config: &DeviceConfig) -> ApiExecutor<'_> {
     use device_config::builtins::{
         custom_eq_gains_payload, dim_timer_write_payload, eq_gains_7plus_payload,
         high_gain_write_payload, muted_mic_brightness_write_payload, nova7gen2_eq_bands_payload,
-        nova7gen2_eq_commit_payload, nova7gen2_eq_name_payload, power_timer_write_payload,
+        nova7gen2_eq_commit_payload, nova7gen2_eq_name_payload,
+        nova_pro_omni_mic_noise_reduction_write_payload, power_timer_write_payload,
     };
     let mut exec = ApiExecutor::new(config);
     exec.register_builtin("builtin:custom_eq_gains", custom_eq_gains_payload);
@@ -421,6 +422,10 @@ fn make_api_executor(config: &DeviceConfig) -> ApiExecutor<'_> {
     exec.register_builtin("builtin:nova7gen2_eq_name", nova7gen2_eq_name_payload);
     exec.register_builtin("builtin:nova7gen2_eq_bands", nova7gen2_eq_bands_payload);
     exec.register_builtin("builtin:nova7gen2_eq_commit", nova7gen2_eq_commit_payload);
+    exec.register_builtin(
+        "builtin:nova_pro_omni_mic_noise_reduction_write",
+        nova_pro_omni_mic_noise_reduction_write_payload,
+    );
     exec
 }
 
