@@ -84,7 +84,7 @@ This keeps the checklist honest and makes blocked work immediately visible witho
 - [ ] **[E7] Multi-device support**
   - [ ] [E7-S1] Spec-to-YAML conversion script
   - [ ] [E7-S2] Arctis Nova 7 family
-  - [ ] [E7-S3] Arctis Nova Pro (wired)
+  - [x] [E7-S3] Arctis Nova Pro (wired)
   - [ ] [E7-S4] Arctis Nova 5 and Nova Elite
   - [ ] [E7-S5] Arctis 7+ family
     > Not done here: RF/BT `pairing_mode` (found in the spec, all tiers) has no D-Bus exposure — the DSL has no "fire and forget action" primitive yet, only value-bearing settings and internal lifecycle calls. Struct/API are declared and ready to dispatch once that lands. Everything else in the story (mic, sidetone, EQ, battery, chatmix, connection sync) is complete and tested.
@@ -333,6 +333,7 @@ Extend coverage to all Arctis headset families present in the official spec, sta
 
 - **[E7-S3] Arctis Nova Pro (wired)**
   Translate the existing `nova_pro_wired.yaml` to the new DSL. Wired device has no wireless_settings struct; validate that sync events and capabilities reflect this correctly.
+  > Done. First real payoff of [E6]'s reference implementation: this is the same GameDAC/DSP chip family as Nova Pro Wireless (identical report_id 0x06, chunk_size 64, ±10dB/0-40 EQ formula, identical dim-timer enum) — reused `builtin:custom_eq_gains`, `builtin:high_gain_write`, and `builtin:dim_timer_write` as-is, **zero new Rust code**. Three PIDs, all protocol-identical (standard `0x12CB`, a firmware-revision successor `0x12FA` v2 that v2 never covered, Xbox `0x12CD`) — one device file, unlike Arctis 7+. Two real corrections against v2's config: `line_out_mode`'s values are "chatmix"/"stream" per the vendor spec's own comment, not v2's guessed "Speaker"/"Stream"; and the physical volume knob (`station_volume`) has no live sync-interface push in the spec — v2 assumed one (`starts_with: 0x0725`) that doesn't exist here, so it's read at connect/reconnect via the bulk `audio_settings` struct only, not live-updated (possibly OS-level HID consumer-control volume on real hardware, outside this interface — unconfirmed).
 
 - **[E7-S4] Arctis Nova 5 and Nova Elite**
   Translate the existing YAML files for these simpler devices.

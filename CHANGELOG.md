@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GUI shows both the UI and daemon versions and upgrades the background service automatically on a version mismatch; starts the service itself if it isn't already running.
 - Rust daemon (v3): Arctis Nova 5 Wireless device support (Nova 5, Nova 5X, Nova 5X white) — mic volume, sidetone, volume limiter, mic-mute LED brightness, wireless mode (speed/range), inactivity timer, battery/connection/charging sync, hardware ChatMix. Parametric EQ (10-band, frequency/filter-type/gain/Q-factor per band) is not yet supported on this device — tracked as a follow-up story, not shipped in this pass.
 - Rust daemon (v3): Arctis 7+ family device support, split into three device files by real capability tier rather than v2's single flat file — standard/Destiny 2 (chatmix + sidetone + 10-band EQ), 7X/Xbox (no chatmix), 7P/PlayStation (no chatmix, no sidetone). Also adds mic volume, the 10-band graphic EQ, and mic-mute LED brightness, none of which v2 exposed for this family.
+- Rust daemon (v3): Arctis Nova Pro (wired) device support — standard, v2 (firmware-revision successor, not covered by v2), and Xbox PIDs in one device file, reusing Nova Pro Wireless's EQ/high-gain/dim-timer logic as-is (no new code). Corrects two v2 config mistakes: `line_out_mode`'s values are "chatmix"/"stream" per the vendor spec, not "Speaker"/"Stream"; the physical volume knob has no live push in the spec, so it's read at connect time only.
 
 ### Changed
 
