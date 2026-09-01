@@ -53,5 +53,6 @@ device:
     - battery
     - bluetooth
     - chatmix
+    - custom_eq
     - microphone
     - noise_cancelling

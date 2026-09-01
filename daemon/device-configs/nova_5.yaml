@@ -45,5 +45,6 @@ device:
   capabilities:
     - battery
     - chatmix
+    - custom_eq
     - microphone
     - wireless

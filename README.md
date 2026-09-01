@@ -178,6 +178,7 @@ rm -rf ~/.config/arctis_manager
 - [Architecture overview](docs/ARCHITECTURE.md)
 - [Device DSL reference](docs/DEVICE_DSL.md) — the YAML format used to describe a device
 - [D-Bus interface reference](docs/dbus.md)
+- [Device compatibility matrix](docs/device_compatibility.md) — auto-generated from the v3 device configs; the table above is the human-curated summary, this is the exhaustive per-capability one
 - [How to add support for a new device](docs/device_support.md)
 - [Wireshark tutorial](https://www.youtube.com/watch?v=zWbdnHwTr3M)
 - [Migrating from v2 to v3](docs/migration-v2-to-v3.md)

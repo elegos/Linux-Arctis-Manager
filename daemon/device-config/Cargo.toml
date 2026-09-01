@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
+[[bin]]
+name = "lam-gen-device-matrix"
+path = "src/bin/gen_device_matrix.rs"
+
 [dependencies]
 serde = { workspace = true }
 serde_yaml = { workspace = true }
