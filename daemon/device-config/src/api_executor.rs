@@ -404,7 +404,10 @@ apis:
         exec.register_builtin("builtin:first_byte_only", |b| vec![vec![b[0]]]);
         exec.register_builtin("builtin:last_byte_only", |b| vec![vec![*b.last().unwrap()]]);
         let mut values = HashMap::new();
-        values.insert("name".to_string(), FieldValue::Str("EQ1".to_string()));
+        // Exactly `size` bytes: a sized varstring is now zero-padded to
+        // `size` on write, so a shorter string's last byte would be padding
+        // (0x00), not the string's own last character — see codec.rs.
+        values.insert("name".to_string(), FieldValue::Str("EQ12".to_string()));
         let op = exec.prepare_write("parametric_eq", &values).unwrap();
         let payloads = send_payloads(&op);
         assert_eq!(payloads.len(), 2);
@@ -413,7 +416,7 @@ apis:
             [0x00, 0, 0, 0],
             "step 1: first byte, padded to 4"
         );
-        assert_eq!(payloads[1], [b'1', 0], "step 2: last byte, padded to 2");
+        assert_eq!(payloads[1], [b'2', 0], "step 2: last byte, padded to 2");
     }
 
     #[test]

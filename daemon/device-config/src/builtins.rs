@@ -284,6 +284,80 @@ pub fn nova5_eq_bands_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
     )
 }
 
+/// Nova Elite/Nova Pro Omni's "named-slot" EQ preset writes are a single
+/// HID_FEATURE message — unlike Gen2/Nova 5's multi-step parametric EQ,
+/// there's no separate name-announce message: `[report_id, command,
+/// onboard_preset_index, alias_name(6, zero-padded), name(61, zero-padded),
+/// band/gain data…]` all travel in one write. `header_len` is the fixed
+/// byte offset where band/gain data starts (70 for every known device in
+/// this family — see per-device registrations in `device_session.rs`); the
+/// header itself (`bytes[0..header_len]`) needs no re-encoding, since
+/// `codec::encode_field` now zero-pads a sized `varstring` on write.
+const NAMED_SLOT_EQ_HEADER_LEN: usize = 70;
+
+/// The parametric variant (per-band frequency/filter-type/gain/Q-factor) —
+/// re-encodes each band exactly like [`parametric_eq_bands_payload`], but
+/// keeps the whole header (through `name`) verbatim instead of rebuilding a
+/// short one, since this device has no separate name-announce message.
+pub fn parametric_eq_named_slot_payload(
+    bytes: &[u8],
+    header_len: usize,
+    band_count: usize,
+    gain_encoding: GainEncoding,
+) -> Vec<Vec<u8>> {
+    let bands_end = header_len + band_count * PARAMETRIC_EQ_BAND_SRC_SIZE;
+    if bytes.len() < bands_end {
+        return vec![bytes.to_vec()];
+    }
+    let mut out = bytes[0..header_len].to_vec();
+    for band in 0..band_count {
+        let base = header_len + band * PARAMETRIC_EQ_BAND_SRC_SIZE;
+        out.extend_from_slice(&bytes[base..base + 2]); // frequency: passthrough, 2 bytes BE
+        out.push(bytes[base + 2]); // filter_type: passthrough
+        let gain_db = f32::from_be_bytes(bytes[base + 3..base + 7].try_into().unwrap());
+        out.push(gain_encoding.encode(gain_db));
+        let q = f32::from_be_bytes(bytes[base + 7..base + 11].try_into().unwrap());
+        let q_u16 = (q * 1000.0).round().clamp(0.0, u16::MAX as f32) as u16;
+        out.extend_from_slice(&q_u16.to_le_bytes()); // little-endian, same as every other device
+    }
+    vec![out]
+}
+
+/// The gain-only ("ten band") variant (mic/BT domains) — the raw spec's own
+/// `transform_gain_fw_to_ui` comment (`0x88 = -12dB … 0x00 = 0.0dB … 0x78 =
+/// 12dB`) confirms this is the *same* signed-tenths-dB encoding as the
+/// parametric variant's gain byte, not the unsigned half-dB-offset formula
+/// used by the Nova Pro/Arctis 7+ families' own fixed-frequency graphic EQ.
+pub fn named_slot_signed_gains_payload(bytes: &[u8], header_len: usize) -> Vec<Vec<u8>> {
+    if bytes.len() < header_len {
+        return vec![bytes.to_vec()];
+    }
+    let mut out = bytes[0..header_len].to_vec();
+    out.extend(
+        bytes[header_len..]
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| GainEncoding::SignedTenthsDb.encode(f32::from_be_bytes(*c))),
+    );
+    vec![out]
+}
+
+/// Nova Elite/Nova Pro Omni's `parametric_eq` (wireless domain) write.
+pub fn nova_elite_parametric_eq_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
+    parametric_eq_named_slot_payload(
+        bytes,
+        NAMED_SLOT_EQ_HEADER_LEN,
+        10,
+        GainEncoding::SignedTenthsDb,
+    )
+}
+
+/// Nova Elite/Nova Pro Omni's `ten_band_eq_mic`/`ten_band_eq_bt` writes.
+pub fn nova_elite_ten_band_eq_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
+    named_slot_signed_gains_payload(bytes, NAMED_SLOT_EQ_HEADER_LEN)
+}
+
 fn minutes_to_timer_enum(minutes: u8) -> u8 {
     match minutes {
         0 => 0,
@@ -871,5 +945,55 @@ mod tests {
         let input = nova5_eq_input(0x00, 0, &bands, "");
         let result = nova5_eq_bands_payload(&input);
         assert_eq!(result[0][6], 0, "gain byte clamped to 0");
+    }
+
+    // ── nova_elite named-slot EQ (single-message write) ──────────────────────
+
+    /// Builds a fake Nova Elite named-slot codec serialisation: `[report_id,
+    /// command, onboard_preset_index, alias_name(6, zero-padded),
+    /// name(61, zero-padded)]` (70 bytes, matching `NAMED_SLOT_EQ_HEADER_LEN`)
+    /// followed by 10 raw band/gain groups.
+    fn nova_elite_header(command: u8, onboard_preset_index: u8) -> Vec<u8> {
+        let mut b = vec![0x01u8, command, onboard_preset_index];
+        b.extend(std::iter::repeat_n(0u8, 6)); // alias_name, already zero-padded by the codec
+        b.extend(std::iter::repeat_n(0u8, 61)); // name, already zero-padded by the codec
+        b
+    }
+
+    #[test]
+    fn nova_elite_parametric_eq_payload_preserves_header_and_converts_bands() {
+        let mut bands = [FLAT_BAND; 10];
+        // -1.2 dB, 1.414 Q -> gain byte -12 (0xF4), q 1414 LE [0x86, 0x05]
+        bands[0] = (1000, 1, -1.2, 1.414);
+        let mut input = nova_elite_header(0x1B, 4);
+        for &(freq, filter_type, gain, q) in &bands {
+            input.extend_from_slice(&freq.to_be_bytes());
+            input.push(filter_type);
+            input.extend_from_slice(&gain.to_be_bytes());
+            input.extend_from_slice(&q.to_be_bytes());
+        }
+        let result = nova_elite_parametric_eq_payload(&input);
+        assert_eq!(result.len(), 1);
+        let p = &result[0];
+        assert_eq!(&p[0..70], &input[0..70], "header (through name) unchanged");
+        assert_eq!(&p[70..76], [0x03, 0xE8, 0x01, 0xF4, 0x86, 0x05], "band 1");
+        assert_eq!(&p[76..82], [0, 0, 0, 0, 0, 0], "band 2 (flat/default)");
+        assert_eq!(p.len(), 70 + 10 * 6);
+    }
+
+    #[test]
+    fn nova_elite_ten_band_eq_payload_preserves_header_and_converts_gains() {
+        let mut input = nova_elite_header(0x1D, 8);
+        let gains: [f32; 10] = [-1.2, 12.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        for g in gains {
+            input.extend_from_slice(&g.to_be_bytes());
+        }
+        let result = nova_elite_ten_band_eq_payload(&input);
+        assert_eq!(result.len(), 1);
+        let p = &result[0];
+        assert_eq!(&p[0..70], &input[0..70], "header (through name) unchanged");
+        // -1.2dB -> round(-12) = -12 (0xF4); 12.0dB -> 120 (0x78)
+        assert_eq!(&p[70..80], [0xF4, 0x78, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(p.len(), 70 + 10);
     }
 }
