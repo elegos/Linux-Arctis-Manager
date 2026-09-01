@@ -857,4 +857,89 @@ mod nova_yaml_tests {
         }
         assert!(checked > 0, "expected at least one device config to check");
     }
+
+    /// Regression guard: for every `emit:` name that appears in both
+    /// `sync_events:` and `sync_read:`, the sync_read field names must be a
+    /// subset of the live sync_event's field names. Both describe the same
+    /// logical event and are read by name (`sync_dispatcher`/`sync_reader`
+    /// both use the field's declared name — not its struct position — as the
+    /// emitted JSON key), so a name that exists under one but not the other
+    /// silently produces two differently-shaped events for what a D-Bus
+    /// client expects to be the same signal. sync_read is allowed to cover
+    /// fewer fields than the live event (e.g. a startup snapshot omitting a
+    /// detail only worth pushing live), just never a *different* name for
+    /// the same field.
+    #[test]
+    fn sync_event_and_sync_read_field_names_agree() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("device-configs");
+        if !dir.exists() {
+            return; // skip when not present (CI without device-configs)
+        }
+        let mut checked = 0;
+        for entry in std::fs::read_dir(&dir).expect("read device-configs dir") {
+            let path = entry.expect("dir entry").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
+                continue;
+            }
+            let is_base = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("base_"));
+            if is_base {
+                continue; // only fully-merged device files carry both sections
+            }
+            let cfg = load(&path, &[dir.as_path()])
+                .unwrap_or_else(|e| panic!("{} failed to parse: {e}", path.display()));
+            checked += 1;
+
+            let Some(sync_events) = cfg.sync_events.as_ref() else {
+                continue;
+            };
+            let Some(sync_read) = cfg.sync_read.as_ref() else {
+                continue;
+            };
+
+            // emit name -> set of field names, from the live sync_events table.
+            let mut live_fields: HashMap<&str, std::collections::HashSet<&str>> = HashMap::new();
+            for def in sync_events.values() {
+                let (Some(emit), Some(fields)) = (def.emit.as_deref(), def.fields.as_ref()) else {
+                    continue;
+                };
+                let names = live_fields.entry(emit).or_default();
+                for f in fields {
+                    names.insert(f.name.as_str());
+                }
+            }
+
+            for entry in sync_read {
+                for map in &entry.maps {
+                    let Some(live) = live_fields.get(map.emit.as_str()) else {
+                        continue; // no live counterpart for this emit; nothing to compare
+                    };
+                    let read_names: Vec<&str> = match (&map.field, &map.fields) {
+                        (Some(f), _) => vec![f.as_str()],
+                        (None, Some(fs)) => fs.iter().map(String::as_str).collect(),
+                        (None, None) => vec![],
+                    };
+                    for name in read_names {
+                        assert!(
+                            live.contains(name),
+                            "{}: sync_read emit '{}' references field '{}', but the live \
+                             sync_events entry for '{}' has no field of that name (has: {:?}) \
+                             — the two will emit differently-shaped events for the same signal",
+                            path.display(),
+                            map.emit,
+                            name,
+                            map.emit,
+                            live
+                        );
+                    }
+                }
+            }
+        }
+        assert!(checked > 0, "expected at least one device config to check");
+    }
 }
