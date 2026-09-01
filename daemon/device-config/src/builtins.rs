@@ -1,24 +1,35 @@
-/// Converts 10 IEEE 754 big-endian float32 gain values (in dB) into 10 uint8
-/// firmware values: `firmware_val = clamp(round(2 × (10 + gain_dB)), 0, 255) as u8`.
+/// Converts N IEEE 754 big-endian float32 gain values (in dB) into N uint8
+/// firmware values: `firmware_val = clamp(round(2 × (offset_db + gain_dB)), 0,
+/// clamp_max) as u8`. Shared by every "fixed-frequency graphic EQ" device
+/// family — only the offset/clamp/band-count differ per device.
 ///
-/// Input: 40 bytes (10 × f32 BE — matching `codec::write_fv`'s big-endian
-/// encoding of every multi-byte numeric field).  Output: 10 bytes, one per
-/// EQ band.
-pub fn gains_to_firmware_values(bytes: &[u8]) -> Vec<u8> {
+/// Input: `4 × band_count` bytes (f32 BE per band — matching
+/// `codec::write_fv`'s big-endian encoding of every multi-byte numeric
+/// field). Output: one byte per band.
+pub fn graphic_eq_gains(bytes: &[u8], offset_db: f32, clamp_max: u8) -> Vec<u8> {
     bytes
         .as_chunks::<4>()
         .0
         .iter()
         .map(|c| {
             let db = f32::from_be_bytes(*c);
-            ((2.0_f32 * (10.0_f32 + db)).round() as i32).clamp(0, 255) as u8
+            ((2.0_f32 * (offset_db + db)).round() as i32).clamp(0, clamp_max as i32) as u8
         })
         .collect()
 }
 
+/// Converts 10 IEEE 754 big-endian float32 gain values (in dB) into 10 uint8
+/// firmware values: `firmware_val = clamp(round(2 × (10 + gain_dB)), 0, 255) as u8`.
+///
+/// Input: 40 bytes (10 × f32 BE). Output: 10 bytes, one per EQ band.
+pub fn gains_to_firmware_values(bytes: &[u8]) -> Vec<u8> {
+    graphic_eq_gains(bytes, 10.0, 255)
+}
+
 /// Full-payload transform for `custom_eq` write: passes `report_id` and `command`
 /// through unchanged, then converts 10 × float32 gains (bytes 2–41) to 10 × uint8
-/// firmware values using [`gains_to_firmware_values`].
+/// firmware values using [`graphic_eq_gains`] (Nova Pro family: offset 10 dB,
+/// clamp 0-255).
 ///
 /// Input:  `[report_id, command, gain1_bytes[4], …, gain10_bytes[4], …]` (42+ bytes).
 /// Output: one packet `[report_id, command, fw_val1, …, fw_val10]`.
@@ -29,7 +40,7 @@ pub fn custom_eq_gains_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
     let mut out = Vec::with_capacity(12);
     out.push(bytes[0]);
     out.push(bytes[1]);
-    out.extend_from_slice(&gains_to_firmware_values(&bytes[2..]));
+    out.extend_from_slice(&graphic_eq_gains(&bytes[2..], 10.0, 255));
     vec![out]
 }
 
@@ -67,28 +78,19 @@ pub fn power_timer_write_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
 /// Converts 10 IEEE 754 big-endian float32 gain values (in dB) into 10 uint8
 /// firmware values for the Arctis 7+ family: `firmware_val = clamp(round(2 ×
 /// (12 + gain_dB)), 0, 48) as u8` (±12 dB range in 0.5 dB steps, vs. the Nova
-/// Pro family's ±10 dB — see [`gains_to_firmware_values`]). A third device
-/// with yet another offset/clamp pair should prompt generalising this instead
-/// of adding a fourth near-identical function.
+/// Pro family's ±10 dB — see [`graphic_eq_gains`]).
 ///
-/// Input: 40 bytes (10 × f32 BE — see [`gains_to_firmware_values`]). Output:
+/// Input: 40 bytes (10 × f32 BE — see [`graphic_eq_gains`]). Output:
 /// 10 bytes, one per EQ band.
 pub fn gains_to_firmware_values_7plus(bytes: &[u8]) -> Vec<u8> {
-    bytes
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .map(|c| {
-            let db = f32::from_be_bytes(*c);
-            ((2.0_f32 * (12.0_f32 + db)).round() as i32).clamp(0, 48) as u8
-        })
-        .collect()
+    graphic_eq_gains(bytes, 12.0, 48)
 }
 
 /// Full-payload transform for the Arctis 7+ `eq` write: passes `report_id`
 /// and `command` through unchanged, then converts 10 × float32 gains
-/// (bytes 2–41) to 10 × uint8 firmware values using
-/// [`gains_to_firmware_values_7plus`].
+/// (bytes 2–41) to 10 × uint8 firmware values using [`graphic_eq_gains`]
+/// (offset 12 dB, clamp 0-48). Also reused as-is by the Arctis Nova 4/4x
+/// family, which shares this exact formula/range.
 pub fn eq_gains_7plus_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
     if bytes.len() < 2 {
         return vec![bytes.to_vec()];
@@ -96,7 +98,7 @@ pub fn eq_gains_7plus_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
     let mut out = Vec::with_capacity(12);
     out.push(bytes[0]);
     out.push(bytes[1]);
-    out.extend_from_slice(&gains_to_firmware_values_7plus(&bytes[2..]));
+    out.extend_from_slice(&graphic_eq_gains(&bytes[2..], 12.0, 48));
     vec![out]
 }
 
@@ -135,58 +137,99 @@ pub fn nova_pro_omni_mic_noise_reduction_write_payload(bytes: &[u8]) -> Vec<Vec<
     vec![vec![bytes[0], bytes[1], enabled, clamped_level]]
 }
 
-/// Layout of the `parametric_eq`/`_bt`/`_mic` struct as serialised by the
-/// codec (see `base_arctis_nova_7_gen2.yaml`): `[report_id, eq_name_command,
-/// connection_type, preset_type, eqband_command, update_complete, 10 ×
-/// (frequency:u16, filter_type:u8, gain:f32, q_factor:f32), name:varstring]`.
-/// The three write steps below each pick out a different slice of this same
-/// serialisation and re-encode it into its own wire message — mirroring the
-/// vendor spec's own `api-write` sequence (name+header, band data, commit).
-const NOVA7GEN2_EQ_BAND_COUNT: usize = 10;
-const NOVA7GEN2_EQ_BAND_SRC_SIZE: usize = 11; // u16 + u8 + f32 + f32
-const NOVA7GEN2_EQ_BANDS_OFFSET: usize = 6;
-const NOVA7GEN2_EQ_NAME_OFFSET: usize = 6 + NOVA7GEN2_EQ_BAND_COUNT * NOVA7GEN2_EQ_BAND_SRC_SIZE; // 116
+/// How a parametric-EQ band's gain value is packed onto the wire. Every
+/// known device shares the same frequency (u16 BE passthrough), filter_type
+/// (u8 passthrough) and Q-factor (f32 -> u16 LE, ×1000) encoding — only the
+/// gain byte's format differs per device family.
+#[derive(Clone, Copy, Debug)]
+pub enum GainEncoding {
+    /// Nova 7 Gen2 family: signed byte in 0.1 dB units, `round(dB * 10)`
+    /// clamped to `i8::MIN..=i8::MAX`.
+    SignedTenthsDb,
+    /// Nova 5 family: unsigned byte via `round(2 × (offset_db + dB))`
+    /// clamped to `[0, clamp_max]` — the same formula as the graphic-EQ
+    /// builtin [`graphic_eq_gains`], reused here per-band.
+    UnsignedHalfDbOffset { offset_db: f32, clamp_max: u8 },
+}
 
-/// Step 1: the name-announcement message — `[report_id, 0xA7 (eq_name_command),
+impl GainEncoding {
+    fn encode(self, gain_db: f32) -> u8 {
+        match self {
+            GainEncoding::SignedTenthsDb => {
+                (gain_db * 10.0).round().clamp(-128.0, 127.0) as i8 as u8
+            }
+            GainEncoding::UnsignedHalfDbOffset {
+                offset_db,
+                clamp_max,
+            } => {
+                ((2.0_f32 * (offset_db + gain_db)).round() as i32).clamp(0, clamp_max as i32) as u8
+            }
+        }
+    }
+}
+
+/// Layout of a `parametric_eq`-shaped struct as serialised by the codec (see
+/// `base_arctis_nova_7_gen2.yaml`/`base_arctis_nova_5.yaml`): `[report_id,
+/// eq_name_command, connection_type, preset_type, eqband_command, {optional
+/// commit byte(s)}, band_count × (frequency:u16, filter_type:u8, gain:f32,
+/// q_factor:f32), name:varstring]`. `header_len` is the byte offset where
+/// band data starts (6 when a commit/`update_complete` byte follows
+/// `eqband_command`, 5 when it doesn't — see per-device registrations in
+/// `device_session.rs`). The functions below each pick out a different
+/// slice of this same serialisation and re-encode it into its own wire
+/// message — mirroring the vendor spec's own `api-write` sequence
+/// (name+header, band data, optional commit).
+const PARAMETRIC_EQ_BAND_SRC_SIZE: usize = 11; // u16 + u8 + f32 + f32
+
+/// The name-announcement message — `[report_id, eq_name_command,
 /// connection_type, preset_type, name_bytes...]`.
-pub fn nova7gen2_eq_name_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
+pub fn parametric_eq_name_payload(
+    bytes: &[u8],
+    header_len: usize,
+    band_count: usize,
+) -> Vec<Vec<u8>> {
     if bytes.len() < 4 {
         return vec![bytes.to_vec()];
     }
-    let mut out = Vec::with_capacity(4 + bytes.len().saturating_sub(NOVA7GEN2_EQ_NAME_OFFSET));
+    let name_offset = header_len + band_count * PARAMETRIC_EQ_BAND_SRC_SIZE;
+    let mut out = Vec::with_capacity(4 + bytes.len().saturating_sub(name_offset));
     out.extend_from_slice(&bytes[0..4]);
-    if bytes.len() > NOVA7GEN2_EQ_NAME_OFFSET {
-        out.extend_from_slice(&bytes[NOVA7GEN2_EQ_NAME_OFFSET..]);
+    if bytes.len() > name_offset {
+        out.extend_from_slice(&bytes[name_offset..]);
     }
     vec![out]
 }
 
-/// Step 2: the band-data message — `[report_id, 0x33 (eqband_command),
-/// connection_type, 10 × (frequency:u16 BE, filter_type:u8, gain:i8,
-/// q_factor:u16 LE)]`. Re-encodes each band from the engine's wire shape
-/// (BE u16 frequency, u8 filter type, BE f32 gain in dB, BE f32 Q factor)
-/// into the firmware's compact shape: gain becomes a single signed byte in
-/// 0.1 dB units, Q factor becomes a little-endian uint16 in thousandths
-/// (the vendor spec stores Q factor little-endian specifically — everything
-/// else on this device is big-endian).
-pub fn nova7gen2_eq_bands_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
-    if bytes.len() < NOVA7GEN2_EQ_NAME_OFFSET {
+/// The band-data message — `[report_id, eqband_command, connection_type,
+/// band_count × (frequency:u16 BE, filter_type:u8, gain, q_factor:u16 LE)]`.
+/// Re-encodes each band from the engine's wire shape (BE u16 frequency, u8
+/// filter type, BE f32 gain in dB, BE f32 Q factor) into the firmware's
+/// compact shape via `gain_encoding`; Q factor becomes a little-endian
+/// uint16 in thousandths on every known device (the vendor spec stores Q
+/// factor little-endian specifically — everything else is big-endian).
+pub fn parametric_eq_bands_payload(
+    bytes: &[u8],
+    bands_offset: usize,
+    band_count: usize,
+    gain_encoding: GainEncoding,
+) -> Vec<Vec<u8>> {
+    let name_offset = bands_offset + band_count * PARAMETRIC_EQ_BAND_SRC_SIZE;
+    if bytes.len() < name_offset {
         return vec![bytes.to_vec()];
     }
-    let mut out = Vec::with_capacity(3 + NOVA7GEN2_EQ_BAND_COUNT * 6);
+    let mut out = Vec::with_capacity(3 + band_count * 6);
     out.push(bytes[0]);
     out.push(bytes[4]);
     out.push(bytes[2]);
-    for band in 0..NOVA7GEN2_EQ_BAND_COUNT {
-        let base = NOVA7GEN2_EQ_BANDS_OFFSET + band * NOVA7GEN2_EQ_BAND_SRC_SIZE;
+    for band in 0..band_count {
+        let base = bands_offset + band * PARAMETRIC_EQ_BAND_SRC_SIZE;
         // frequency: passthrough, 2 bytes BE
         out.extend_from_slice(&bytes[base..base + 2]);
         // filter_type: passthrough
         out.push(bytes[base + 2]);
-        // gain: f32 dB -> signed byte in 0.1 dB units
+        // gain: f32 dB -> device-specific byte encoding
         let gain_db = f32::from_be_bytes(bytes[base + 3..base + 7].try_into().unwrap());
-        let gain_byte = (gain_db * 10.0).round().clamp(-128.0, 127.0) as i8;
-        out.push(gain_byte as u8);
+        out.push(gain_encoding.encode(gain_db));
         // q_factor: f32 -> uint16 in thousandths, little-endian on the wire
         let q = f32::from_be_bytes(bytes[base + 7..base + 11].try_into().unwrap());
         let q_u16 = (q * 1000.0).round().clamp(0.0, u16::MAX as f32) as u16;
@@ -195,13 +238,50 @@ pub fn nova7gen2_eq_bands_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
     vec![out]
 }
 
-/// Step 3: the commit message — `[report_id, 0x27 (update_complete)]`,
-/// telling the firmware the previous two messages form a complete update.
-pub fn nova7gen2_eq_commit_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
-    if bytes.len() < 6 {
+/// The commit message — `[report_id, commit_byte]`, telling the firmware
+/// the previous messages form a complete update. Not every device has one
+/// (e.g. Nova 5 doesn't) — only register this builtin for devices whose
+/// struct actually declares a commit/`update_complete` field.
+pub fn parametric_eq_commit_payload(bytes: &[u8], commit_byte_offset: usize) -> Vec<Vec<u8>> {
+    if bytes.len() <= commit_byte_offset {
         return vec![bytes.to_vec()];
     }
-    vec![vec![bytes[0], bytes[5]]]
+    vec![vec![bytes[0], bytes[commit_byte_offset]]]
+}
+
+/// Nova 7 Gen2 family: `header_len=6` (report_id, eq_name_command,
+/// connection_type, preset_type, eqband_command, update_complete),
+/// `commit_byte_offset=5`, 10 bands, signed-tenths-dB gain.
+pub fn nova7gen2_eq_name_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
+    parametric_eq_name_payload(bytes, 6, 10)
+}
+
+pub fn nova7gen2_eq_bands_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
+    parametric_eq_bands_payload(bytes, 6, 10, GainEncoding::SignedTenthsDb)
+}
+
+pub fn nova7gen2_eq_commit_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
+    parametric_eq_commit_payload(bytes, 5)
+}
+
+/// Nova 5 family: `header_len=5` (no commit byte — report_id,
+/// eq_name_command, connection_type, preset_type, eqband_command), 10
+/// bands, unsigned half-dB-offset gain (`round(2 × (10 + dB))` clamped
+/// `[0,40]`), no commit step (2-message write, not 3).
+pub fn nova5_eq_name_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
+    parametric_eq_name_payload(bytes, 5, 10)
+}
+
+pub fn nova5_eq_bands_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
+    parametric_eq_bands_payload(
+        bytes,
+        5,
+        10,
+        GainEncoding::UnsignedHalfDbOffset {
+            offset_db: 10.0,
+            clamp_max: 40,
+        },
+    )
 }
 
 fn minutes_to_timer_enum(minutes: u8) -> u8 {
@@ -703,5 +783,93 @@ mod tests {
         let input = eq_input(0x00, 0, &bands, "ignored");
         let result = nova7gen2_eq_commit_payload(&input);
         assert_eq!(result, vec![vec![0x00, 0x27]]);
+    }
+
+    // ── graphic_eq_gains (generic) ───────────────────────────────────────────
+
+    #[test]
+    fn graphic_eq_gains_matches_nova_pro_offset_and_clamp() {
+        let db: [f32; 10] = [0.0, -10.0, 10.0, -5.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let mut input = Vec::with_capacity(40);
+        for &v in &db {
+            input.extend_from_slice(&v.to_be_bytes());
+        }
+        assert_eq!(
+            graphic_eq_gains(&input, 10.0, 255),
+            vec![20, 0, 40, 10, 30, 20, 20, 20, 20, 20]
+        );
+    }
+
+    #[test]
+    fn graphic_eq_gains_respects_custom_offset_and_clamp() {
+        // Arctis Nova 3 (wired)-shaped constants: offset 10 dB, clamp [8,32] range
+        // via clamp_max=32 (clamp_min is always 0 for every known device).
+        let db: [f32; 2] = [-100.0, 100.0];
+        let mut input = Vec::new();
+        for &v in &db {
+            input.extend_from_slice(&v.to_be_bytes());
+        }
+        assert_eq!(graphic_eq_gains(&input, 10.0, 32), vec![0, 32]);
+    }
+
+    // ── nova5 parametric EQ (name / bands, no commit step) ───────────────────
+
+    /// Builds a fake Nova 5 `parametric_eq` codec serialisation: 5-byte
+    /// header (no `update_complete` byte, unlike Nova 7 Gen2's 6-byte
+    /// header), 10 bands, then the raw name bytes.
+    fn nova5_eq_input(
+        connection_type: u8,
+        preset_type: u8,
+        bands: &[(u16, u8, f32, f32); 10],
+        name: &str,
+    ) -> Vec<u8> {
+        let mut b = vec![0x00u8, 0xA5, connection_type, preset_type, 0x33];
+        for &(freq, filter_type, gain, q) in bands {
+            b.extend_from_slice(&freq.to_be_bytes());
+            b.push(filter_type);
+            b.extend_from_slice(&gain.to_be_bytes());
+            b.extend_from_slice(&q.to_be_bytes());
+        }
+        b.extend_from_slice(name.as_bytes());
+        b
+    }
+
+    #[test]
+    fn nova5_eq_name_payload_includes_header_and_name() {
+        let bands = [FLAT_BAND; 10];
+        let input = nova5_eq_input(0x01, 1, &bands, "EQ1");
+        let result = nova5_eq_name_payload(&input);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], [0x00, 0xA5, 0x01, 0x01, b'E', b'Q', b'1']);
+    }
+
+    #[test]
+    fn nova5_eq_bands_payload_converts_gain_and_q_factor() {
+        let mut bands = [FLAT_BAND; 10];
+        // -1.2 dB -> round(2*(10-1.2)) = round(17.6) = 18 (0x12); 1.414 Q -> 1414 LE
+        bands[0] = (1000, 1, -1.2, 1.414);
+        // 12.0 dB -> round(2*(10+12)) = 44, clamped to 40 (0x28); 10.0 Q -> 10000 LE
+        bands[1] = (20000, 5, 12.0, 10.0);
+        let input = nova5_eq_input(0x02, 1, &bands, "");
+        let result = nova5_eq_bands_payload(&input);
+        assert_eq!(result.len(), 1);
+        let p = &result[0];
+        assert_eq!(
+            &p[0..3],
+            [0x00, 0x33, 0x02],
+            "report_id, 0x33, connection_type"
+        );
+        assert_eq!(&p[3..9], [0x03, 0xE8, 0x01, 0x12, 0x86, 0x05]);
+        assert_eq!(&p[9..15], [0x4E, 0x20, 0x05, 0x28, 0x10, 0x27]);
+        assert_eq!(p.len(), 3 + 10 * 6);
+    }
+
+    #[test]
+    fn nova5_eq_bands_payload_clamps_negative_gain_to_zero() {
+        let mut bands = [FLAT_BAND; 10];
+        bands[0] = (100, 1, -100.0, 0.2); // way below -10dB — must clamp, not wrap
+        let input = nova5_eq_input(0x00, 0, &bands, "");
+        let result = nova5_eq_bands_payload(&input);
+        assert_eq!(result[0][6], 0, "gain byte clamped to 0");
     }
 }

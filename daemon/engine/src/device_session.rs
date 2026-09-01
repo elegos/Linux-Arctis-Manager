@@ -405,9 +405,10 @@ impl DeviceSession {
 fn make_api_executor(config: &DeviceConfig) -> ApiExecutor<'_> {
     use device_config::builtins::{
         custom_eq_gains_payload, dim_timer_write_payload, eq_gains_7plus_payload,
-        high_gain_write_payload, muted_mic_brightness_write_payload, nova7gen2_eq_bands_payload,
-        nova7gen2_eq_commit_payload, nova7gen2_eq_name_payload,
-        nova_pro_omni_mic_noise_reduction_write_payload, power_timer_write_payload,
+        high_gain_write_payload, muted_mic_brightness_write_payload, nova5_eq_bands_payload,
+        nova5_eq_name_payload, nova7gen2_eq_bands_payload, nova7gen2_eq_commit_payload,
+        nova7gen2_eq_name_payload, nova_pro_omni_mic_noise_reduction_write_payload,
+        power_timer_write_payload,
     };
     let mut exec = ApiExecutor::new(config);
     exec.register_builtin("builtin:custom_eq_gains", custom_eq_gains_payload);
@@ -422,6 +423,8 @@ fn make_api_executor(config: &DeviceConfig) -> ApiExecutor<'_> {
     exec.register_builtin("builtin:nova7gen2_eq_name", nova7gen2_eq_name_payload);
     exec.register_builtin("builtin:nova7gen2_eq_bands", nova7gen2_eq_bands_payload);
     exec.register_builtin("builtin:nova7gen2_eq_commit", nova7gen2_eq_commit_payload);
+    exec.register_builtin("builtin:nova5_eq_name", nova5_eq_name_payload);
+    exec.register_builtin("builtin:nova5_eq_bands", nova5_eq_bands_payload);
     exec.register_builtin(
         "builtin:nova_pro_omni_mic_noise_reduction_write",
         nova_pro_omni_mic_noise_reduction_write_payload,
@@ -1062,6 +1065,131 @@ apis:
 
         // Message 3: report_id, 0x27 (commit).
         assert_eq!(&msg3[0..2], [0x00, 0x27]);
+    }
+
+    // ── E7-S8: Nova 5 parametric EQ multi-step write ──────────────────────────
+
+    /// Nova 5's own parametric EQ write, using the *generalized* builtins
+    /// (`builtin:nova5_eq_name`/`builtin:nova5_eq_bands`) — proves the
+    /// [`parametric_eq_name_payload`]/[`parametric_eq_bands_payload`] core
+    /// shared with Nova 7 Gen2 handles a real second device shape correctly:
+    /// only 2 messages (no commit step — Nova 5's struct has no
+    /// `update_complete` field), a different name-command byte (0xA5 vs
+    /// 0xA7), and the unsigned half-dB-offset gain encoding instead of Gen2's
+    /// signed-tenths-dB one. Also exercises the real `{sleep_ms: 600}` step
+    /// between messages 1 and 2, matching the vendor spec's explicit
+    /// inter-message timing requirement for this device.
+    #[tokio::test]
+    async fn write_nova5_parametric_eq_sends_two_messages_with_sleep_between() {
+        let (engine_fd, peer_fd) = make_pair();
+        let config = cfg(r#"
+structs:
+  parametric_eq:
+    - {name: report_id,        type: uint8, constant: 0x00}
+    - {name: eq_name_command,  type: uint8, constant: 0xA5}
+    - {name: connection_type,  type: uint8, constant: 0x00}
+    - {name: preset_type,      type: uint8, range: [0, 1]}
+    - {name: eqband_command,   type: uint8, constant: 0x33}
+    - {name: band1_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band1_filter_type, type: uint8,   range: [1, 5]}
+    - {name: band1_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band1_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band2_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band2_filter_type, type: uint8,   range: [1, 5]}
+    - {name: band2_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band2_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band3_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band3_filter_type, type: uint8,   range: [1, 5]}
+    - {name: band3_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band3_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band4_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band4_filter_type, type: uint8,   range: [1, 5]}
+    - {name: band4_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band4_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band5_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band5_filter_type, type: uint8,   range: [1, 5]}
+    - {name: band5_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band5_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band6_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band6_filter_type, type: uint8,   range: [1, 5]}
+    - {name: band6_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band6_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band7_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band7_filter_type, type: uint8,   range: [1, 5]}
+    - {name: band7_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band7_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band8_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band8_filter_type, type: uint8,   range: [1, 5]}
+    - {name: band8_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band8_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band9_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band9_filter_type, type: uint8,   range: [1, 5]}
+    - {name: band9_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band9_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band10_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band10_filter_type, type: uint8,   range: [1, 5]}
+    - {name: band10_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band10_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: name, type: varstring, size: 60}
+apis:
+  parametric_eq:
+    write:
+      steps:
+        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:nova5_eq_name"}
+        - {sleep_ms: 600}
+        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:nova5_eq_bands"}
+"#);
+        let mut values = HashMap::new();
+        values.insert("preset_type".to_string(), FieldValue::U8(1));
+        values.insert("name".to_string(), FieldValue::Str("Bass".to_string()));
+        for band in 1..=10u8 {
+            let (freq, filter_type, gain, q) = if band == 1 {
+                (1000u16, 1u8, -1.2f32, 1.414f32)
+            } else {
+                (0u16, 0u8, 0.0f32, 0.0f32)
+            };
+            values.insert(format!("band{band}_frequency"), FieldValue::U16(freq));
+            values.insert(
+                format!("band{band}_filter_type"),
+                FieldValue::U8(filter_type),
+            );
+            values.insert(format!("band{band}_gain"), FieldValue::F32(gain));
+            values.insert(format!("band{band}_q_factor"), FieldValue::F32(q));
+        }
+
+        let started = std::time::Instant::now();
+        let task = tokio::spawn(async move {
+            let mut s = DeviceSession::new(config, engine_fd).expect("from_fd");
+            s.write_api_direct("parametric_eq", values).await
+        });
+
+        let mut peer = HidTransport::from_fd(peer_fd).expect("from_fd");
+        let msg1 = peer
+            .read_interrupt(Duration::from_millis(500))
+            .await
+            .expect("message 1 (name)");
+        let msg2 = peer
+            .read_interrupt(Duration::from_secs(2))
+            .await
+            .expect("message 2 (bands)");
+        task.await.unwrap().unwrap();
+
+        // Message 1: report_id, 0xA5 (Nova 5's name command, not Gen2's
+        // 0xA7), connection_type, preset_type, name bytes.
+        assert_eq!(&msg1[0..4], [0x00, 0xA5, 0x00, 0x01]);
+        assert_eq!(&msg1[4..8], b"Bass");
+
+        // Message 2: report_id, 0x33, connection_type, then band1's
+        // re-encoded data (freq 1000 = 0x03E8 BE, filter 1, gain -1.2dB ->
+        // round(2*(10-1.2))=18 (0x12, unsigned — not Gen2's signed -12), Q
+        // 1.414 -> 1414 little-endian [0x86, 0x05]).
+        assert_eq!(&msg2[0..3], [0x00, 0x33, 0x00]);
+        assert_eq!(&msg2[3..9], [0x03, 0xE8, 0x01, 0x12, 0x86, 0x05]);
+
+        assert!(
+            started.elapsed() >= Duration::from_millis(600),
+            "the {{sleep_ms: 600}} step between messages must actually elapse"
+        );
     }
 
     // ── E6-S4: EQ preset selection ────────────────────────────────────────────
