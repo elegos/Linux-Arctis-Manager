@@ -181,13 +181,18 @@ jobs:
               ;;
           esac
 
-      # Temporary: CachyOS's install-test has SIGILL'd on lam-daemon startup
-      # on the GH-hosted runner three times in a row, but the identical
+      # Temporary: CachyOS's install-test SIGILL'd on lam-daemon startup on
+      # the GH-hosted runner three times in a row, but the identical
       # build+install flow (real makepkg + pacman -U, same package) runs
-      # clean locally on a CPU with full x86-64-v3 support — so this isn't
-      # reproducible off-runner. Capture the runner's actual CPU flags and a
-      # real gdb backtrace here so the next failure has a root cause instead
-      # of another guess. Remove once the cause is confirmed and fixed.
+      # clean locally on a CPU with full x86-64-v3 support — so this looks
+      # like GH's runner fleet is heterogeneous and only some instances hit
+      # it. Capture the runner's actual CPU flags and a real gdb backtrace
+      # so the next failure has a root cause instead of another guess.
+      # `timeout` guards against exactly what happened on the first try of
+      # this diagnostic: lam-daemon is a long-running service, so if this
+      # particular runner *doesn't* hit the SIGILL, "gdb -ex run" just sits
+      # there watching a healthy process forever with nothing to report.
+      # Remove this step once the cause is confirmed and fixed.
       - name: Diagnose CachyOS SIGILL (temporary)
         if: matrix.slug == 'cachyos'
         run: |
@@ -195,7 +200,11 @@ jobs:
           grep -m1 flags /proc/cpuinfo | tr ' ' '\n' | grep -E '^(avx|avx2|avx512f|bmi1|bmi2|fma|f16c|lzcnt|movbe|abm|sse4_2)$' || true
           pacman -Sy --noconfirm --needed gdb
           ulimit -c unlimited
-          gdb -batch -ex run -ex bt -ex "info registers" -ex "x/8i \$pc" --args /usr/bin/lam-daemon --log-level=error || true
+          timeout 20 gdb -batch -ex run -ex bt -ex "info registers" -ex "x/8i \$pc" --args /usr/bin/lam-daemon --log-level=error
+          status=$?
+          if [ "$status" -eq 124 ]; then
+            echo "lam-daemon ran 20s without crashing on this runner — SIGILL didn't reproduce here."
+          fi
         continue-on-error: true
 
       - name: Install test
