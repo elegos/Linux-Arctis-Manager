@@ -3,15 +3,16 @@
 # station display with home-screen/screensaver settings. Report id 0x01
 # (not 0x06 like the Nova Pro family), chunk_size 64.
 #
-# EQ (wireless/Bluetooth/microphone, all three domains) is entirely out of
-# scope this pass, not just curve editing: unlike every other family so far,
-# there is no simple "select preset by id" write command at all — presets are
-# read/written as full named slots (`parametric_eq`/`ten_band_eq_mic`/
-# `ten_band_eq_bt`, HID_FEATURE payloads of 1036 bytes with alias+name
-# strings) via `0x1B`/`0x1D`/`0x1F`. v2's `equalizer_wireless`/
-# `equalizer_bluetooth`/`equalizer_mic` settings (`update_sequence:
-# [0x01, 0x2d/0x2e/0x2f, 'value']`) don't correspond to anything in this
-# spec — no 0x2D/0x2E/0x2F command exists anywhere in it. See the v3 backlog.
+# EQ (wireless/Bluetooth/microphone) has no simple "select preset by id"
+# write command, unlike every other family so far: presets are named slots,
+# written as a whole curve + alias/name strings in one HID_FEATURE message
+# (`parametric_eq`/`ten_band_eq_mic`/`ten_band_eq_bt`, 0x1B/0x1D/0x1F). v2's
+# `equalizer_wireless`/`equalizer_bluetooth`/`equalizer_mic` settings
+# (`update_sequence: [0x01, 0x2d/0x2e/0x2f, 'value']`) don't correspond to
+# anything in this spec — no 0x2D/0x2E/0x2F command exists anywhere in it.
+# The named-slot *write* is modelled below (see structs.parametric_eq and
+# friends); reading a slot back is deferred, same convention as every other
+# shipped EQ device — see the v3 backlog ([E7-S10]) for the exact rationale.
 #
 # `audio_settings` (mic volume/sidetone/line-out/stream-mix/chatmix startup
 # snapshot) shares the EQ structs' 1036-byte HID_FEATURE read. That size isn't
@@ -286,6 +287,123 @@ structs:
     - {name: report_id, type: uint8, constant: 0x01}
     - {name: command,   type: uint8, constant: 0xFD}
 
+  # [E7-S10] Named-slot EQ presets. Unlike every other shipped EQ device,
+  # there's no "select preset N" write — the entire curve, plus a short
+  # `alias_name` (6 chars, shown on the OLED) and a longer free-text `name`
+  # (61 chars), is written into one onboard slot in a single HID_FEATURE
+  # message. `preset_type` (0=factory preset, 1=custom) doesn't appear
+  # below: on the real wire, GG's own app resolves preset_type + a name
+  # string match against the factory preset names ("Flat", "Bass Boost", …)
+  # into a raw onboard slot index before writing — this DSL has no string-
+  # matching primitive, so `onboard_preset_index` is exposed directly
+  # instead (0-3/0-7 = the device's own named factory slots, the last index
+  # = "Custom"). Reading a slot back is not modelled — same convention as
+  # every other shipped EQ device (never wired into `sync_read`), and this
+  # device has no simple index-addressed curve read either (named slots are
+  # read by 0x18-style per-domain commands this pass doesn't cover).
+  #
+  # `alias_name`/`name` are `varstring` with a `size:` cap even though they
+  # aren't the last field in the struct — `codec::encode_field` zero-pads a
+  # sized varstring to exactly `size` bytes on write (needed here so band/
+  # gain data lands at the fixed offset the firmware expects; a no-op for
+  # every other device, where a sized varstring already is the last field
+  # and gets zero-padded by the transport's own chunk_size padding anyway).
+  #
+  # Wireless domain only, genuinely parametric (frequency/filter-type/gain/
+  # Q-factor per band) — same wire shape as Nova 7 Gen2/Nova 5's own
+  # parametric EQ (11 bytes in, 6 bytes out per band), just packed into one
+  # message instead of a multi-step write.
+  parametric_eq:
+    - {name: report_id,           type: uint8, constant: 0x01}
+    - {name: command,             type: uint8, constant: 0x1B}
+    - {name: onboard_preset_index, type: uint8, range: [0, 4]}
+    - {name: alias_name,          type: varstring, size: 6}
+    - {name: name,                type: varstring, size: 61}
+    - {name: band1_frequency,   type: uint16,  range: [20, 20001]}
+    # Raw spec declares (range 1 6) though its own comment only documents 5
+    # filter types (Peak/Low Pass/High Pass/Low Shelving/High Shelving) —
+    # kept literal, unconfirmed against real hardware.
+    - {name: band1_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band1_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band1_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band2_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band2_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band2_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band2_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band3_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band3_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band3_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band3_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band4_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band4_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band4_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band4_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band5_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band5_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band5_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band5_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band6_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band6_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band6_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band6_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band7_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band7_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band7_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band7_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band8_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band8_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band8_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band8_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band9_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band9_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band9_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band9_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band10_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band10_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band10_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band10_q_factor,    type: float32, range: [0.2, 10.0]}
+
+  # Microphone/Bluetooth domains: gain-only ("ten band graphic") EQ, not
+  # parametric — no frequency/filter-type/Q-factor, just 10 fixed-frequency
+  # gains. The raw spec's own `transform_gain_fw_to_ui` comment (`0x88 =
+  # -12dB … 0x00 = 0.0dB … 0x78 = 12dB`) confirms the gain byte is the same
+  # signed-tenths-dB encoding as `parametric_eq` above, not the unsigned
+  # half-dB-offset formula the Nova Pro/Arctis 7+ families' own graphic EQ
+  # uses — see `builtin:nova_elite_ten_band_eq`.
+  ten_band_eq_mic:
+    - {name: report_id,           type: uint8, constant: 0x01}
+    - {name: command,             type: uint8, constant: 0x1D}
+    - {name: onboard_preset_index, type: uint8, range: [0, 8]}
+    - {name: alias_name,          type: varstring, size: 6}
+    - {name: name,                type: varstring, size: 61}
+    - {name: band1_gain,  type: float32, range: [-12.0, 12.0]}
+    - {name: band2_gain,  type: float32, range: [-12.0, 12.0]}
+    - {name: band3_gain,  type: float32, range: [-12.0, 12.0]}
+    - {name: band4_gain,  type: float32, range: [-12.0, 12.0]}
+    - {name: band5_gain,  type: float32, range: [-12.0, 12.0]}
+    - {name: band6_gain,  type: float32, range: [-12.0, 12.0]}
+    - {name: band7_gain,  type: float32, range: [-12.0, 12.0]}
+    - {name: band8_gain,  type: float32, range: [-12.0, 12.0]}
+    - {name: band9_gain,  type: float32, range: [-12.0, 12.0]}
+    - {name: band10_gain, type: float32, range: [-12.0, 12.0]}
+
+  ten_band_eq_bt:
+    - {name: report_id,           type: uint8, constant: 0x01}
+    - {name: command,             type: uint8, constant: 0x1F}
+    - {name: onboard_preset_index, type: uint8, range: [0, 4]}
+    - {name: alias_name,          type: varstring, size: 6}
+    - {name: name,                type: varstring, size: 61}
+    - {name: band1_gain,  type: float32, range: [-12.0, 12.0]}
+    - {name: band2_gain,  type: float32, range: [-12.0, 12.0]}
+    - {name: band3_gain,  type: float32, range: [-12.0, 12.0]}
+    - {name: band4_gain,  type: float32, range: [-12.0, 12.0]}
+    - {name: band5_gain,  type: float32, range: [-12.0, 12.0]}
+    - {name: band6_gain,  type: float32, range: [-12.0, 12.0]}
+    - {name: band7_gain,  type: float32, range: [-12.0, 12.0]}
+    - {name: band8_gain,  type: float32, range: [-12.0, 12.0]}
+    - {name: band9_gain,  type: float32, range: [-12.0, 12.0]}
+    - {name: band10_gain, type: float32, range: [-12.0, 12.0]}
+
 apis:
   set_sonar_present:
     write: {transport: HID_IO, chunk_size: 64}
@@ -345,6 +463,12 @@ apis:
   restore_factory_default:
     action: true
     write: {transport: HID_IO, chunk_size: 64}
+  parametric_eq:
+    write: {transport: HID_FEATURE, chunk_size: 1036, payload_transform: "builtin:nova_elite_parametric_eq"}
+  ten_band_eq_mic:
+    write: {transport: HID_FEATURE, chunk_size: 1036, payload_transform: "builtin:nova_elite_ten_band_eq"}
+  ten_band_eq_bt:
+    write: {transport: HID_FEATURE, chunk_size: 1036, payload_transform: "builtin:nova_elite_ten_band_eq"}
 
 # Field `name:` values are deliberately chosen to match the corresponding
 # `sync_read:` struct field name below for the same `emit:`, so a live event

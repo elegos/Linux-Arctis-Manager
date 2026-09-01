@@ -271,6 +271,17 @@ impl<'a> Codec<'a> {
                         detail: format!("{} bytes exceeds max size {max}", s.len()),
                     });
                 }
+                // Zero-pad to exactly `max` bytes. When this field is the
+                // last thing in the message (Nova 7 Gen2/Nova 5's own
+                // parametric EQ name step), this is a no-op on the wire —
+                // the transport already zero-pads the whole payload up to
+                // `chunk_size`. When it isn't last (Nova Elite's named-slot
+                // EQ writes pack alias/name ahead of fixed-offset band
+                // data), padding here is required so every later field
+                // lands at its correct fixed byte offset.
+                buf.extend_from_slice(s.as_bytes());
+                buf.resize(buf.len() + (max as usize - s.len()), 0);
+                return Ok(());
             }
             match (count, fv) {
                 (1, _) => write_fv(fv, buf),
@@ -636,6 +647,19 @@ mod tests {
         })
     }
 
+    fn sized_varstring_field(name: &str, size: u32) -> FieldOrRef {
+        FieldOrRef::Field(FieldDef {
+            name: name.to_string(),
+            field_type: FieldType::VarString,
+            constant: None,
+            range: None,
+            values: None,
+            values_mapping: None,
+            repeat: None,
+            size: Some(size),
+        })
+    }
+
     fn flat(fields: Vec<FieldOrRef>) -> StructDef {
         StructDef::Flat(fields)
     }
@@ -754,6 +778,47 @@ mod tests {
         values.insert("gain".to_string(), FieldValue::F32(1.0f32));
         let bytes = codec.serialize("s", &values).unwrap();
         assert_eq!(bytes, 1.0f32.to_be_bytes());
+    }
+
+    #[test]
+    fn serialize_sized_varstring_zero_pads_mid_struct() {
+        // A sized varstring followed by more fields (Nova Elite's named-slot
+        // EQ writes: alias_name/name precede band data in the same message)
+        // must land its follower at a fixed offset regardless of the
+        // string's actual length.
+        let structs = single_struct(
+            "s",
+            vec![
+                sized_varstring_field("name", 4),
+                field("marker", FieldType::Uint8),
+            ],
+        );
+        let codec = Codec::new(&structs, no_consts());
+        let mut values = HashMap::new();
+        values.insert("name".to_string(), FieldValue::Str("Hi".to_string()));
+        values.insert("marker".to_string(), FieldValue::U8(0xAB));
+        let bytes = codec.serialize("s", &values).unwrap();
+        assert_eq!(bytes, [b'H', b'i', 0x00, 0x00, 0xAB]);
+    }
+
+    #[test]
+    fn serialize_sized_varstring_exact_length_no_extra_padding() {
+        let structs = single_struct("s", vec![sized_varstring_field("name", 4)]);
+        let codec = Codec::new(&structs, no_consts());
+        let mut values = HashMap::new();
+        values.insert("name".to_string(), FieldValue::Str("Test".to_string()));
+        let bytes = codec.serialize("s", &values).unwrap();
+        assert_eq!(bytes, b"Test");
+    }
+
+    #[test]
+    fn serialize_sized_varstring_over_size_rejected() {
+        let structs = single_struct("s", vec![sized_varstring_field("name", 4)]);
+        let codec = Codec::new(&structs, no_consts());
+        let mut values = HashMap::new();
+        values.insert("name".to_string(), FieldValue::Str("Toolong".to_string()));
+        let err = codec.serialize("s", &values).unwrap_err();
+        assert!(matches!(err, CodecError::ConstraintViolation { .. }));
     }
 
     #[test]

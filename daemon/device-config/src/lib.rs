@@ -76,12 +76,17 @@ pub enum FieldType {
     Int32,
     Float32,
     ByteArray,
-    /// Variable-length string, always the last field in its layout. On
-    /// decode it consumes every remaining byte in the response and trims
-    /// trailing NUL padding (matches the vendor spec's `varstring`, e.g. a
-    /// free-text EQ preset name). On encode, `size` (if set) caps the byte
-    /// length — writing a longer value is a `ConstraintViolation`, not a
-    /// silent truncation.
+    /// Variable-length string. On decode it always consumes every remaining
+    /// byte in the response and trims trailing NUL padding (matches the
+    /// vendor spec's `varstring`, e.g. a free-text EQ preset name) — for
+    /// that reason a `varstring` field must be last in the layout of any
+    /// struct it's read from. On encode, when `size` is set it's a fixed
+    /// wire width instead of just a cap: writing a longer value is a
+    /// `ConstraintViolation`, and a shorter one is zero-padded up to `size`
+    /// — which lets a sized `varstring` sit anywhere in a *write* struct's
+    /// layout (e.g. Nova Elite's named-slot EQ writes, where fixed-width
+    /// alias/name fields precede band data in the same message), not just
+    /// at the end.
     VarString,
 }
 
@@ -104,8 +109,9 @@ pub struct FieldDef {
     #[serde(default)]
     pub repeat: Option<u32>,
     /// Required for `bytearray` fields (fixed size). Optional for
-    /// `varstring` fields (max size on encode; ignored on decode, which
-    /// always consumes to the end of the buffer).
+    /// `varstring` fields — fixed wire width on encode (shorter values are
+    /// zero-padded, longer ones rejected); ignored on decode, which always
+    /// consumes to the end of the buffer.
     #[serde(default)]
     pub size: Option<u32>,
 }
@@ -937,6 +943,77 @@ mod nova_yaml_tests {
         assert_eq!(decoded["band1_gain"], FieldValue::I8(-12));
         assert_eq!(decoded["band1_q_factor"], FieldValue::U16(2500));
         assert_eq!(decoded["band10_gain"], FieldValue::I8(0));
+    }
+
+    #[test]
+    fn nova_elite_parametric_eq_write_encodes_real_yaml() {
+        use crate::api_executor::{ApiExecutor, WriteAction};
+        use crate::builtins::nova_elite_parametric_eq_payload;
+        use crate::codec::FieldValue;
+
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("device-configs");
+        let nova = dir.join("nova_elite.yaml");
+        if !nova.exists() {
+            return; // skip when not present (CI without device-configs)
+        }
+        let cfg = load(&nova, &[dir.as_path()]).expect("nova_elite.yaml must parse");
+        let mut api = ApiExecutor::new(&cfg);
+        api.register_builtin(
+            "builtin:nova_elite_parametric_eq",
+            nova_elite_parametric_eq_payload,
+        );
+
+        let mut values = HashMap::new();
+        values.insert(
+            "onboard_preset_index".to_string(),
+            FieldValue::U8(4), // "Custom"
+        );
+        values.insert(
+            "alias_name".to_string(),
+            FieldValue::Str("MyEQ".to_string()),
+        );
+        values.insert(
+            "name".to_string(),
+            FieldValue::Str("My Custom EQ".to_string()),
+        );
+        for i in 1..=10 {
+            values.insert(format!("band{i}_frequency"), FieldValue::U16(1000));
+            values.insert(format!("band{i}_filter_type"), FieldValue::U8(1));
+            values.insert(format!("band{i}_gain"), FieldValue::F32(0.0));
+            values.insert(format!("band{i}_q_factor"), FieldValue::F32(1.0));
+        }
+        // -1.2 dB, 1.414 Q -> gain byte -12 (0xF4), q 1414 LE [0x86, 0x05]
+        values.insert("band1_gain".to_string(), FieldValue::F32(-1.2));
+        values.insert("band1_q_factor".to_string(), FieldValue::F32(1.414));
+
+        let op = api.prepare_write("parametric_eq", &values).unwrap();
+        assert_eq!(op.actions.len(), 1, "single HID_FEATURE message, no steps");
+        let WriteAction::Send { payload, .. } = &op.actions[0] else {
+            panic!("expected a Send action");
+        };
+        assert_eq!(payload.len(), 1036, "padded to chunk_size");
+        assert_eq!(
+            &payload[0..3],
+            [0x01, 0x1B, 0x04],
+            "report_id, command, onboard_preset_index"
+        );
+        assert_eq!(&payload[3..9], b"MyEQ\0\0", "alias_name, zero-padded to 6");
+        let mut expected_name = b"My Custom EQ".to_vec();
+        expected_name.resize(61, 0);
+        assert_eq!(&payload[9..70], expected_name.as_slice());
+        assert_eq!(
+            &payload[70..76],
+            [0x03, 0xE8, 0x01, 0xF4, 0x86, 0x05],
+            "band 1: freq 1000, filter 1, gain -1.2dB, q 1.414"
+        );
+        assert_eq!(
+            &payload[130..1036],
+            vec![0u8; 906].as_slice(),
+            "chunk padding"
+        );
     }
 
     /// Regression guard: every device file (anything not starting with
