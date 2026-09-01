@@ -1,0 +1,106 @@
+transforms:
+  connection_status_to_label:
+    type: case_int_to_str
+    default: UNKNOWN
+    values: {0: NOT_PAIRED_NOT_SEARCHING, 1: NOT_PAIRED_SEARCHING, 2: PAIRED_NOT_CONNECTED, 3: PAIRED_CONNECTED}
+
+  charging_status_to_label:
+    type: case_int_to_str
+    default: UNKNOWN
+    values: {0: UNKNOWN_OR_HEADSET_NOT_CONNECTED, 1: PLUGGED_IN_CHARGING, 2: PLUGGED_IN_NOT_CHARGING, 3: DISCHARGING}
+
+  # Firmware only defines cases 0-4 (25% steps) despite the field's declared
+  # range being 0-5; unknown/undefined values fall back to 0 rather than
+  # risk over-reporting battery.
+  battery_level_to_percent:
+    type: case_int_to_int
+    default: 0
+    values: {0: 0, 1: 25, 2: 50, 3: 75, 4: 100}
+
+structs:
+  # Shared across all three real capability tiers of this family (standard,
+  # 7X/Xbox, 7P/PlayStation) — headset_status, sidetone (present on two of
+  # three tiers) and sync_events/sync_read differ per tier and are declared
+  # in each tier's own device file instead. No report-ID byte on the wire;
+  # firmware always expects 0x00 in that position ("Data size + 1 to account
+  # for report ID 0" per the SteelSeries spec, same convention as Nova 5).
+  # No readback API exists for any of these settings on this device — the
+  # engine's own settings persistence (re-applies last-known values on
+  # reconnect) is the only source of truth after a restart, there is nothing
+  # to sync_read here.
+  mic_volume:
+    - {name: report_id,  type: uint8, constant: 0x00}
+    - {name: command,    type: uint8, constant: 0x37}
+    - {name: mic_volume, type: uint8, range: [1, 7]}
+
+  # 10-band graphic EQ (fixed frequencies, gain only — not parametric).
+  # Firmware byte = round(2 × (12 + gain_dB)), ±12 dB in 0.5 dB steps.
+  eq:
+    - {name: report_id, type: uint8,  constant: 0x00}
+    - {name: command,   type: uint8,  constant: 0x33}
+    - {name: gain1,     type: float32, range: [-12.0, 12.0]}
+    - {name: gain2,     type: float32, range: [-12.0, 12.0]}
+    - {name: gain3,     type: float32, range: [-12.0, 12.0]}
+    - {name: gain4,     type: float32, range: [-12.0, 12.0]}
+    - {name: gain5,     type: float32, range: [-12.0, 12.0]}
+    - {name: gain6,     type: float32, range: [-12.0, 12.0]}
+    - {name: gain7,     type: float32, range: [-12.0, 12.0]}
+    - {name: gain8,     type: float32, range: [-12.0, 12.0]}
+    - {name: gain9,     type: float32, range: [-12.0, 12.0]}
+    - {name: gain10,    type: float32, range: [-12.0, 12.0]}
+
+  muted_mic_brightness:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0xAE}
+    - {name: level,     type: uint8, range: [0, 3]}
+
+  power_inactivity_timer:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0xA3}
+    - {name: minutes,   type: uint8, range: [0, 255]}
+
+  save_to_flash:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x09}
+
+  # TODO(action-commands): one-shot RF/BT pairing trigger, found in the spec
+  # but not wired to anything — the DSL has no "fire and forget action"
+  # primitive yet (everything is either a value-bearing setting or an
+  # internal lifecycle call), so exposing this on D-Bus needs its own design
+  # pass. Declared here so the struct/API exist and can be dispatched
+  # manually once that lands; see the v3 backlog.
+  pairing_mode:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x03}
+    - {name: mode,      type: uint8, range: [0, 1], values_mapping: {"0": "exit", "1": "enter"}}
+
+apis:
+  mic_volume:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  eq:
+    write:
+      transport: HID_IO
+      chunk_size: 65
+      payload_transform: "builtin:eq_gains_7plus"
+
+  muted_mic_brightness:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  power_inactivity_timer:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  save_to_flash:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  pairing_mode:
+    write: {transport: HID_IO, chunk_size: 65}
+
+lifecycle:
+  # No Sonar/software-chatmix structs exist for this device — nothing to
+  # disable on init. No EQ reset call yet since there is no selected-preset
+  # concept here (only a single custom 10-band curve) and no way to read the
+  # device's current curve back to know it needs resetting; revisit once
+  # save_to_flash-triggered persistence is better understood for this family.
+  shutdown:
+    - call: save_to_flash
