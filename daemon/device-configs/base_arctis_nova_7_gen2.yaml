@@ -6,11 +6,13 @@
 # Bluetooth-link status. sidetone is defined directly in this base (unlike
 # gen1, where it's per-SKU) — every SKU in this family has it, including 7P.
 #
-# EQ *readback* (current preset name/curve at startup) is intentionally not
-# modelled: the wire format needs a signed 8-bit field type this DSL doesn't
-# have yet (gain comes back as a plain `int8`, not the unsigned types this
-# schema supports) — tracked as a follow-up in the v3 backlog. EQ *write* is
-# fully modelled below using the new multi-step/varstring primitives.
+# EQ *readback* (current preset name/curve, `read_eq_preset_name`/
+# `get_eq_preset_data`, RF/BT/mic domains) is now modelled too, using the
+# `int8` field type ([E7-S12]) the wire format's raw gain byte needs. Like
+# every other shipped EQ device, it's declared for structural completeness
+# but not wired into `sync_read` — this daemon always resets EQ to a known
+# state on init rather than restoring the hardware's persisted curve. EQ
+# *write* is modelled below using the multi-step/varstring primitives.
 #
 # "RGB color spin" was flagged during scoping as a possible new capability —
 # turned out not to be one: the vendor spec's own `translate_color_spin`
@@ -286,6 +288,216 @@ structs:
     - {name: band10_q_factor,    type: float32, range: [0.2, 10.0]}
     - {name: name, type: varstring, size: 60}
 
+  # Readback of the currently active preset's name (RF/BT/mic domains) — the
+  # DSL blocker this needed (a signed `int8` field type for the paired
+  # get_eq_preset_data struct's gain byte, below) is resolved ([E7-S12]).
+  # Bidir: outgoing is the read-request (report_id/command/connection_type,
+  # all constant per domain since a read's outgoing bytes are serialised
+  # with an empty values map — see api_executor.rs::prepare_read), incoming
+  # is the device's response. Matches every other shipped EQ device: declared
+  # for structural completeness, not wired into sync_read — this daemon
+  # always resets EQ to a known state on init rather than restoring the
+  # hardware's persisted curve/name.
+  read_eq_preset_name:
+    outgoing:
+      - {name: report_id,       type: uint8, constant: 0x00}
+      - {name: command,         type: uint8, constant: 0xA6}
+      - {name: connection_type, type: uint8, constant: 0x00}
+    incoming:
+      - {name: report_id,       type: uint8, constant: 0x00}
+      - {name: command,         type: uint8, constant: 0xA6}
+      - {name: connection_type, type: uint8, constant: 0x00}
+      - {name: preset_type,     type: uint8, range: [0, 1]}
+      - {name: name,            type: bytearray, size: 61}
+
+  read_eq_preset_name_bt:
+    outgoing:
+      - {name: report_id,       type: uint8, constant: 0x00}
+      - {name: command,         type: uint8, constant: 0xA6}
+      - {name: connection_type, type: uint8, constant: 0x01}
+    incoming:
+      - {name: report_id,       type: uint8, constant: 0x00}
+      - {name: command,         type: uint8, constant: 0xA6}
+      - {name: connection_type, type: uint8, constant: 0x01}
+      - {name: preset_type,     type: uint8, range: [0, 1]}
+      - {name: name,            type: bytearray, size: 61}
+
+  read_eq_preset_name_mic:
+    outgoing:
+      - {name: report_id,       type: uint8, constant: 0x00}
+      - {name: command,         type: uint8, constant: 0xA6}
+      - {name: connection_type, type: uint8, constant: 0x02}
+    incoming:
+      - {name: report_id,       type: uint8, constant: 0x00}
+      - {name: command,         type: uint8, constant: 0xA6}
+      - {name: connection_type, type: uint8, constant: 0x02}
+      - {name: preset_type,     type: uint8, range: [0, 1]}
+      - {name: name,            type: bytearray, size: 61}
+
+  # Readback of the currently active preset's full band curve (RF/BT/mic).
+  # `gain` decodes as a raw signed byte (0.1 dB units, e.g. `0xF4` = -1.2 dB)
+  # via the new `int8` field type — the actual blocker this story closes;
+  # `q_factor` is declared plain big-endian `uint16` here, matching the raw
+  # spec's bare `(field q_factor uint16 (range 200 10000))` on this incoming
+  # struct — but the same spec's write-side encoder has an explicit comment
+  # that Q-factor is stored little-endian on the wire. It's unclear whether
+  # that only describes the outgoing byte-twiddling (already handled by
+  # `nova7gen2_eq_bands_payload`, not the generic codec) or the physical
+  # wire format read back here too; kept as literally declared, flagged for
+  # verification against real hardware. Same not-wired-to-sync_read
+  # convention as read_eq_preset_name above. The vendor spec also flags a
+  # known firmware quirk on this incoming layout ("TODO: remove after FW
+  # fix missing byte") — kept as literally specified, unconfirmed too.
+  get_eq_preset_data:
+    outgoing:
+      - {name: report_id,       type: uint8, constant: 0x00}
+      - {name: command,         type: uint8, constant: 0x32}
+      - {name: connection_type, type: uint8, constant: 0x00}
+    incoming:
+      - {name: report_id,       type: uint8, constant: 0x00}
+      - {name: command,         type: uint8, constant: 0x32}
+      - {name: connection_type, type: uint8, constant: 0x00}
+      - {name: band1_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band1_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band1_gain,        type: int8}
+      - {name: band1_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band2_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band2_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band2_gain,        type: int8}
+      - {name: band2_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band3_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band3_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band3_gain,        type: int8}
+      - {name: band3_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band4_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band4_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band4_gain,        type: int8}
+      - {name: band4_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band5_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band5_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band5_gain,        type: int8}
+      - {name: band5_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band6_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band6_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band6_gain,        type: int8}
+      - {name: band6_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band7_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band7_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band7_gain,        type: int8}
+      - {name: band7_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band8_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band8_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band8_gain,        type: int8}
+      - {name: band8_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band9_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band9_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band9_gain,        type: int8}
+      - {name: band9_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band10_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band10_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band10_gain,        type: int8}
+      - {name: band10_q_factor,    type: uint16, range: [200, 10000]}
+
+  get_eq_preset_data_bt:
+    outgoing:
+      - {name: report_id,       type: uint8, constant: 0x00}
+      - {name: command,         type: uint8, constant: 0x32}
+      - {name: connection_type, type: uint8, constant: 0x01}
+    incoming:
+      - {name: report_id,       type: uint8, constant: 0x00}
+      - {name: command,         type: uint8, constant: 0x32}
+      - {name: connection_type, type: uint8, constant: 0x01}
+      - {name: band1_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band1_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band1_gain,        type: int8}
+      - {name: band1_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band2_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band2_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band2_gain,        type: int8}
+      - {name: band2_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band3_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band3_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band3_gain,        type: int8}
+      - {name: band3_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band4_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band4_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band4_gain,        type: int8}
+      - {name: band4_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band5_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band5_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band5_gain,        type: int8}
+      - {name: band5_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band6_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band6_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band6_gain,        type: int8}
+      - {name: band6_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band7_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band7_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band7_gain,        type: int8}
+      - {name: band7_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band8_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band8_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band8_gain,        type: int8}
+      - {name: band8_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band9_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band9_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band9_gain,        type: int8}
+      - {name: band9_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band10_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band10_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band10_gain,        type: int8}
+      - {name: band10_q_factor,    type: uint16, range: [200, 10000]}
+
+  get_eq_preset_data_mic:
+    outgoing:
+      - {name: report_id,       type: uint8, constant: 0x00}
+      - {name: command,         type: uint8, constant: 0x32}
+      - {name: connection_type, type: uint8, constant: 0x02}
+    incoming:
+      - {name: report_id,       type: uint8, constant: 0x00}
+      - {name: command,         type: uint8, constant: 0x32}
+      - {name: connection_type, type: uint8, constant: 0x02}
+      - {name: band1_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band1_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band1_gain,        type: int8}
+      - {name: band1_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band2_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band2_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band2_gain,        type: int8}
+      - {name: band2_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band3_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band3_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band3_gain,        type: int8}
+      - {name: band3_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band4_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band4_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band4_gain,        type: int8}
+      - {name: band4_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band5_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band5_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band5_gain,        type: int8}
+      - {name: band5_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band6_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band6_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band6_gain,        type: int8}
+      - {name: band6_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band7_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band7_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band7_gain,        type: int8}
+      - {name: band7_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band8_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band8_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band8_gain,        type: int8}
+      - {name: band8_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band9_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band9_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band9_gain,        type: int8}
+      - {name: band9_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band10_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band10_filter_type, type: uint8,  range: [0, 6]}
+      - {name: band10_gain,        type: int8}
+      - {name: band10_q_factor,    type: uint16, range: [200, 10000]}
+
 apis:
   mic_volume:
     write: {transport: HID_IO, chunk_size: 65}
@@ -316,6 +528,19 @@ apis:
   ux_settings:
     read: {transport: HID_IO, chunk_size: 65}
   headset_status:
+    read: {transport: HID_IO, chunk_size: 65}
+
+  read_eq_preset_name:
+    read: {transport: HID_IO, chunk_size: 65}
+  read_eq_preset_name_bt:
+    read: {transport: HID_IO, chunk_size: 65}
+  read_eq_preset_name_mic:
+    read: {transport: HID_IO, chunk_size: 65}
+  get_eq_preset_data:
+    read: {transport: HID_IO, chunk_size: 65}
+  get_eq_preset_data_bt:
+    read: {transport: HID_IO, chunk_size: 65}
+  get_eq_preset_data_mic:
     read: {transport: HID_IO, chunk_size: 65}
 
   parametric_eq:

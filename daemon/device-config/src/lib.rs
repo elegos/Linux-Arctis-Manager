@@ -64,6 +64,16 @@ pub enum FieldType {
     Uint8,
     Uint16,
     Uint32,
+    /// Signed, two's-complement. Decodes/encodes with the same bit pattern
+    /// as `Uint8`, just reinterpreted as negative above 0x7F — needed for
+    /// wire fields the vendor spec declares as a plain signed byte (e.g. an
+    /// EQ band's readback gain, ±0.1 dB units) rather than an offset/scaled
+    /// unsigned value.
+    Int8,
+    /// See `Int8`; big-endian on the wire like `Uint16`.
+    Int16,
+    /// See `Int8`; big-endian on the wire like `Uint32`.
+    Int32,
     Float32,
     ByteArray,
     /// Variable-length string, always the last field in its layout. On
@@ -874,6 +884,59 @@ mod nova_yaml_tests {
         let variants = device.variants.as_ref().expect("variants");
         assert!(variants.iter().any(|v| v.product_id == 0x12E0));
         assert_eq!(device.vendor_id, Some(0x1038));
+    }
+
+    /// End-to-end proof that Nova 7 Gen2's `get_eq_preset_data` readback —
+    /// the whole point of [E7-S12]'s `int8` field type — decodes a real
+    /// device response correctly through the actual loaded YAML (byte
+    /// offsets, band stride, signed gain included), not just a synthetic
+    /// struct built by hand in `codec.rs`'s own unit tests.
+    #[test]
+    fn nova7gen2_get_eq_preset_data_decodes_negative_gain() {
+        use crate::api_executor::ApiExecutor;
+        use crate::codec::FieldValue;
+
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("device-configs");
+        let nova = dir.join("nova_7_gen2.yaml");
+        if !nova.exists() {
+            return; // skip when not present (CI without device-configs)
+        }
+        let cfg = load(&nova, &[dir.as_path()]).expect("nova_7_gen2.yaml must parse");
+        let api = ApiExecutor::new(&cfg);
+
+        // Read request: report_id/command/connection_type, all constant,
+        // padded to the 65-byte chunk.
+        let read_op = api.prepare_read("get_eq_preset_data").unwrap();
+        assert_eq!(&read_op.request_bytes[..3], [0x00, 0x32, 0x00]);
+        assert_eq!(read_op.request_bytes.len(), 65);
+
+        // Synthetic response: header (report_id, command, connection_type)
+        // then 10 bands x 6 bytes (freq u16 BE, filter_type u8, gain i8,
+        // q_factor u16 BE). Only band 1 carries interesting values; bands
+        // 2-10 use a minimal in-range "no filter" band (frequency/q_factor
+        // range minimums, filter_type/gain 0) — an all-zero band would
+        // violate band*_frequency's [20, 20001] and band*_q_factor's
+        // [200, 10000] range constraints.
+        let mut resp = vec![0x00, 0x32, 0x00];
+        resp.extend_from_slice(&[0x00, 0x64]); // band1_frequency = 100
+        resp.push(0x01); // band1_filter_type = 1 (peak)
+        resp.push(0xF4); // band1_gain = -12 (i8 two's complement) = -1.2 dB
+        resp.extend_from_slice(&[0x09, 0xC4]); // band1_q_factor = 2500 (2.5 x1000)
+
+        let empty_band = [0x00, 0x14, 0x00, 0x00, 0x00, 0xC8];
+        for _ in 0..9 {
+            resp.extend_from_slice(&empty_band);
+        }
+
+        let decoded = api.parse_response("get_eq_preset_data", &resp).unwrap();
+        assert_eq!(decoded["band1_frequency"], FieldValue::U16(100));
+        assert_eq!(decoded["band1_filter_type"], FieldValue::U8(1));
+        assert_eq!(decoded["band1_gain"], FieldValue::I8(-12));
+        assert_eq!(decoded["band1_q_factor"], FieldValue::U16(2500));
+        assert_eq!(decoded["band10_gain"], FieldValue::I8(0));
     }
 
     /// Regression guard: every device file (anything not starting with
