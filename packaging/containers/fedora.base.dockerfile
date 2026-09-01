@@ -12,6 +12,7 @@ RUN dnf update -y && \
         python3-devel \
         python3-pip \
         systemd-devel \
+        openssl-devel \
         rpm-build \
         rpmdevtools \
         libcap \

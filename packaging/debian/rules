@@ -20,6 +20,21 @@ override_dh_auto_build:
 override_dh_auto_install:
 	make install DESTDIR=$(CURDIR)/debian/linux-arctis-manager PREFIX=/usr
 
+override_dh_shlibdeps:
+	# The venv bundles its own private Qt6/ffmpeg/icu .so files (PySide6's
+	# wheel vendors them) — they're not public shared libraries this
+	# package provides, and dpkg-shlibdeps hard-fails trying to resolve
+	# *their* runtime deps (libGL.so.1, libxkbcommon.so.0, ...) against
+	# the build container instead of a real desktop system. Real binaries
+	# (lam-daemon, lam-hidraw-helper) live outside the venv and are
+	# unaffected by the exclude.
+	dh_shlibdeps -X venv
+
+override_dh_makeshlibs:
+	# Same reason as override_dh_shlibdeps above: the venv's bundled .so
+	# files aren't public shared libraries this package provides.
+	dh_makeshlibs -X venv
+
 override_dh_fixperms-arch:
 	dh_fixperms
 	chown root:root $(CURDIR)/debian/linux-arctis-manager/usr/libexec/lam-hidraw-helper
