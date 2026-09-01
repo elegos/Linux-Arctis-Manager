@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resolve the install-test CI matrix for wheel-install-test.yaml.
+"""Resolve the install-test CI matrix for install-test.yaml.
 
 The *set* of distros tested is a static snapshot of DistroWatch's page-hit
 top 10 (see the comment block below) intersected with "has an image we can
@@ -12,6 +12,13 @@ an install script checking "what's currently supported" instead of a
 maintainer hand-updating version numbers every release. Debian ships its
 own floating stable/oldstable tags, so no lookup is needed there. Rolling
 distros (Arch, CachyOS, Bazzite) have no "version" to resolve at all.
+
+Each entry also carries a `family` (arch/rpm/deb — which packaging recipe
+and native package manager applies) and a `slug` (artifact-name-safe id),
+since the workflow builds the real package (PKGBUILD/.spec/debian/control)
+and installs it via the distro's own package manager on a fresh image —
+that's what actually exercises the declared depends/Requires/Build-Depends,
+which a hand-picked `apt-get install <list>` in the workflow never would.
 """
 
 import datetime
@@ -54,6 +61,14 @@ def _parse_date(value) -> datetime.date | None:
     return datetime.date.fromisoformat(value)
 
 
+def _slug(label: str) -> str:
+    return re.sub(r"-+", "-", re.sub(r"[^a-z0-9]+", "-", label.lower())).strip("-")
+
+
+def _entry(distro: str, image: str, family: str) -> dict:
+    return {"distro": distro, "image": image, "family": family, "slug": _slug(distro)}
+
+
 def _released_non_eol(cycles: list[dict]) -> list[dict]:
     today = _today()
     out = []
@@ -73,7 +88,7 @@ def resolve_fedora() -> list[dict]:
     cycles = _released_non_eol(_fetch_json("https://endoflife.date/api/fedora.json"))
     cycles.sort(key=lambda c: int(c["cycle"]), reverse=True)
     return [
-        {"distro": f"Fedora {c['cycle']}", "image": f"fedora:{c['cycle']}"}
+        _entry(f"Fedora {c['cycle']}", f"fedora:{c['cycle']}", "rpm")
         for c in cycles[:2]
     ]
 
@@ -92,7 +107,7 @@ def resolve_ubuntu() -> list[dict]:
             picked.append(c)
 
     return [
-        {"distro": f"Ubuntu {c['cycle']}", "image": f"ubuntu:{c['cycle']}"}
+        _entry(f"Ubuntu {c['cycle']}", f"ubuntu:{c['cycle']}", "deb")
         for c in picked
     ]
 
@@ -106,22 +121,21 @@ def resolve_linuxmint() -> list[dict]:
         return []
     cycles.sort(key=lambda c: _parse_date(c["releaseDate"]), reverse=True)
     latest = cycles[0]["cycle"]
-    return [{
-        "distro": f"Linux Mint {latest}",
-        "image": f"linuxmintd/mint{latest}-amd64:latest",
-    }]
+    return [_entry(
+        f"Linux Mint {latest}", f"linuxmintd/mint{latest}-amd64:latest", "deb",
+    )]
 
 
 def static_entries() -> list[dict]:
     return [
         # Debian tracks its own current stable/oldstable via floating tags —
         # no version lookup needed on our side.
-        {"distro": "Debian (stable)", "image": "debian:stable-slim"},
-        {"distro": "Debian (oldstable)", "image": "debian:oldstable-slim"},
+        _entry("Debian (stable)", "debian:stable-slim", "deb"),
+        _entry("Debian (oldstable)", "debian:oldstable-slim", "deb"),
         # Rolling / atomic — no versioned releases to resolve.
-        {"distro": "Arch Linux", "image": "archlinux:latest"},
-        {"distro": "CachyOS", "image": "cachyos/cachyos:latest"},
-        {"distro": "Bazzite", "image": "ghcr.io/ublue-os/bazzite:stable"},
+        _entry("Arch Linux", "archlinux:latest", "arch"),
+        _entry("CachyOS", "cachyos/cachyos:latest", "arch"),
+        _entry("Bazzite", "ghcr.io/ublue-os/bazzite:stable", "rpm"),
     ]
 
 
@@ -133,6 +147,11 @@ def main() -> int:
         except Exception as e:  # network hiccup, API shape change, ...
             print(f"::error::{resolver.__name__} failed: {e}", file=sys.stderr)
             return 1
+
+    slugs = [e["slug"] for e in matrix]
+    if len(slugs) != len(set(slugs)):
+        print(f"::error::duplicate slug in matrix: {matrix}", file=sys.stderr)
+        return 1
 
     print(json.dumps(matrix), file=sys.stderr)  # human-readable log
     print(f"matrix={json.dumps(matrix)}")

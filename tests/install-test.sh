@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Smoke-tests a `make build && make install` pass: verifies the daemon,
-# helper, and GUI wrapper actually land and run, and that the privileged
-# capability was applied. Run from the repository root, after `make install`.
+# Smoke-tests an install (source `make install`, or a native package built
+# from packaging/{arch,fedora,debian}): verifies the daemon, helper, and GUI
+# wrapper actually land and run, and that the privileged capability was
+# applied. Run from the repository root, after the install; set PREFIX to
+# match how it was installed (packages use /usr, `make install` defaults to
+# /usr/local).
 set -euo pipefail
 
 PREFIX="${PREFIX:-/usr/local}"
