@@ -13,16 +13,19 @@
 # [0x01, 0x2d/0x2e/0x2f, 'value']`) don't correspond to anything in this
 # spec — no 0x2D/0x2E/0x2F command exists anywhere in it. See the v3 backlog.
 #
-# Also out of scope: the bulk `audio_settings` read (mic volume/sidetone/
-# line-out/stream-mix/chatmix snapshot) uses the same 1036-byte HID_FEATURE
-# read as the EQ structs — 12 bytes over hid-transport's
-# REPORT_SIZE_HID_FEATURE_MAX (1024). Can't be read at all without extending
-# the transport layer, so none of those settings have a startup snapshot;
-# same "write-only, engine's own persistence is the source of truth on
-# restart" situation as Nova 5/Arctis 7+, but here it's a transport
-# limitation, not just an absent device-side read API. Battery/connection/
-# ANC-related fields and OLED/station-screen settings are unaffected — both
-# `wireless_settings` and `ux_settings` read normally (64 bytes).
+# `audio_settings` (mic volume/sidetone/line-out/stream-mix/chatmix startup
+# snapshot) shares the EQ structs' 1036-byte HID_FEATURE read. That size isn't
+# actually enforced anywhere in this codebase — hid-transport's
+# REPORT_SIZE_HID_FEATURE_MAX (1024) is documentation only, chunk_size flows
+# straight into the buffer allocation with no clamp — so it's modelled below
+# as chunk_size: 1036 like the spec says. The EQ-band portions of the struct
+# (10 custom bands + 10 measured bands + 10 BT gains + 10 mic gains, 140 bytes
+# total) are reserved as opaque placeholders to keep the fields after them
+# correctly aligned, same trick as Nova 5's `eq_data_raw`. Unconfirmed on real
+# hardware: the 1036 figure comes from the vendor's Windows-side spec, and
+# while nothing in the kernel's own HIDIOCGFEATURE path is known to cap
+# below that, the device's actual USB HID report descriptor is the only true
+# authority on this and hasn't been checked directly.
 
 transforms:
   connection_status_to_label:
@@ -204,6 +207,49 @@ structs:
       - {name: oled_screen_saver_mode, type: uint8, range: [0, 1]}
       - {name: home_screen_option,    type: uint8, range: [0, 2]}
 
+  # Startup snapshot for everything write-only above that has no dedicated
+  # read command of its own (mic volume, both sidetone paths, line-out mode,
+  # stream mix, volume limiter, chatmix). EQ preset ids and the mic-noise-
+  # reduction fields are declared (real names, real positions) but not
+  # sync_read-mapped — those features aren't implemented yet (see the header
+  # comment), no point wiring events nothing will use.
+  audio_settings:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x01}
+      - {name: command,   type: uint8, constant: 0x20}
+    incoming:
+      - {name: report_id,             type: uint8, constant: 0x01}
+      - {name: command,               type: uint8, constant: 0x20}
+      - {name: custom_eq_bands_raw,   type: bytearray, size: 60}
+      - {name: measured_eq_bands_raw, type: bytearray, size: 60}
+      - {name: bt_gains_raw,          type: bytearray, size: 10}
+      - {name: mic_gains_raw,         type: bytearray, size: 10}
+      - {name: audio_input,           type: uint8, range: [0, 3]}
+      - {name: station_volume,        type: uint8, range: [0, 38]}
+      - {name: volume_limiter,        type: uint8, range: [0, 1]}
+      - {name: surround_mode,         type: uint8, range: [0, 1]}
+      - {name: mic_volume,            type: uint8, range: [1, 10]}
+      - {name: boom_sidetone_level,   type: uint8, range: [1, 10]}
+      - {name: line_out_mode,         type: uint8, range: [1, 2]}
+      - {name: radio_selected_eq_preset,       type: uint8, range: [0, 5]}
+      - {name: microphone_selected_eq_preset,  type: uint8, range: [0, 8]}
+      - {name: bluetooth_selected_eq_preset,   type: uint8, range: [0, 4]}
+      - {name: chatmix_game,          type: uint8, range: [0, 100]}
+      - {name: chatmix_chat,          type: uint8, range: [0, 100]}
+      - {name: unused1,               type: bytearray, size: 2}
+      - {name: stream_main,           type: uint8, range: [0, 100]}
+      - {name: unused2,               type: uint8}
+      - {name: stream_aux,            type: uint8, range: [0, 100]}
+      - {name: stream_mic,            type: uint8, range: [0, 100]}
+      - {name: unused3,               type: bytearray, size: 5}
+      - {name: mic_noise_reduction_setting,   type: uint8, values: [0, 1, 16, 17]}
+      - {name: mic_boom_reduction_level,      type: uint8, range: [0, 3]}
+      - {name: on_ear_mic_reduction_level,    type: uint8, range: [0, 3]}
+      - {name: unused4,               type: bytearray, size: 2}
+      - {name: boom_sidetone_state,   type: uint8, range: [0, 1]}
+      - {name: on_ear_sidetone_level, type: uint8, range: [1, 10]}
+      - {name: on_ear_sidetone_state, type: uint8, range: [0, 1]}
+
   # TODO(action-commands, [E7-S9]): one-shot factory-reset trigger, same
   # "fire and forget" shape as Arctis 7+'s pairing_mode — no DSL primitive
   # for this yet. Declared so the struct/API exist; not wired to D-Bus.
@@ -258,14 +304,20 @@ apis:
     read: {transport: HID_IO, chunk_size: 64}
   ux_settings:
     read: {transport: HID_IO, chunk_size: 64}
+  audio_settings:
+    read: {transport: HID_FEATURE, chunk_size: 1036}
   restore_factory_default:
     write: {transport: HID_IO, chunk_size: 64}
 
+# Field `name:` values are deliberately chosen to match the corresponding
+# `sync_read:` struct field name below for the same `emit:`, so a live event
+# and the startup snapshot for the same setting always carry the same JSON
+# key — not just the same value shape.
 sync_events:
   0x27:
     emit: volume_limiter_changed
     fields:
-      - {name: enabled, byte: 2, display_type: on_off}
+      - {name: volume_limiter, byte: 2, display_type: on_off}
 
   0x37:
     emit: mic_volume_changed
@@ -275,14 +327,14 @@ sync_events:
   0x38:
     emit: boom_mic_sidetone_changed
     fields:
-      - {name: state, byte: 2}
-      - {name: level, byte: 3}
+      - {name: boom_sidetone_state, byte: 2}
+      - {name: boom_sidetone_level, byte: 3}
 
   0x39:
     emit: on_ear_sidetone_changed
     fields:
-      - {name: state, byte: 2}
-      - {name: level, byte: 3}
+      - {name: on_ear_sidetone_state, byte: 2}
+      - {name: on_ear_sidetone_level, byte: 3}
 
   0x43:
     emit: line_out_mode_changed
@@ -292,8 +344,8 @@ sync_events:
   0x45:
     emit: chatmix_changed
     fields:
-      - {name: game_attenuation, byte: 2}
-      - {name: chat_attenuation, byte: 3}
+      - {name: chatmix_game, byte: 2}
+      - {name: chatmix_chat, byte: 3}
 
   0x47:
     emit: stream_mix_changed
@@ -305,37 +357,37 @@ sync_events:
   0x83:
     emit: oled_screen_saver_timer_changed
     fields:
-      - {name: minutes, byte: 2, transform: timer_enum_to_minutes}
+      - {name: oled_screen_saver_timer, byte: 2, transform: timer_enum_to_minutes}
 
   0x85:
     emit: oled_brightness_changed
     fields:
-      - {name: level, byte: 2, display_type: percentage}
+      - {name: oled_brightness, byte: 2, display_type: percentage}
 
   0x88:
     emit: oled_screen_saver_mode_changed
     fields:
-      - {name: mode, byte: 2}
+      - {name: oled_screen_saver_mode, byte: 2}
 
   0x89:
     emit: home_screen_view_changed
     fields:
-      - {name: mode, byte: 2}
+      - {name: home_screen_view, byte: 2}
 
   0x8A:
     emit: home_screen_option_changed
     fields:
-      - {name: mode, byte: 2}
+      - {name: home_screen_option, byte: 2}
 
   0xB2:
     emit: bt_power_default_changed
     fields:
-      - {name: enabled, byte: 2, display_type: on_off}
+      - {name: bt_power_default, byte: 2, display_type: on_off}
 
   0xB3:
     emit: bt_call_default_changed
     fields:
-      - {name: mode, byte: 2}
+      - {name: bt_call_default, byte: 2}
 
   0xB5:
     emit: connection_changed
@@ -354,32 +406,32 @@ sync_events:
   0xB8:
     emit: active_noise_cancellation_changed
     fields:
-      - {name: level, byte: 2}
+      - {name: active_noise_cancellation, byte: 2}
 
   0xB9:
     emit: transparent_changed
     fields:
-      - {name: level, byte: 2, display_type: percentage}
+      - {name: transparent_level, byte: 2, display_type: percentage}
 
   0xBB:
     emit: mic_muted_changed
     fields:
-      - {name: muted, byte: 2, display_type: on_off}
+      - {name: mic_muted, byte: 2, display_type: on_off}
 
   0xBD:
     emit: transparent_anc_mode_changed
     fields:
-      - {name: mode, byte: 2}
+      - {name: transparent_anc_mode, byte: 2}
 
   0xBF:
     emit: muted_mic_brightness_changed
     fields:
-      - {name: level, byte: 2}
+      - {name: muted_mic_brightness, byte: 2}
 
   0xC1:
     emit: inactivity_timer_changed
     fields:
-      - {name: minutes, byte: 2, transform: timer_enum_to_minutes}
+      - {name: inactivity_timer, byte: 2, transform: timer_enum_to_minutes}
 
 sync_read:
   - struct: wireless_settings
@@ -402,6 +454,22 @@ sync_read:
       - {emit: home_screen_view_changed,        field: home_screen_view}
       - {emit: oled_screen_saver_mode_changed,  field: oled_screen_saver_mode}
       - {emit: home_screen_option_changed,      field: home_screen_option}
+
+  - struct: audio_settings
+    maps:
+      - {emit: mic_volume_changed,       field: mic_volume}
+      - {emit: volume_limiter_changed,   field: volume_limiter, display_type: on_off}
+      - {emit: line_out_mode_changed,    field: line_out_mode}
+      - {emit: station_volume_changed,   field: station_volume, display_type: percentage}
+      - {emit: surround_changed,         field: surround_mode,  display_type: on_off}
+      - emit: boom_mic_sidetone_changed
+        fields: [boom_sidetone_state, boom_sidetone_level]
+      - emit: on_ear_sidetone_changed
+        fields: [on_ear_sidetone_state, on_ear_sidetone_level]
+      - emit: stream_mix_changed
+        fields: [stream_main, stream_aux, stream_mic]
+      - emit: chatmix_changed
+        fields: [chatmix_game, chatmix_chat]
 
 lifecycle:
   init:

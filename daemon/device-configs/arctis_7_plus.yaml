@@ -36,8 +36,8 @@ sync_events:
   0x45:
     emit: chatmix_changed
     fields:
-      - {name: game_attenuation, byte: 2}
-      - {name: chat_attenuation, byte: 3}
+      - {name: game_chatmix_level, byte: 2}
+      - {name: chat_chatmix_level, byte: 3}
 
   0xB7:
     emit: battery_changed
