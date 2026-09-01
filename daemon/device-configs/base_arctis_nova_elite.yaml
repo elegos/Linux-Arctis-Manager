@@ -279,9 +279,9 @@ structs:
       - {name: on_ear_sidetone_level, type: uint8, range: [1, 10]}
       - {name: on_ear_sidetone_state, type: uint8, range: [0, 1]}
 
-  # TODO(action-commands, [E7-S9]): one-shot factory-reset trigger, same
-  # "fire and forget" shape as Arctis 7+'s pairing_mode — no DSL primitive
-  # for this yet. Declared so the struct/API exist; not wired to D-Bus.
+  # One-shot factory-reset trigger — an action, not a persisted setting.
+  # Exposed via the `TriggerAction` D-Bus method ([E7-S9]), e.g.
+  # `TriggerAction("restore_factory_default", "")`.
   restore_factory_default:
     - {name: report_id, type: uint8, constant: 0x01}
     - {name: command,   type: uint8, constant: 0xFD}
@@ -343,6 +343,7 @@ apis:
   audio_settings:
     read: {transport: HID_FEATURE, chunk_size: 1036}
   restore_factory_default:
+    action: true
     write: {transport: HID_IO, chunk_size: 64}
 
 # Field `name:` values are deliberately chosen to match the corresponding

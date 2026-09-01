@@ -76,9 +76,9 @@ structs:
     - {name: report_id, type: uint8, constant: 0x00}
     - {name: command,   type: uint8, constant: 0x09}
 
-  # TODO(action-commands, E7-S9): one-shot factory-reset trigger, no
-  # persisted state, same DSL gap as Arctis 7+'s pairing_mode and Nova
-  # Elite's own restore_factory_default.
+  # One-shot factory-reset trigger — an action, not a persisted setting.
+  # Exposed via the `TriggerAction` D-Bus method ([E7-S9]), e.g.
+  # `TriggerAction("restore_factory_default", "")`.
   restore_factory_default:
     - {name: report_id, type: uint8, constant: 0x00}
     - {name: command,   type: uint8, constant: 0xFD}
@@ -302,6 +302,7 @@ apis:
   bt_call_default:
     write: {transport: HID_IO, chunk_size: 65}
   restore_factory_default:
+    action: true
     write: {transport: HID_IO, chunk_size: 65}
 
   save_to_flash:

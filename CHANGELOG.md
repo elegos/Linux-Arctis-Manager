@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rust daemon (v3): also fixed while building the above — Nova Elite never had a `save_to_flash` write at all (settings never survived a power cycle), and its shutdown sequence called two lifecycle hooks (`disable_chatmix`, `disable_sonar`) whose backing structs had never been added, so both would have failed at runtime. All three now present.
 - Rust daemon (v3): Arctis Nova Pro Wireless X White (`0x225D`) added as a third variant — protocol-identical to the existing two, was simply never added.
 - Rust daemon (v3): Arctis Nova Pro Omni device support — same underlying hardware/protocol as Nova Elite (confirmed from its own raw spec), reusing ANC, Bluetooth, sidetone, station display, and battery/connection sync unchanged. Adds mic noise reduction (not on Nova Elite at all); has no on-ear mic, unlike Nova Elite. EQ is not supported on this device yet, same as Nova Elite — tracked as a follow-up story, not shipped in this pass.
+- Rust daemon (v3): a new `TriggerAction` D-Bus method for one-shot, fire-and-forget device commands (RF/BT pairing, factory reset) that have no persisted value to remember or restore, unlike every other setting `SetSetting` handles — wired to Arctis 7+/7x+/7p+'s `pairing_mode` and Nova Elite/Nova Pro Omni/Nova 7 Gen2's `restore_factory_default`, all previously declared in their device YAML but unreachable from D-Bus. GUI wiring (a "Pair"/"Factory reset" button) not included in this pass.
 
 ### Changed
 
