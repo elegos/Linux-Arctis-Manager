@@ -87,9 +87,11 @@ This keeps the checklist honest and makes blocked work immediately visible witho
   - [ ] [E7-S3] Arctis Nova Pro (wired)
   - [ ] [E7-S4] Arctis Nova 5 and Nova Elite
   - [ ] [E7-S5] Arctis 7+ family
+    > Not done here: RF/BT `pairing_mode` (found in the spec, all tiers) has no D-Bus exposure — the DSL has no "fire and forget action" primitive yet, only value-bearing settings and internal lifecycle calls. Struct/API are declared and ready to dispatch once that lands. Everything else in the story (mic, sidetone, EQ, battery, chatmix, connection sync) is complete and tested.
   - [x] [E7-S6] Bootloader and upgrade PID registration
   - [ ] [E7-S7] Device compatibility matrix
   - [ ] [E7-S8] Nova 5 parametric EQ
+  - [ ] [E7-S9] Action-command DSL primitive
 - [ ] **[E8] OLED display** *(stretch)*
   - [ ] [E8-S1] `draw_bitmap` API
   - [ ] [E8-S2] `reload_display` API
@@ -338,6 +340,7 @@ Extend coverage to all Arctis headset families present in the official spec, sta
 
 - **[E7-S5] Arctis 7+ family**
   Translate the existing `arctis_7_plus.yaml` and verify against the spec files for the 7+ and its variants.
+  > Done as **three** device files, not one, and not the four flat variants v2 used — the raw spec revealed three genuinely different capability tiers, not four cosmetic skins: `arctis_7_plus.yaml` (standard `0x220E` + Destiny 2 skin `0x2236`, full: chatmix + sidetone + 10-band graphic EQ + mic volume + muted-mic brightness), `arctis_7x_plus.yaml` (Xbox `0x2216`: no hardware chatmix — the console mixes it), `arctis_7p_plus.yaml` (PlayStation `0x2212`: no chatmix *and* no sidetone struct at all). v2 exposed the same settings uniformly across all four PIDs, which would be a silent no-op on 7X/7P for chatmix and, on 7P, for sidetone too. Splitting was needed because `device.variants` only supports one shared `capabilities:` list per file — there is no way to say "this PID variant lacks capability X" inside a single device file with the current schema. v2 also never exposed mic volume, the 10-band EQ, or muted-mic brightness for this family at all (write-only structs with no readback API — nothing to poll, relies on the engine's own settings persistence). EQ formula is graphic (fixed-frequency, gain-only, like Nova Pro's) but with different constants (±12 dB / 0–48 firmware range vs Nova Pro's ±10 dB / 0–40) — added as a second near-duplicate builtin (`builtin:eq_gains_7plus`) rather than generalising the existing one; a third device needing yet another offset/clamp pair should prompt actually generalising it. `command_interface`/`sync_interface` again taken from v2 (interface 3 for both — this family's v2 config listens on 3 only, not the spec's declared sync-interface 5 either), unverified on real hardware, same caveat as Nova 5.
 
 - **[E7-S6] Bootloader and upgrade PID registration** — Done. `nova_pro_wireless.yaml`'s two variants now carry `bootloader_pid` (`0x12E0` → `0x12E1`, `0x12E5` → `0x12E7`, from the real spec). Engine-side: new `find_bootloader_variant` (`engine/src/main.rs`) checked at both the startup device scan and the runtime hotplug-add path, before the normal `find_config` PID match; a hit skips `device_init`/`DeviceEntry` registration entirely (so it's automatically absent from `GetStatus`/`GetSettings`, no separate suppression logic needed) and sends a new `DeviceFirmwareUpdateMode` signal (`Status` D-Bus interface) instead. Unit-tested (`engine/src/main.rs`'s `tests` module).
   > Not done here: the Xbox White variant (`0x225D`, its bootloader PID `0x225F` confirmed in the same spec) is missing from `nova_pro_wireless.yaml` entirely — a pre-existing gap unrelated to this story, since v2.4.1 shipped 225D support. Left for whoever picks that variant back up.
@@ -347,6 +350,9 @@ Extend coverage to all Arctis headset families present in the official spec, sta
 
 - **[E7-S8] Nova 5 parametric EQ**
   The Nova 5 family's EQ is a 10-band *parametric* EQ (per-band frequency, filter type, gain, and Q factor — commands `0x33`/`0x34` write, `0xA5` preset name, `0xA6` read preset names), a different shape from the Nova Pro family's fixed-frequency graphic EQ (`builtin:custom_eq_gains`, [E6-S3]). Needs: a new struct shape for a parametric EQ band, a new Rust `payload_transform` builtin to serialise it, and — once implemented — an `init` lifecycle call resetting it to flat (matching the no-Sonar/flat-EQ-on-init convention used elsewhere) plus removal of the `eq_data_raw` placeholder bytes reserved for it in `audio_settings` ([E7-S4]). Likely relevant beyond Nova 5 — Nova 3/4 look like they may share the same parametric scheme, worth checking when picked up.
+
+- **[E7-S9] Action-command DSL primitive**
+  Found on the Arctis 7+ family ([E7-S5]): a `pairing_mode` write (`0x03`, mode 0/1) that triggers RF/BT pairing — a one-shot fire-and-forget command, not a persisted value like every other struct the DSL currently models. The DSL has `apis:`/`structs:` for value-bearing settings (read/write, `sync_read`-able) but nothing for "run this command now" with no associated state. Needs: a way to mark a struct as an action (vs. a setting) in the YAML, and a D-Bus method (or a convention on `SetSettings`) to trigger it from the GUI. Check other device families for the same pattern before designing this narrowly around pairing.
 
 ---
 
