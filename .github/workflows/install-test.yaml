@@ -158,6 +158,17 @@ jobs:
           set -e
           case "${{ matrix.family }}" in
             arch)
+              # CachyOS's pacman sandboxes install-scriptlet execution in an
+              # isolated network namespace; Docker's default container
+              # capabilities can't create one ("could not isolate the
+              # network: Operation not permitted"), so it refuses to run
+              # lam.install's post_install (the setcap step) at all instead
+              # of proceeding unsandboxed. A real CachyOS machine has normal
+              # namespace support and never hits this — CI-only workaround,
+              # not something to weaken in the package itself.
+              if ! grep -q '^DisableSandboxNetwork' /etc/pacman.conf; then
+                sed -i '/^\[options\]/a DisableSandboxNetwork' /etc/pacman.conf
+              fi
               pacman -Sy --noconfirm
               pacman -U --noconfirm /pkg/*.pkg.tar.zst
               ;;
