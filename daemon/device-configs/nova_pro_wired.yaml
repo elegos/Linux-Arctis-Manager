@@ -1,0 +1,45 @@
+extends: base_arctis_nova_pro
+
+# All three PIDs are protocol-identical per the raw spec (only firmware
+# target versions and product naming differ) — confirmed by diff, unlike the
+# Arctis 7+ family. `0x12FA` ("v2") is a firmware-revision successor to
+# `0x12CB` (its own spec even sets get-main-product-id back to 0x12CB,
+# suggesting continuity of the same physical unit across a major firmware
+# update, similar to the Nova 7 "upgrade" pattern) — v2 never covered it.
+
+device:
+  name: "SteelSeries Arctis Nova Pro"
+  vendor_id: 0x1038
+
+  # Unlike Nova 5/Arctis 7+, this one has no discrepancy to flag: the vendor
+  # spec's declared sync-interface (4) matches v2's real hardware finding for
+  # both command and listen, and matches the already-shipped, real-hardware-
+  # verified Nova Pro Wireless's own command_interface/sync_interface (also
+  # both 4). v2 still used the endpoint-0/control-transfer write encoding
+  # here too; per the note on Nova 5/Arctis 7+, that's expected to be
+  # transparent through /dev/hidraw.
+  variants:
+    - product_id: 0x12CB
+      name: "Arctis Nova Pro"
+      bootloader_pid: 0x12CC
+    - product_id: 0x12FA
+      name: "Arctis Nova Pro (v2)"
+      bootloader_pid: 0x12FB
+    - product_id: 0x12CD
+      name: "Arctis Nova Pro (Xbox)"
+      bootloader_pid: 0x12CF
+
+  hid:
+    usage_page: 0xFFC0
+    usage: 0x0001
+    command_interface:
+      interface: 4
+    sync_interface:
+      interface: 4
+      usage_page: 0xFF00
+      usage: 0x0001
+
+  capabilities:
+    - chatmix
+    - custom_eq
+    - microphone

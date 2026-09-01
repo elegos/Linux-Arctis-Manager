@@ -1,0 +1,305 @@
+# Wired GameDAC sibling of base_arctis_nova_pro_wireless.yaml — same DSP/EQ
+# chip family (report_id 0x06, chunk_size 64, identical ±10dB/0-40 gain
+# formula and identical dim-timer enum), reuses that base's builtins as-is
+# rather than duplicating them. No battery/Bluetooth/wireless-mode structs —
+# this unit is wired, always-on.
+
+transforms:
+  connection_status_to_label:
+    type: case_int_to_str
+    default: UNKNOWN
+    values: {0: NOT_PAIRED_NOT_SEARCHING, 1: NOT_PAIRED_SEARCHING, 2: PAIRED_NOT_CONNECTED, 3: PAIRED_CONNECTED}
+
+  gain_from_device:
+    type: case_int_to_int
+    default: 0
+    values: {1: 0, 2: 1}
+
+  timer_enum_to_minutes:
+    type: case_int_to_int
+    default: 1
+    values: {0: 0, 1: 1, 2: 5, 3: 10, 4: 15, 5: 30, 6: 60}
+
+structs:
+  save_to_flash:
+    - {name: report_id, type: uint8, constant: 0x06}
+    - {name: command,   type: uint8, constant: 0x09}
+
+  set_sonar_present:
+    - {name: report_id,  type: uint8, constant: 0x06}
+    - {name: command,    type: uint8, constant: 0x8D}
+    - {name: is_present, type: uint8, range: [0, 1]}
+
+  software_chatmix_status:
+    - {name: report_id, type: uint8, constant: 0x06}
+    - {name: command,   type: uint8, constant: 0x49}
+    - {name: status,    type: uint8, range: [0, 1]}
+
+  high_gain:
+    - {name: report_id,   type: uint8, constant: 0x06}
+    - {name: command,     type: uint8, constant: 0x27}
+    - {name: device_gain, type: uint8, range: [0, 1]}
+
+  mic_volume:
+    - {name: report_id,  type: uint8, constant: 0x06}
+    - {name: command,    type: uint8, constant: 0x37}
+    - {name: mic_volume, type: uint8, range: [1, 10]}
+
+  sidetone:
+    - {name: report_id, type: uint8, constant: 0x06}
+    - {name: command,   type: uint8, constant: 0x39}
+    - {name: sidetone,  type: uint8, range: [0, 3]}
+
+  # Real semantics confirmed directly in the vendor spec's own comment ("[1]
+  # ChatMix mode [2] Stream Mix mode") — same as Nova Pro Wireless. v2's
+  # config guessed "Speaker"/"Stream" for these two values; that looks like a
+  # mislabel from reverse-engineering without the vendor comment, corrected
+  # here.
+  line_out_mode:
+    - {name: report_id,     type: uint8, constant: 0x06}
+    - {name: command,       type: uint8, constant: 0x43}
+    - {name: line_out_mode, type: uint8, range: [1, 2], values_mapping: {"1": "chatmix", "2": "stream"}}
+
+  stream_mix:
+    - {name: report_id,   type: uint8, constant: 0x06}
+    - {name: command,     type: uint8, constant: 0x47}
+    - {name: stream_main, type: uint8, range: [0, 100]}
+    - {name: unused,      type: uint8, constant: 0x00}
+    - {name: stream_aux,  type: uint8, range: [0, 100]}
+    - {name: stream_mic,  type: uint8, range: [0, 100]}
+
+  custom_eq:
+    - {name: report_id, type: uint8,   constant: 0x06}
+    - {name: command,   type: uint8,   constant: 0x33}
+    - {name: gain1,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain2,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain3,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain4,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain5,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain6,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain7,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain8,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain9,     type: float32, range: [-10.0, 10.0]}
+    - {name: gain10,    type: float32, range: [-10.0, 10.0]}
+
+  selected_eq_preset:
+    - {name: report_id, type: uint8, constant: 0x06}
+    - {name: command,   type: uint8, constant: 0x2E}
+    - name: eq_preset
+      type: uint8
+      range: [0, 18]
+      values_mapping:
+        "0":  flat
+        "1":  bass_boost
+        "2":  focus
+        "3":  smiley
+        "4":  custom
+        "5":  apex_legends
+        "6":  baldurs_gate_3
+        "7":  cod_mwii
+        "8":  cod_warzone_2
+        "9":  destiny_2
+        "10": diablo_iv
+        "11": fortnite
+        "12": fps_footsteps
+        "13": gta_v
+        "14": minecraft
+        "15": overwatch_2
+        "16": pubg
+        "17": rainbow_six_siege
+        "18": rocket_league
+
+  dim_timer:
+    - {name: report_id, type: uint8, constant: 0x06}
+    - {name: command,   type: uint8, constant: 0x83}
+    - {name: dim_timer, type: uint8, range: [0, 60]}
+
+  oled_brightness:
+    - {name: report_id,       type: uint8, constant: 0x06}
+    - {name: command,         type: uint8, constant: 0x85}
+    - {name: oled_brightness, type: uint8, range: [1, 10]}
+
+  # Bulk read. `station_volume`/`audio_input` are the GameDAC's physical
+  # volume knob position and input-source selector — read-only, no write API
+  # exists for either in the spec. No sync_event pushes changes to either
+  # live either: v2's config assumed a separate live-push report
+  # (`starts_with: 0x0725`) for the knob, but no such case exists in
+  # `translate_sync_data` here — only the value at connect/reconnect time via
+  # this struct. Likely OS-level (HID consumer-control) volume on real
+  # hardware, outside this vendor-specific interface entirely; unconfirmed.
+  audio_settings:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x06}
+      - {name: command,   type: uint8, constant: 0x20}
+    incoming:
+      - {name: report_id,     type: uint8, constant: 0x06}
+      - {name: command,       type: uint8, constant: 0x20}
+      - {name: audio_input,   type: uint8, range: [0, 3]}
+      - {name: station_volume, type: uint8, range: [0, 56]}
+      - {name: device_gain,   type: uint8, range: [1, 2]}
+      - {name: surround,      type: uint8, range: [0, 1]}
+      - {name: eq_preset,     type: uint8, range: [0, 18]}
+      - {name: custom_eq_band1,  type: uint8, range: [0, 40]}
+      - {name: custom_eq_band2,  type: uint8, range: [0, 40]}
+      - {name: custom_eq_band3,  type: uint8, range: [0, 40]}
+      - {name: custom_eq_band4,  type: uint8, range: [0, 40]}
+      - {name: custom_eq_band5,  type: uint8, range: [0, 40]}
+      - {name: custom_eq_band6,  type: uint8, range: [0, 40]}
+      - {name: custom_eq_band7,  type: uint8, range: [0, 40]}
+      - {name: custom_eq_band8,  type: uint8, range: [0, 40]}
+      - {name: custom_eq_band9,  type: uint8, range: [0, 40]}
+      - {name: custom_eq_band10, type: uint8, range: [0, 40]}
+      - {name: mic_volume,    type: uint8, range: [1, 10]}
+      - {name: sidetone,      type: uint8, range: [0, 3]}
+      - {name: line_out_mode, type: uint8, range: [1, 2]}
+      - {name: chatmix_game,  type: uint8, range: [0, 100]}
+      - {name: chatmix_chat,  type: uint8, range: [0, 100]}
+      - {name: stream_main,   type: uint8, range: [0, 100]}
+      - {name: stream_unused, type: uint8}
+      - {name: stream_aux,    type: uint8, range: [0, 100]}
+      - {name: stream_mic,    type: uint8, range: [0, 100]}
+
+  # No home_screen_type/sonar_present/home_screen_mic_mute fields here —
+  # unlike Nova Pro Wireless, this device has no home-screen mode setting.
+  ux_settings:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x06}
+      - {name: command,   type: uint8, constant: 0x80}
+    incoming:
+      - {name: report_id,       type: uint8, constant: 0x06}
+      - {name: command,         type: uint8, constant: 0x80}
+      - {name: dim_timer,       type: uint8, range: [0, 6]}
+      - {name: oled_brightness, type: uint8, range: [1, 10]}
+      - {name: idle_brightness, type: uint8, range: [1, 10]}
+
+apis:
+  save_to_flash:
+    write: {transport: HID_IO, chunk_size: 64}
+
+  set_sonar_present:
+    write: {transport: HID_IO, chunk_size: 64}
+
+  software_chatmix_status:
+    write: {transport: HID_IO, chunk_size: 64}
+
+  high_gain:
+    write:
+      transport: HID_IO
+      chunk_size: 64
+      payload_transform: "builtin:high_gain_write"
+
+  mic_volume:
+    write: {transport: HID_IO, chunk_size: 64}
+
+  sidetone:
+    write: {transport: HID_IO, chunk_size: 64}
+
+  line_out_mode:
+    write: {transport: HID_IO, chunk_size: 64}
+
+  stream_mix:
+    write: {transport: HID_IO, chunk_size: 64}
+
+  custom_eq:
+    write:
+      transport: HID_IO
+      chunk_size: 64
+      payload_transform: "builtin:custom_eq_gains"
+
+  selected_eq_preset:
+    write: {transport: HID_IO, chunk_size: 64}
+
+  dim_timer:
+    write:
+      transport: HID_IO
+      chunk_size: 64
+      payload_transform: "builtin:dim_timer_write"
+
+  oled_brightness:
+    write: {transport: HID_IO, chunk_size: 64}
+
+  audio_settings:
+    read: {transport: HID_IO, chunk_size: 64}
+
+  ux_settings:
+    read: {transport: HID_IO, chunk_size: 64}
+
+sync_events:
+  0x27:
+    emit: high_gain_changed
+    fields:
+      - {name: device_gain, byte: 2, transform: gain_from_device, display_type: on_off}
+
+  0x2E:
+    emit: eq_preset_changed
+    fields:
+      - {name: eq_preset, byte: 2}
+
+  0x37:
+    emit: mic_volume_changed
+    fields:
+      - {name: mic_volume, byte: 2}
+
+  0x39:
+    emit: sidetone_changed
+    fields:
+      - {name: sidetone, byte: 2}
+
+  0x43:
+    emit: line_out_mode_changed
+    fields:
+      - {name: line_out_mode, byte: 2}
+
+  0x45:
+    emit: chatmix_changed
+    fields:
+      - {name: chatmix_game, byte: 2}
+      - {name: chatmix_chat, byte: 3}
+
+  0x47:
+    emit: stream_mix_changed
+    fields:
+      - {name: stream_main, byte: 2}
+      - {name: stream_aux,  byte: 4}
+      - {name: stream_mic,  byte: 5}
+
+  0x83:
+    emit: dim_timer_changed
+    fields:
+      - {name: dim_timer, byte: 2, transform: timer_enum_to_minutes}
+
+  0x85:
+    emit: oled_brightness_changed
+    fields:
+      - {name: oled_brightness, byte: 2, display_type: percentage}
+
+sync_read:
+  - struct: audio_settings
+    maps:
+      - {emit: high_gain_changed,    field: device_gain,   transform: gain_from_device, display_type: on_off}
+      - {emit: eq_preset_changed,    field: eq_preset}
+      - {emit: mic_volume_changed,   field: mic_volume}
+      - {emit: sidetone_changed,     field: sidetone}
+      - {emit: line_out_mode_changed, field: line_out_mode}
+      - {emit: station_volume_changed, field: station_volume, display_type: percentage}
+      - {emit: surround_changed,     field: surround,      display_type: on_off}
+      - emit: stream_mix_changed
+        fields: [stream_main, stream_aux, stream_mic]
+      - emit: chatmix_changed
+        fields: [chatmix_game, chatmix_chat]
+
+  - struct: ux_settings
+    maps:
+      - {emit: dim_timer_changed,       field: dim_timer,       transform: timer_enum_to_minutes}
+      - {emit: oled_brightness_changed, field: oled_brightness, display_type: percentage}
+
+lifecycle:
+  init:
+    # LAM does not provide SteelSeries Sonar.
+    - call: disable_sonar
+    - call: reset_eq_preset
+    - call: enable_chatmix
+  shutdown:
+    - call: disable_chatmix
+    - call: disable_sonar
+    - call: save_to_flash
