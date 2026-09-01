@@ -23,7 +23,6 @@ Cross-checked against SteelSeries' own device specs, not just the previous v2 li
 | Device | Supported | Notes |
 |---|:---:|---|
 | Arctis 1 Wireless (+ Xbox, + Cyberpunk 2077 Edition) | ❌ | No hardware EQ (fixed on the AVNERA DSP chip, not adjustable); no ChatMix; no ANC. |
-| Arctis 3 Console Edition | ❌ | Not present in the spec archive we've surveyed — hardware capabilities unconfirmed. |
 | Arctis 5 (+ 2018, Dota 2 Edition, PUBG 2018 Edition) | ❌ | No ChatMix; no ANC. |
 | Arctis 7 (+ 2019 refresh) | ❌ | No hardware EQ (2018 original has none at all; 2019 refresh has a fixed AVNERA curve, not adjustable); no ANC. |
 | Arctis 7+ / Destiny 2 Edition | ✅ | No ANC. |
