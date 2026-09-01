@@ -46,7 +46,7 @@ GUI_WRAPPER_OUT := packaging/scripts/lam-gui
 DEVICE_YAMLS := $(wildcard daemon/device-configs/*.yaml)
 
 .PHONY: build build-python generate-services generate-gui-wrapper \
-        install install-python install-helper uninstall enable disable \
+        install install-python uninstall enable disable \
         container-build-rpm container-build-deb container-build-pkg container-build-all \
         container-refresh-fedora container-refresh-debian container-refresh-arch container-refresh-all \
         help
