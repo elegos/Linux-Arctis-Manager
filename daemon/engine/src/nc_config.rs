@@ -63,6 +63,12 @@ impl Default for CompressorConfig {
 pub struct NcConfig {
     /// "off" disables NC entirely; any other value enables it.
     pub preset: String,
+    /// When `true` *and* `active()`, the daemon re-applies this config on
+    /// its own startup (and on device reconnect) instead of staying
+    /// inactive until a client calls `SetNCSettings` again — see
+    /// `vc_config::VcLadspaConfig::autostart`'s doc comment for the full
+    /// rationale (identical tri-state behavior, shared across NC and VC).
+    pub autostart: bool,
     /// Stable ALSA `node.name` of the physical mic source to process.
     pub source_id: String,
     pub hpf_enabled: bool,
@@ -74,6 +80,7 @@ impl Default for NcConfig {
     fn default() -> Self {
         Self {
             preset: "off".to_owned(),
+            autostart: false,
             source_id: String::new(),
             hpf_enabled: false,
             gate: GateConfig::default(),
@@ -100,6 +107,20 @@ mod tests {
     }
 
     #[test]
+    fn autostart_defaults_to_false() {
+        assert!(!NcConfig::default().autostart);
+    }
+
+    #[test]
+    fn autostart_missing_from_json_deserializes_to_false() {
+        // Old persisted configs written before `autostart` existed —
+        // `#[serde(default)]` must fill it in as `false`, not fail to parse.
+        let cfg: NcConfig = serde_json::from_str(r#"{"preset": "on"}"#).unwrap();
+        assert!(!cfg.autostart);
+        assert_eq!(cfg.preset, "on");
+    }
+
+    #[test]
     fn active_when_preset_is_not_off() {
         let cfg = NcConfig {
             preset: "on".to_owned(),
@@ -121,6 +142,7 @@ mod tests {
     fn roundtrip_full_config() {
         let cfg = NcConfig {
             preset: "custom".to_owned(),
+            autostart: true,
             source_id: "alsa_input.usb-SteelSeries-00.mono-fallback".to_owned(),
             hpf_enabled: true,
             gate: GateConfig {

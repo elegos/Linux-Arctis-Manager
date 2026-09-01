@@ -412,10 +412,52 @@ pub fn find_onnxruntime_dylib(vendor: GpuVendor) -> Option<(PathBuf, OnnxRuntime
 // libraries with no reliable system package (same reasoning already applied
 // to `torch`).
 
-/// The one relevant install command for cuDNN — see the module-level note
-/// above for why this doesn't need per-distro branching like
-/// [`pick_tutorial`] does.
-pub const CUDNN_PIP_HINT: &str = "pip install --user nvidia-cudnn-cu12";
+/// cuDNN's pip wheels are versioned by CUDA *major* version
+/// (`nvidia-cudnn-cu11`/`nvidia-cudnn-cu12`/...) and are not
+/// interchangeable — installing the cu12 wheel on a CUDA 11 system is the
+/// same class of silent ABI-mismatch failure this whole detection exists to
+/// avoid. `nvidia-smi`'s plain-text header always prints a `CUDA Version:
+/// X.Y` line (the max version the installed *driver* supports, not
+/// necessarily a toolkit install — reliable even on a system with no CUDA
+/// toolkit at all, only the driver, which is exactly the pip-wheel-only
+/// case this function exists for). Pure parse, kept separate from the
+/// `nvidia-smi` invocation so it's testable without a real GPU.
+fn parse_cuda_major_version(nvidia_smi_output: &str) -> Option<u32> {
+    let after = nvidia_smi_output.split("CUDA Version:").nth(1)?;
+    let ver_token = after.split_whitespace().next()?;
+    ver_token.split('.').next()?.parse().ok()
+}
+
+/// `None` when `nvidia-smi` is missing/fails/unparseable (no CUDA toolkit
+/// installed, non-NVIDIA GPU, ...) — callers fall back to the most common
+/// recent case (see [`cudnn_pip_package`]).
+async fn detect_cuda_major_version() -> Option<u32> {
+    let output = tokio::process::Command::new("nvidia-smi")
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_cuda_major_version(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// The `nvidia-cudnn-cuXX` pip package name for `cuda_major`, or the cu12
+/// build (covers the large majority of systems with a reasonably recent
+/// driver, driver 525+) when the version couldn't be determined.
+fn cudnn_pip_package(cuda_major: Option<u32>) -> String {
+    format!("nvidia-cudnn-cu{}", cuda_major.unwrap_or(12))
+}
+
+/// The install command to show the user before [`install_cudnn`] — detects
+/// the right CUDA-major-versioned wheel first, so what's shown and what
+/// actually runs on consent are always the same command.
+pub async fn cudnn_install_command() -> String {
+    format!(
+        "pip install --user {}",
+        cudnn_pip_package(detect_cuda_major_version().await)
+    )
+}
 
 /// Finds an already-installed `libcudnn.so*`: common system/CUDA-toolkit
 /// locations, plus `pip install --user nvidia-cudnn-cuXX`'s
@@ -433,6 +475,43 @@ pub fn find_libcudnn() -> Option<PathBuf> {
     ];
     candidates.extend(scan_pip_site_packages("nvidia/cudnn/lib", "libcudnn.so"));
     candidates.into_iter().find(|p| p.is_file())
+}
+
+/// `true` when `found`'s onnxruntime is CUDA-capable but cuDNN isn't
+/// resolvable on disk anywhere `find_libcudnn` looks — the exact condition
+/// that hard-fails a real session the first time it tries to run a kernel,
+/// live-reproduced via `rvc_live_chain.rs`'s inference loop ("cuDNN is
+/// unavailable ... dlopen failed for libcudnn.so"). Shared by
+/// `DetectOnnxRuntime` (explicit user-triggered re-probe, in the install
+/// dialog) and `GetVCCapabilities` (proactive — surfaced in the main VC
+/// panel even if the user never opens that dialog, which is what let this
+/// failure reach a live session silently before this existed).
+pub fn cudnn_missing(found: Option<&(PathBuf, OnnxRuntimeCapability)>) -> bool {
+    found.is_some_and(|(_, cap)| *cap == OnnxRuntimeCapability::Cuda) && find_libcudnn().is_none()
+}
+
+/// Installs cuDNN via the one relevant `pip` command
+/// ([`cudnn_install_command`]) — only ever called after the GUI has shown
+/// that exact command and the user consented (`InstallCudnn` in
+/// `dbus.rs`), same trust model as `vc_export::install_export_deps`.
+/// Unlike that function this needs no venv: `pip install --user` puts the
+/// wheel under the running user's own site-packages, and
+/// `engine::init_runtime`'s `preload_cudnn` already knows to search there
+/// (`scan_pip_site_packages`, shared by both). Re-detects the CUDA major
+/// version itself rather than taking it as a parameter, so it always
+/// installs the same package it would currently recommend.
+pub async fn install_cudnn() -> Result<(), String> {
+    let package = cudnn_pip_package(detect_cuda_major_version().await);
+    let output = tokio::process::Command::new("python3")
+        .args(["-m", "pip", "install", "--user", &package])
+        .output()
+        .await
+        .map_err(|e| format!("failed to run python3 -m pip: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("pip install failed: {}", stderr.trim()));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -620,7 +699,66 @@ mod tests {
         let vendor = detect_gpu_vendor();
         let _ = detect_distro_id();
         let _ = detect_package_manager();
-        let _ = find_onnxruntime_dylib(vendor);
+        let found = find_onnxruntime_dylib(vendor);
         let _ = find_libcudnn();
+        let _ = cudnn_missing(found.as_ref());
+    }
+
+    #[test]
+    fn cudnn_missing_false_when_no_onnxruntime_found() {
+        assert!(!cudnn_missing(None));
+    }
+
+    #[test]
+    fn cudnn_missing_false_for_non_cuda_capability() {
+        let found = (
+            PathBuf::from("/fake/libonnxruntime.so"),
+            OnnxRuntimeCapability::CpuOnly,
+        );
+        assert!(!cudnn_missing(Some(&found)));
+    }
+
+    // ── CUDA major version detection (pure parse) ───────────────────────
+
+    #[test]
+    fn parse_cuda_major_version_from_real_header_line() {
+        let out = "\
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 550.144.03             Driver Version: 550.144.03     CUDA Version: 12.4     |
+|-----------------------------------------+----------------------+----------------------+";
+        assert_eq!(parse_cuda_major_version(out), Some(12));
+    }
+
+    #[test]
+    fn parse_cuda_major_version_double_digit_major() {
+        let out = "Driver Version: 999.99.99     CUDA Version: 13.0";
+        assert_eq!(parse_cuda_major_version(out), Some(13));
+    }
+
+    #[test]
+    fn parse_cuda_major_version_none_when_absent() {
+        assert_eq!(parse_cuda_major_version("command not found"), None);
+    }
+
+    #[test]
+    fn parse_cuda_major_version_none_on_garbage_after_label() {
+        assert_eq!(parse_cuda_major_version("CUDA Version: N/A"), None);
+    }
+
+    #[test]
+    fn cudnn_pip_package_uses_detected_major() {
+        assert_eq!(cudnn_pip_package(Some(11)), "nvidia-cudnn-cu11");
+        assert_eq!(cudnn_pip_package(Some(12)), "nvidia-cudnn-cu12");
+    }
+
+    #[test]
+    fn cudnn_pip_package_falls_back_to_cu12_when_undetected() {
+        assert_eq!(cudnn_pip_package(None), "nvidia-cudnn-cu12");
+    }
+
+    #[tokio::test]
+    async fn detect_cuda_major_version_runs_without_panicking_on_this_machine() {
+        let _ = detect_cuda_major_version().await;
+        let _ = cudnn_install_command().await;
     }
 }

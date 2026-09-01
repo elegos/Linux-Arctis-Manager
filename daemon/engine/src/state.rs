@@ -97,6 +97,20 @@ pub enum SignalEvent {
     VCExportComplete {
         json: String,
     },
+    VCCudnnInstallProgress {
+        message: String,
+    },
+    VCCudnnInstallComplete {
+        json: String,
+    },
+    /// The live RVC chain failed to start or died — surfaced to the GUI
+    /// instead of only the daemon log, so a `SetVCSettings` that
+    /// synchronously returned `true` (model/onnx/onnxruntime all resolved
+    /// fine) but then failed asynchronously (cuDNN missing, a corrupt
+    /// model, ...) isn't silent. See `rvc_live_chain.rs`'s module doc.
+    VCLiveChainError {
+        message: String,
+    },
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

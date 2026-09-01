@@ -375,6 +375,62 @@ pub fn parse_audio_sources(json: &str, default_id: &str) -> Vec<AudioSource> {
         .collect()
 }
 
+/// Verifies (and, if needed, forcibly corrects via `pactl move-source-output`)
+/// that the most recent capture stream tagged `media.role == role` is
+/// actually linked to `expected_target` (a numeric object index, from
+/// [`resolve_source_numeric_id`]). Found live: WirePlumber's own
+/// link-resolution can still land a stream on the wrong node — reproduced
+/// with `rvc_live_chain.rs`'s `pw-record`, correct numeric `--target`,
+/// dedicated `--media-role`, and no stale `module-stream-restore` entry —
+/// even though `pactl move-source-output` right after setup reliably
+/// corrects it and the correction *stays put* (confirmed live: still
+/// correct, and real inference running, seconds later). The exact
+/// WirePlumber-internal cause wasn't pinned down (the leading suspicion is
+/// a race with other graph changes happening at the same time, e.g.
+/// `mic_router` also touching a node moments later — hence the delay
+/// before checking), so this is a pragmatic direct correction rather than
+/// a fix at the protocol level. Best-effort: does nothing if no matching
+/// stream is found or `pactl` itself fails.
+// Takes ownership (`String` rather than `&str`) so it can be handed to
+// `tokio::spawn` directly, running independently of (and outliving) its
+// caller's own stack frame — see `rvc_live_chain.rs`'s call site.
+pub async fn ensure_source_output_linked(role: &'static str, expected_target: String) {
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let Some((index, actual_source)) = find_source_output_by_role(role).await else {
+        return;
+    };
+    if actual_source == expected_target {
+        return;
+    }
+    warn!(
+        "audio: source-output {index} (role={role}) linked to {actual_source}, \
+         expected {expected_target} — correcting"
+    );
+    let _ = pactl(&["move-source-output", &index.to_string(), &expected_target]).await;
+}
+
+async fn find_source_output_by_role(role: &str) -> Option<(u32, String)> {
+    let json = pactl(&["-f", "json", "list", "source-outputs"])
+        .await
+        .ok()?;
+    parse_source_output_by_role(&json, role)
+}
+
+/// Pure parse half of [`find_source_output_by_role`], so it's testable
+/// without a running PipeWire.
+fn parse_source_output_by_role(json: &str, role: &str) -> Option<(u32, String)> {
+    let entries: serde_json::Value = serde_json::from_str(json).ok()?;
+    for entry in entries.as_array()? {
+        if entry["properties"]["media.role"].as_str() != Some(role) {
+            continue;
+        }
+        let index = entry["index"].as_u64()? as u32;
+        let source = entry["source"].as_u64()?.to_string();
+        return Some((index, source));
+    }
+    None
+}
+
 /// Enumerate all physical PipeWire input sources, flagging the current default.
 /// Returns an empty list if `pactl` is unavailable or returns an error.
 pub async fn list_audio_sources() -> Vec<AudioSource> {
@@ -386,6 +442,46 @@ pub async fn list_audio_sources() -> Vec<AudioSource> {
             vec![]
         }
     }
+}
+
+/// Resolves a source's stable `node.name` to its *current* numeric object
+/// index/serial. `pw-record --target <name>` was found live to sometimes
+/// mis-resolve to an entirely different node — reproduced consistently on
+/// the real dev machine: `--target
+/// alsa_input.usb-SteelSeries_Arctis_Nova_Pro_Wireless-00.mono-fallback`
+/// (the real physical mic, correctly set as the stream's own
+/// `target.object` property) actually linked to `Arctis_Manager_Mic`
+/// instead — silently, no error, capturing that node's own real output
+/// instead of the physical mic (which, once `Arctis_Manager_Mic` was
+/// re-pointed at the RVC chain's own output by `mic_router`, meant the
+/// live chain was reading back its own — silent — output: a second,
+/// differently-shaped feedback loop from the one already fixed via the
+/// GUI source-picker, this one at the PipeWire link-resolution level
+/// rather than the source-selection level). Passing the numeric index via
+/// `--target` instead was confirmed to resolve reliably. `None` if `name`
+/// isn't currently found — callers fall back to the name (today's
+/// behavior) rather than failing outright.
+pub async fn resolve_source_numeric_id(name: &str) -> Option<u32> {
+    let json = pactl(&["-f", "json", "list", "sources"]).await.ok()?;
+    parse_source_numeric_id(&json, name)
+}
+
+/// Pure parse half of [`resolve_source_numeric_id`], so it's testable
+/// without a running PipeWire — same node-name lookup convention as
+/// `mic_router.rs::parse_existing_module` (`properties.node.name`, falling
+/// back to the top-level `name` field for older `pactl` JSON shapes).
+fn parse_source_numeric_id(json: &str, name: &str) -> Option<u32> {
+    let sources: serde_json::Value = serde_json::from_str(json).ok()?;
+    for source in sources.as_array()? {
+        let node_name = source["properties"]["node.name"]
+            .as_str()
+            .or_else(|| source["name"].as_str());
+        if node_name != Some(name) {
+            continue;
+        }
+        return source["index"].as_u64().map(|i| i as u32);
+    }
+    None
 }
 
 /// Find the physical Arctis microphone source (not a virtual/monitor source).
@@ -543,5 +639,60 @@ mod tests {
     fn parse_audio_sources_returns_empty_on_bad_json() {
         assert!(parse_audio_sources("not json", "").is_empty());
         assert!(parse_audio_sources("null", "").is_empty());
+    }
+
+    // ── parse_source_numeric_id ─────────────────────────────────────────
+
+    #[test]
+    fn parse_source_numeric_id_matches_top_level_name() {
+        let json = r#"[{"index": 63188186, "name": "alsa_input.usb-foo.mono-fallback"}]"#;
+        assert_eq!(
+            parse_source_numeric_id(json, "alsa_input.usb-foo.mono-fallback"),
+            Some(63188186)
+        );
+    }
+
+    #[test]
+    fn parse_source_numeric_id_matches_properties_node_name() {
+        let json = r#"[{"index": 42, "properties": {"node.name": "alsa_input.usb-foo"}}]"#;
+        assert_eq!(
+            parse_source_numeric_id(json, "alsa_input.usb-foo"),
+            Some(42)
+        );
+    }
+
+    #[test]
+    fn parse_source_numeric_id_none_when_absent() {
+        let json = r#"[{"index": 1, "name": "something_else"}]"#;
+        assert_eq!(parse_source_numeric_id(json, "not_there"), None);
+    }
+
+    #[test]
+    fn parse_source_numeric_id_none_on_bad_json() {
+        assert_eq!(parse_source_numeric_id("not json", "x"), None);
+    }
+
+    // ── parse_source_output_by_role ─────────────────────────────────────
+
+    #[test]
+    fn parse_source_output_by_role_matches_and_reads_source() {
+        let json = r#"[{"index": 42, "source": 63188186,
+            "properties": {"media.role": "production"}}]"#;
+        assert_eq!(
+            parse_source_output_by_role(json, "production"),
+            Some((42, "63188186".to_owned()))
+        );
+    }
+
+    #[test]
+    fn parse_source_output_by_role_none_when_role_absent() {
+        let json = r#"[{"index": 1, "source": 2,
+            "properties": {"media.role": "music"}}]"#;
+        assert_eq!(parse_source_output_by_role(json, "production"), None);
+    }
+
+    #[test]
+    fn parse_source_output_by_role_none_on_bad_json() {
+        assert_eq!(parse_source_output_by_role("not json", "production"), None);
     }
 }
