@@ -650,7 +650,9 @@ fn decide_gate_calibration(leading_samples: &[f32]) -> Option<GateCalibration> {
 /// producing `f32` rather than `i16` since this feeds `Pipeline::convert`
 /// directly instead of a WAV file.
 fn downmix_stereo_f32_bytes(buf: &[u8]) -> Vec<f32> {
-    buf.chunks_exact(8)
+    buf.as_chunks::<8>()
+        .0
+        .iter()
         .map(|c| {
             let l = f32::from_le_bytes([c[0], c[1], c[2], c[3]]);
             let r = f32::from_le_bytes([c[4], c[5], c[6], c[7]]);
