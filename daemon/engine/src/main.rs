@@ -135,6 +135,32 @@ fn find_config(
     None
 }
 
+/// Return the friendly name of the variant whose `bootloader_pid` matches
+/// `pid`, if any device config declares one.
+///
+/// A device re-enumerates on this PID (instead of its normal `product_id`)
+/// while it is in firmware update mode. Such a PID is deliberately absent
+/// from every config's `variants[].product_id`, so `find_config` never
+/// matches it — callers use this to recognise the case distinctly instead of
+/// treating it as a plain unknown device.
+fn find_bootloader_variant(configs: &[Arc<DeviceConfig>], pid: u16) -> Option<String> {
+    configs.iter().find_map(|c| {
+        let device = c.device.as_ref()?;
+        let variant = device
+            .variants
+            .as_ref()?
+            .iter()
+            .find(|v| v.bootloader_pid == Some(pid))?;
+        Some(
+            variant
+                .name
+                .clone()
+                .or_else(|| device.name.clone())
+                .unwrap_or_else(|| format!("{pid:#06x}")),
+        )
+    })
+}
+
 /// Return the path to the hidraw-helper socket.
 pub fn helper_sock_path() -> PathBuf {
     let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
@@ -846,6 +872,16 @@ async fn run_main_loop(
         let iface_s = dev
             .interface_num
             .map_or_else(|| "?".to_string(), |i| i.to_string());
+        if let Some(name) = find_bootloader_variant(&configs, dev.pid) {
+            info!(
+                "device at startup: {} PID={:#06x} is {name} in firmware update mode, \
+                 not running device_init",
+                dev.hidraw_path.display(),
+                dev.pid
+            );
+            let _ = signal_tx.send(SignalEvent::DeviceFirmwareUpdateMode { pid: dev.pid, name });
+            continue;
+        }
         if let Some(cfg) = find_config(&configs, dev.pid, dev.interface_num) {
             let name = cfg
                 .device
@@ -900,6 +936,19 @@ async fn run_main_loop(
                         let iface_s = dev
                             .interface_num
                             .map_or_else(|| "?".to_string(), |i| i.to_string());
+                        if let Some(name) = find_bootloader_variant(&configs, dev.pid) {
+                            info!(
+                                "hotplug add: {} PID={:#06x} is {name} in firmware update \
+                                 mode, not running device_init",
+                                dev.hidraw_path.display(),
+                                dev.pid
+                            );
+                            let _ = signal_tx.send(SignalEvent::DeviceFirmwareUpdateMode {
+                                pid: dev.pid,
+                                name,
+                            });
+                            continue;
+                        }
                         if let Some(cfg) = find_config(&configs, dev.pid, dev.interface_num) {
                             let cmd_iface = cfg
                                 .device
@@ -1033,4 +1082,83 @@ async fn run_main_loop(
     nc_manager::teardown_nc(&mut *nc_runtime.lock().await).await;
     vc_ladspa_chain::teardown_vc_ladspa(&mut *vc_runtime.lock().await).await;
     rvc_live_chain::teardown_rvc(&mut *rvc_live_runtime.lock().await).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use device_config::{DeviceSection, DeviceVariant};
+
+    fn config_with_variants(variants: Vec<DeviceVariant>) -> Arc<DeviceConfig> {
+        Arc::new(DeviceConfig {
+            device: Some(DeviceSection {
+                name: Some("Test Device".to_string()),
+                variants: Some(variants),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn find_bootloader_variant_matches_bootloader_pid() {
+        let configs = vec![config_with_variants(vec![DeviceVariant {
+            name: Some("Test Variant".to_string()),
+            product_id: 0x1234,
+            bootloader_pid: Some(0x1235),
+        }])];
+
+        assert_eq!(
+            find_bootloader_variant(&configs, 0x1235),
+            Some("Test Variant".to_string())
+        );
+    }
+
+    #[test]
+    fn find_bootloader_variant_ignores_normal_product_id() {
+        let configs = vec![config_with_variants(vec![DeviceVariant {
+            name: Some("Test Variant".to_string()),
+            product_id: 0x1234,
+            bootloader_pid: Some(0x1235),
+        }])];
+
+        // 0x1234 is the normal product_id, not the bootloader_pid — must not match.
+        assert_eq!(find_bootloader_variant(&configs, 0x1234), None);
+    }
+
+    #[test]
+    fn find_bootloader_variant_returns_none_for_unknown_pid() {
+        let configs = vec![config_with_variants(vec![DeviceVariant {
+            name: Some("Test Variant".to_string()),
+            product_id: 0x1234,
+            bootloader_pid: Some(0x1235),
+        }])];
+
+        assert_eq!(find_bootloader_variant(&configs, 0x9999), None);
+    }
+
+    #[test]
+    fn find_bootloader_variant_falls_back_to_device_name() {
+        let configs = vec![config_with_variants(vec![DeviceVariant {
+            name: None,
+            product_id: 0x1234,
+            bootloader_pid: Some(0x1235),
+        }])];
+
+        assert_eq!(
+            find_bootloader_variant(&configs, 0x1235),
+            Some("Test Device".to_string())
+        );
+    }
+
+    #[test]
+    fn find_bootloader_variant_none_when_variant_has_no_bootloader_pid() {
+        let configs = vec![config_with_variants(vec![DeviceVariant {
+            name: Some("Test Variant".to_string()),
+            product_id: 0x1234,
+            bootloader_pid: None,
+        }])];
+
+        assert_eq!(find_bootloader_variant(&configs, 0x1234), None);
+    }
 }

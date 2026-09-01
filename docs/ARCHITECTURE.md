@@ -163,7 +163,7 @@ Every device defines two USB Product IDs:
 - **App PID**: used during normal operation.
 - **Bootloader PID**: the device re-enumerates with this PID when entering firmware update mode.
 
-The engine registers both PIDs for each device variant. When the bootloader PID appears, the engine enters a restricted mode: it does not run the init sequence or expose settings on D-Bus, and only accepts firmware-update API calls.
+The engine registers both PIDs for each device variant (`variants[].bootloader_pid` in the YAML). When the bootloader PID appears — at startup or via hotplug — the engine does not run the init sequence or register the device on D-Bus at all (so no settings are exposed); it only emits a `DeviceFirmwareUpdateMode` signal on the `Status` interface so the GUI can warn against unplugging it. The engine does not itself speak the firmware-update protocol — flashing happens through the vendor tool, not this daemon.
 
 Some device families use a third "upgrade" PID for units that have received a major firmware revision that permanently changes their protocol (e.g., Arctis Nova 7 → Nova 7 Gen2). These are treated as distinct device variants with their own YAML file and capability list.
 

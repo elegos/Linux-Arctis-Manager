@@ -6,8 +6,10 @@ device:
   variants:
     - product_id: 0x12E0
       name: "Arctis Nova Pro Wireless"
+      bootloader_pid: 0x12E1
     - product_id: 0x12E5
       name: "Arctis Nova Pro Wireless X"
+      bootloader_pid: 0x12E7
   hid:
     command_interface:
       interface: 4
