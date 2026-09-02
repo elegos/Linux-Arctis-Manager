@@ -1,0 +1,216 @@
+structs:
+  # Every struct here is `report_id=0x00` + a one-byte command + a constant
+  # 0xAA "error-check" byte — this device's whole command shape, confirmed
+  # against the raw spec (`arctis-pro-wireless.device`, which itself
+  # `include`s "siberia-840" for the shared firmware/battery/save_to_flash
+  # APIs and only redefines what's specific to this headset). Unlike Arctis
+  # 9X (same "Arctis 9 family" naming, wildly different hardware), almost
+  # everything here is plain `HID`/`HIDIO` — `AVNERA`/`LIGHTXIO` (this
+  # project's unimplemented transport) is only used by firmware-update and
+  # pairing, both out of scope same as every other device's fw-update path.
+  sidetone:
+    - {name: report_id,   type: uint8, constant: 0x00}
+    - {name: command,     type: uint8, constant: 0x39}
+    - {name: error_check, type: uint8, constant: 0xAA}
+    - {name: value,       type: uint8, range: [0, 9]}
+
+  oled_brightness:
+    - {name: report_id,   type: uint8, constant: 0x00}
+    - {name: command,     type: uint8, constant: 0x85}
+    - {name: error_check, type: uint8, constant: 0xAA}
+    - {name: value,       type: uint8, range: [0, 10]}
+
+  volume_limiter:
+    - {name: report_id,   type: uint8, constant: 0x00}
+    - {name: command,     type: uint8, constant: 0x27}
+    - {name: error_check, type: uint8, constant: 0xAA}
+    - {name: value,       type: uint8, range: [0, 1]}
+
+  off_time:
+    - {name: report_id,   type: uint8, constant: 0x00}
+    - {name: command,     type: uint8, constant: 0x3C}
+    - {name: error_check, type: uint8, constant: 0xAA}
+    - {name: value,       type: uint8, range: [0, 12]}
+
+  mute_mic_brightness:
+    - {name: report_id,   type: uint8, constant: 0x00}
+    - {name: command,     type: uint8, constant: 0x3E}
+    - {name: error_check, type: uint8, constant: 0xAA}
+    - {name: value,       type: uint8, range: [0, 10]}
+
+  bt_startup_mode:
+    - {name: report_id,   type: uint8, constant: 0x00}
+    - {name: command,     type: uint8, constant: 0x62}
+    - {name: error_check, type: uint8, constant: 0xAA}
+    - {name: value,       type: uint8, range: [0, 1]}
+
+  # "0 = duck game audio, 1 = mute game audio" during a BT call.
+  bt_gamemute_pref:
+    - {name: report_id,   type: uint8, constant: 0x00}
+    - {name: command,     type: uint8, constant: 0x63}
+    - {name: error_check, type: uint8, constant: 0xAA}
+    - {name: value,       type: uint8, range: [0, 1]}
+
+  screensaver_mode:
+    - {name: report_id,   type: uint8, constant: 0x00}
+    - {name: command,     type: uint8, constant: 0x89}
+    - {name: error_check, type: uint8, constant: 0xAA}
+    - {name: value,       type: uint8, range: [0, 2]}
+
+  display_timeout:
+    - {name: report_id,   type: uint8, constant: 0x00}
+    - {name: command,     type: uint8, constant: 0x60}
+    - {name: error_check, type: uint8, constant: 0xAA}
+    - {name: value,       type: uint8, range: [3, 60]}
+
+  # DTS Headphone:X toggle. Raw spec declares the state byte with no
+  # `(range ...)` at all (unlike every other setting in this file) — left
+  # unranged rather than guessing it's a plain on/off. The raw spec's own
+  # side effects here also re-sync a Windows-only DTS software component
+  # (`dts_hpx_surround`/`dts_hpx_v2_surround`) — not portable, not modeled.
+  surround:
+    - {name: report_id,   type: uint8, constant: 0x00}
+    - {name: command,     type: uint8, constant: 0x55}
+    - {name: error_check, type: uint8, constant: 0xAA}
+    - {name: state,       type: uint8}
+
+  # 5-band graphic EQ (plain 0-12 integer levels, no biquad math — this
+  # chip does its own onboard filtering) bundled with an EQ-preset selector
+  # in one raw-spec API, but the firmware wants it as two physically
+  # separate HID_IO messages: band data first, then a *different* command
+  # byte (0x2E) carrying just the preset. Modeled as one struct/API pair
+  # (`builtin:arctis_pro_wireless_eq_bands` / `_eq_preset` in
+  # `daemon/device-config/src/builtins.rs` do the splitting) so it's still
+  # one atomic setting from the engine/GUI's point of view — same shape as
+  # the raw spec's own `(extract-bytes payload 0 25)` / `(extract-byte
+  # payload 25)`. The vendor struct also carries a 16-byte per-slot "name"
+  # field, always blank for the live/custom slot (index 6, hence
+  # `eq_index` constant 6) and never read back — the builtin synthesizes
+  # it, it isn't part of this struct at all.
+  equalizer:
+    - {name: report_id,   type: uint8, constant: 0x00}
+    - {name: command,     type: uint8, constant: 0x83}
+    - {name: error_check, type: uint8, constant: 0xAA}
+    - {name: eq_index,    type: uint8, constant: 0x06}
+    - {name: band_100,    type: uint8, range: [0, 12]}
+    - {name: band_300,    type: uint8, range: [0, 12]}
+    - {name: band_900,    type: uint8, range: [0, 12]}
+    - {name: band_2500,   type: uint8, range: [0, 12]}
+    - {name: band_8000,   type: uint8, range: [0, 12]}
+    - {name: preset,      type: uint8, range: [0, 6]}
+
+  # From siberia-840 (shared base every Siberia 840-derived headset uses),
+  # not redefined by this device — battery level as reported by the base
+  # station. No range given in the raw spec; assumed 0-100 percentage like
+  # every other battery reading in this project, not confirmed.
+  battery_status:
+    outgoing:
+      - {name: report_id,   type: uint8, constant: 0x00}
+      - {name: command,     type: uint8, constant: 0x40}
+      - {name: error_check, type: uint8, constant: 0xAA}
+    incoming:
+      - {name: selector,      type: uint8}
+      - {name: battery_level, type: uint8, range: [0, 100]}
+
+  # Also from siberia-840, unmodified.
+  save_to_flash:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x05}
+    - {name: error_check, type: uint8, constant: 0xAA}
+    - {name: profile,   type: uint8, constant: 0x00}
+
+  # Combined settings snapshot, read once on connect. The raw spec's own
+  # `translate_sync_data` also treats this exact shape as a live/pushed
+  # update on the sync interface, diffing each field itself to avoid
+  # resending unchanged values — but never states which report/command ID
+  # identifies that pushed message (unlike every `sync_events:`-keyed
+  # device this project already ships), so that live-push path isn't
+  # wired here. Settings only refresh at connect time via `sync_read:`
+  # below; a change made from the base station's own OLED menu won't
+  # reach this daemon until the next reconnect. Documented gap, not a
+  # silent omission.
+  get_settings:
+    outgoing:
+      - {name: report_id,   type: uint8, constant: 0x00}
+      - {name: command,     type: uint8, constant: 0x12}
+      - {name: error_check, type: uint8, constant: 0xAA}
+    incoming:
+      - {name: report_id,           type: uint8, constant: 0x00}
+      - {name: sidetone,            type: uint8, range: [0, 9]}
+      - {name: volume_limiter,      type: uint8, range: [0, 1]}
+      - {name: off_time,            type: uint8, range: [0, 12]}
+      - {name: preset,              type: uint8, range: [0, 6]}
+      - {name: mute_mic_brightness, type: uint8, range: [0, 10]}
+      - {name: surround,            type: uint8}
+      - {name: oled_brightness,     type: uint8, range: [0, 10]}
+      - {name: padding,             type: bytearray, size: 4}
+      - {name: display_timeout,     type: uint8, range: [3, 60]}
+      - {name: screensaver_mode,    type: uint8, range: [0, 2]}
+      - {name: bt_startup_mode,     type: uint8, range: [0, 1]}
+      - {name: bt_gamemute_pref,    type: uint8, range: [0, 1]}
+      - {name: band_100,            type: uint8, range: [0, 12]}
+      - {name: band_300,            type: uint8, range: [0, 12]}
+      - {name: band_900,            type: uint8, range: [0, 12]}
+      - {name: band_2500,           type: uint8, range: [0, 12]}
+      - {name: band_8000,           type: uint8, range: [0, 12]}
+
+apis:
+  sidetone:
+    write: {transport: HID_IO, chunk_size: 33}
+  oled_brightness:
+    write: {transport: HID_IO, chunk_size: 33}
+  volume_limiter:
+    write: {transport: HID_IO, chunk_size: 33}
+  off_time:
+    write: {transport: HID_IO, chunk_size: 33}
+  mute_mic_brightness:
+    write: {transport: HID_IO, chunk_size: 33}
+  bt_startup_mode:
+    write: {transport: HID_IO, chunk_size: 33}
+  bt_gamemute_pref:
+    write: {transport: HID_IO, chunk_size: 33}
+  screensaver_mode:
+    write: {transport: HID_IO, chunk_size: 33}
+  display_timeout:
+    write: {transport: HID_IO, chunk_size: 33}
+  surround:
+    write: {transport: HID_IO, chunk_size: 33}
+  equalizer:
+    write:
+      steps:
+        - {transport: HID_IO, chunk_size: 33, payload_transform: "builtin:arctis_pro_wireless_eq_bands"}
+        - {transport: HID_IO, chunk_size: 33, payload_transform: "builtin:arctis_pro_wireless_eq_preset"}
+  battery_status:
+    read: {transport: HID_IO, chunk_size: 33}
+  save_to_flash:
+    write: {transport: HID_IO, chunk_size: 33}
+  get_settings:
+    read: {transport: HID_IO, chunk_size: 33}
+
+sync_read:
+  - struct: get_settings
+    maps:
+      - {emit: sidetone_changed,            field: sidetone}
+      - {emit: volume_limiter_changed,      field: volume_limiter, display_type: on_off}
+      - {emit: off_time_changed,            field: off_time}
+      - {emit: eq_preset_changed,           field: preset}
+      - {emit: mute_mic_brightness_changed, field: mute_mic_brightness}
+      - {emit: surround_changed,            field: surround}
+      - {emit: oled_brightness_changed,     field: oled_brightness}
+      - {emit: display_timeout_changed,     field: display_timeout}
+      - {emit: screensaver_mode_changed,    field: screensaver_mode}
+      - {emit: bt_startup_mode_changed,     field: bt_startup_mode, display_type: on_off}
+      - {emit: bt_gamemute_pref_changed,    field: bt_gamemute_pref, display_type: on_off}
+      - emit: custom_eq_changed
+        fields: [band_100, band_300, band_900, band_2500, band_8000]
+  - struct: battery_status
+    maps:
+      - {emit: battery_changed, field: battery_level, display_type: percentage}
+
+lifecycle:
+  init:
+    - call: sync_all
+    - call: discord_certified_set_attributes
+      args: {echo_cancellation: true, noise_suppression: true}
+  shutdown:
+    - call: save_to_flash

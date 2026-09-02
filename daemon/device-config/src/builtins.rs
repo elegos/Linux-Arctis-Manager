@@ -460,6 +460,40 @@ pub fn bitmap_sub_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
     }
 }
 
+/// Arctis Pro Wireless's `equalizer` API bundles a 5-band graphic-EQ write
+/// (plain 0-12 integer levels — this chip does its own onboard filtering,
+/// no biquad math like the AV6X02/CX20892 families) with an EQ-preset
+/// selection in one logical setting, but the firmware wants two physically
+/// separate HID_IO messages — see `arctis-pro-wireless.device`'s `(api
+/// equalizer ...)`, which literally slices its own combined payload the
+/// same way (`extract-bytes payload 0 25` / `extract-byte payload 25`).
+///
+/// Input (from codec): `[report_id, command, error_check, eq_index,
+/// band_100, band_300, band_900, band_2500, band_8000, preset]` (10 bytes).
+///
+/// The band-write message: the first 9 bytes verbatim, then 16 zero bytes
+/// for the vendor struct's per-slot "name" field — always blank for the
+/// live/custom slot this device always writes to, never read back, so it
+/// isn't modeled as a struct field at all.
+pub fn arctis_pro_wireless_eq_bands_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
+    if bytes.len() < 9 {
+        return vec![bytes.to_vec()];
+    }
+    let mut out = bytes[..9].to_vec();
+    out.extend(std::iter::repeat_n(0u8, 16));
+    vec![out]
+}
+
+/// The preset-selection message: `[0x00, 0x2E, 0xAA, preset]` — fixed
+/// command/error-check bytes per the vendor spec, `preset` is the input's
+/// last byte.
+pub fn arctis_pro_wireless_eq_preset_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
+    let Some(&preset) = bytes.last() else {
+        return vec![bytes.to_vec()];
+    };
+    vec![vec![0x00, 0x2E, 0xAA, preset]]
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1055,5 +1089,26 @@ mod tests {
         // -1.2dB -> round(-12) = -12 (0xF4); 12.0dB -> 120 (0x78)
         assert_eq!(&p[70..80], [0xF4, 0x78, 0, 0, 0, 0, 0, 0, 0, 0]);
         assert_eq!(p.len(), 70 + 10);
+    }
+
+    // ── Arctis Pro Wireless equalizer split ──────────────────────────────────
+
+    #[test]
+    fn arctis_pro_wireless_eq_bands_appends_blank_name() {
+        let input = [
+            0x00u8, 0x83, 0xAA, 0x06, 3, 4, 5, 6, 7, 2, /* preset, dropped */
+        ];
+        let result = arctis_pro_wireless_eq_bands_payload(&input);
+        assert_eq!(result.len(), 1);
+        assert_eq!(&result[0][0..9], &input[0..9]);
+        assert_eq!(result[0].len(), 9 + 16);
+        assert!(result[0][9..].iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn arctis_pro_wireless_eq_preset_builds_fixed_header() {
+        let input = [0x00u8, 0x83, 0xAA, 0x06, 3, 4, 5, 6, 7, 2];
+        let result = arctis_pro_wireless_eq_preset_payload(&input);
+        assert_eq!(result, vec![vec![0x00, 0x2E, 0xAA, 2]]);
     }
 }

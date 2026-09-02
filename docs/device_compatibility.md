@@ -27,3 +27,4 @@ For per-device known gaps (what's modelled but not yet wired up, what's still un
 | SteelSeries Arctis Nova Pro | `0x12CB`, `0x12FA`, `0x12CD` | chatmix, custom_eq, microphone |
 | SteelSeries Arctis Nova Pro Omni | `0x2290` | battery, bluetooth, chatmix, custom_eq, microphone, noise_cancelling |
 | SteelSeries Arctis Nova Pro Wireless | `0x12E0`, `0x12E5`, `0x225D` | battery, bluetooth, chatmix, custom_eq, microphone, noise_cancelling, wireless |
+| SteelSeries Arctis Pro Wireless | `0x1290` | battery, bluetooth, custom_eq, wireless |
