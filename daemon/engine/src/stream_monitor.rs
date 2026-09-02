@@ -20,7 +20,9 @@ use tracing::{info, warn};
 use device_config::codec::FieldValue;
 
 use crate::audio::AudioSetup;
-use crate::eq::settings::{load_eq_settings, AppMatcher, ChannelEqSettings, EqBackend, EqSettings};
+use crate::eq::settings::{
+    load_eq_settings, AppMatcher, Channel, ChannelEqSettings, EqBackend, EqSettings,
+};
 use crate::eq_manager::{self as eq_manager, EqRuntime};
 use crate::state::{AppState, DeviceCommand, SignalEvent};
 
@@ -101,7 +103,7 @@ async fn check_and_apply(
     audio_shared: &Arc<Mutex<Option<AudioSetup>>>,
     eq_rt: &Arc<Mutex<EqRuntime>>,
     app_state: &Arc<Mutex<AppState>>,
-    active: &mut HashMap<String, Option<String>>,
+    active: &mut HashMap<Channel, Option<String>>,
 ) {
     let clients = list_pw_clients().await;
     let hw_ctx = {
@@ -109,7 +111,10 @@ async fn check_and_apply(
         eq_manager::build_hw_eq_context(&st)
     };
 
-    for (channel, ch_settings) in [("media", &settings.media), ("chat", &settings.chat)] {
+    for (channel, ch_settings) in [
+        (Channel::Media, &settings.media),
+        (Channel::Chat, &settings.chat),
+    ] {
         // Hardware-backend channels: skip unless there are factory-preset overrides.
         // Software-preset overrides on hardware channels are handled by focus_monitor.
         let is_hw_backend = matches!(ch_settings.backend, EqBackend::Hardware);
@@ -140,7 +145,7 @@ async fn check_and_apply(
             }
         });
 
-        let currently = active.get(channel).and_then(|v| v.as_deref());
+        let currently = active.get(&channel).and_then(|v| v.as_deref());
 
         match (matched_key.as_deref(), currently) {
             // Override unchanged — nothing to do.
@@ -181,7 +186,7 @@ async fn check_and_apply(
                     )
                     .await;
                 }
-                active.insert(channel.to_string(), Some(key.to_owned()));
+                active.insert(channel, Some(key.to_owned()));
             }
 
             // Override lifted — restore channel default.
@@ -201,7 +206,7 @@ async fn check_and_apply(
                     )
                     .await;
                 }
-                active.insert(channel.to_string(), None);
+                active.insert(channel, None);
             }
         }
     }
@@ -209,7 +214,7 @@ async fn check_and_apply(
 
 async fn restore_channel(
     ch: &ChannelEqSettings,
-    channel: &str,
+    channel: Channel,
     base_dir: &Path,
     audio_shared: &Arc<Mutex<Option<AudioSetup>>>,
     eq_rt: &Arc<Mutex<EqRuntime>>,
@@ -232,7 +237,7 @@ pub async fn run(
     mut signal_rx: broadcast::Receiver<SignalEvent>,
 ) {
     let mut eq_settings = load_eq_settings(&settings_base_dir);
-    let mut active: HashMap<String, Option<String>> = HashMap::new();
+    let mut active: HashMap<Channel, Option<String>> = HashMap::new();
 
     let child = tokio::process::Command::new("pactl")
         .arg("subscribe")

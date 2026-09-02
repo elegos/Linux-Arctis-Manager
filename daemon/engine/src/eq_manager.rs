@@ -9,10 +9,10 @@ use tracing::{info, warn};
 
 use device_config::codec::FieldValue;
 
-use crate::audio::{self, AudioSetup};
+use crate::audio::AudioSetup;
 use crate::eq::ladspa;
 use crate::eq::preset::{load_preset, preset_path, BandMode, EqBand, EqPreset};
-use crate::eq::settings::{ChannelEqSettings, EqBackend};
+use crate::eq::settings::{Channel, ChannelEqSettings, EqBackend};
 use crate::state::{AppState, DeviceCommand};
 
 /// Sink names for the EQ virtual sinks.
@@ -92,6 +92,30 @@ impl EqRuntime {
     pub fn new() -> Arc<Mutex<Self>> {
         Arc::new(Mutex::new(Self::default()))
     }
+
+    fn channel(&self, channel: Channel) -> &ChannelEqState {
+        match channel {
+            Channel::Media => &self.media,
+            Channel::Chat => &self.chat,
+        }
+    }
+
+    fn channel_mut(&mut self, channel: Channel) -> &mut ChannelEqState {
+        match channel {
+            Channel::Media => &mut self.media,
+            Channel::Chat => &mut self.chat,
+        }
+    }
+}
+
+impl Channel {
+    /// The internal LADSPA EQ sink this channel loops through when active.
+    fn eq_sink(self) -> &'static str {
+        match self {
+            Channel::Media => MEDIA_EQ_SINK,
+            Channel::Chat => CHAT_EQ_SINK,
+        }
+    }
 }
 
 // ── Apply / tear-down ─────────────────────────────────────────────────────────
@@ -119,7 +143,7 @@ pub enum EqApplyOutcome {
 /// If LADSPA is already loaded, push new gains live (no reload).
 pub async fn apply_channel_eq(
     ch_settings: &ChannelEqSettings,
-    channel: &str, // "media" or "chat"
+    channel: Channel,
     base_dir: &std::path::Path,
     audio_shared: &Arc<Mutex<Option<AudioSetup>>>,
     eq_rt: &Arc<Mutex<EqRuntime>>,
@@ -267,11 +291,8 @@ pub async fn apply_channel_eq(
             gains_str.join(", ")
         );
     }
-    let (eq_sink, source_sink) = if channel == "media" {
-        (MEDIA_EQ_SINK, audio::MEDIA_SINK)
-    } else {
-        (CHAT_EQ_SINK, audio::CHAT_SINK)
-    };
+    let eq_sink = channel.eq_sink();
+    let source_sink = channel.sink_name();
 
     // Get the physical sink name and current loopback ID.
     let (physical, direct_lb_id) = {
@@ -281,26 +302,12 @@ pub async fn apply_channel_eq(
                 warn!("eq: no audio setup; cannot apply EQ for {channel}");
                 return EqApplyOutcome::Failed;
             }
-            Some(s) => {
-                let lb = if channel == "media" {
-                    s.media_loopback
-                } else {
-                    s.chat_loopback
-                };
-                (s.physical_sink.clone(), lb)
-            }
+            Some(s) => (s.physical_sink.clone(), s.loopback(channel)),
         }
     };
 
     // Check whether the LADSPA module is already live.
-    let existing_ladspa_id = {
-        let rt = eq_rt.lock().await;
-        if channel == "media" {
-            rt.media.ladspa_module_id
-        } else {
-            rt.chat.ladspa_module_id
-        }
-    };
+    let existing_ladspa_id = { eq_rt.lock().await.channel(channel).ladspa_module_id };
 
     // pw-cli set-param returns Ok but gains don't update in practice; always
     // tear down and reload to guarantee the new values take effect.
@@ -335,11 +342,7 @@ pub async fn apply_channel_eq(
             {
                 let mut guard = audio_shared.lock().await;
                 if let Some(s) = guard.as_mut() {
-                    if channel == "media" {
-                        s.media_loopback = id;
-                    } else {
-                        s.chat_loopback = id;
-                    }
+                    s.set_loopback(channel, id);
                 }
             }
             return EqApplyOutcome::Failed;
@@ -350,20 +353,12 @@ pub async fn apply_channel_eq(
     {
         let mut guard = audio_shared.lock().await;
         if let Some(s) = guard.as_mut() {
-            if channel == "media" {
-                s.media_loopback = new_lb_id;
-            } else {
-                s.chat_loopback = new_lb_id;
-            }
+            s.set_loopback(channel, new_lb_id);
         }
     }
     {
         let mut rt = eq_rt.lock().await;
-        let ch = if channel == "media" {
-            &mut rt.media
-        } else {
-            &mut rt.chat
-        };
+        let ch = rt.channel_mut(channel);
         ch.ladspa_module_id = Some(ladspa_id);
         ch.eq_loopback_id = Some(new_lb_id);
         ch.active = true;
@@ -376,7 +371,7 @@ pub async fn apply_channel_eq(
 /// Disable EQ on a channel: reset hardware EQ to flat (preset 0) if active,
 /// remove the LADSPA sink and EQ loopback, restore the direct loopback.
 pub async fn disable_channel_eq(
-    channel: &str,
+    channel: Channel,
     audio_shared: &Arc<Mutex<Option<AudioSetup>>>,
     eq_rt: &Arc<Mutex<EqRuntime>>,
     hw_ctx: Option<&HwEqContext>,
@@ -396,28 +391,18 @@ pub async fn disable_channel_eq(
     }
     let (ladspa_id, eq_lb_id) = {
         let rt = eq_rt.lock().await;
-        let ch = if channel == "media" {
-            &rt.media
-        } else {
-            &rt.chat
-        };
+        let ch = rt.channel(channel);
         (ch.ladspa_module_id, ch.eq_loopback_id)
     };
 
-    let (physical, source_sink) = {
+    let physical = {
         let guard = audio_shared.lock().await;
         match guard.as_ref() {
             None => return,
-            Some(s) => (
-                s.physical_sink.clone(),
-                if channel == "media" {
-                    audio::MEDIA_SINK.to_owned()
-                } else {
-                    "Arctis_Chat".to_owned()
-                },
-            ),
+            Some(s) => s.physical_sink.clone(),
         }
     };
+    let source_sink = channel.sink_name();
 
     // Remove EQ loopback.
     if let Some(id) = eq_lb_id {
@@ -442,21 +427,13 @@ pub async fn disable_channel_eq(
         let mut guard = audio_shared.lock().await;
         if let Some(s) = guard.as_mut() {
             if let Some(id) = restored_lb_id {
-                if channel == "media" {
-                    s.media_loopback = id;
-                } else {
-                    s.chat_loopback = id;
-                }
+                s.set_loopback(channel, id);
             }
         }
     }
     {
         let mut rt = eq_rt.lock().await;
-        let ch = if channel == "media" {
-            &mut rt.media
-        } else {
-            &mut rt.chat
-        };
+        let ch = rt.channel_mut(channel);
         ch.ladspa_module_id = None;
         ch.eq_loopback_id = None;
         ch.active = false;

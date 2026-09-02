@@ -104,6 +104,32 @@ pub struct AudioSetup {
     pub chat_loopback: u32,
 }
 
+impl AudioSetup {
+    pub fn loopback(&self, channel: crate::eq::settings::Channel) -> u32 {
+        match channel {
+            crate::eq::settings::Channel::Media => self.media_loopback,
+            crate::eq::settings::Channel::Chat => self.chat_loopback,
+        }
+    }
+
+    pub fn set_loopback(&mut self, channel: crate::eq::settings::Channel, id: u32) {
+        match channel {
+            crate::eq::settings::Channel::Media => self.media_loopback = id,
+            crate::eq::settings::Channel::Chat => self.chat_loopback = id,
+        }
+    }
+}
+
+impl crate::eq::settings::Channel {
+    /// The virtual sink this channel routes through (`Arctis_Media`/`Arctis_Chat`).
+    pub fn sink_name(self) -> &'static str {
+        match self {
+            Self::Media => MEDIA_SINK,
+            Self::Chat => CHAT_SINK,
+        }
+    }
+}
+
 // ── pactl helpers ─────────────────────────────────────────────────────────────
 
 async fn pactl(args: &[&str]) -> Result<String, AudioError> {
