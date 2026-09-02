@@ -120,68 +120,76 @@ fn reverb_controls(cfg: &ReverbConfig) -> Vec<(String, f64)> {
 /// (reverb last, per its stereo-output constraint). An effect that is enabled
 /// but whose plugin is not installed is skipped with a warning — it never
 /// silently no-ops.
+/// Looks up `candidates` for one LADSPA stage and, if found, appends it to
+/// `stages` with controls built by `controls_fn` (given the resolved plugin
+/// name — only `pitch_controls` needs it, to pick am_pitchshift vs. the
+/// single-port fallback). Shared by every branch of [`collect_stages`]; they
+/// differ only in which config/candidates/controls-builder they pass in.
+fn push_stage(
+    stages: &mut Vec<Stage>,
+    enabled: bool,
+    name: &str,
+    candidates: &[(&'static str, &'static str)],
+    not_found: &str,
+    controls_fn: impl FnOnce(&str) -> Vec<(String, f64)>,
+) {
+    if !enabled {
+        return;
+    }
+    match find_plugin(candidates) {
+        Some((plugin, label)) => stages.push(Stage {
+            name: name.to_owned(),
+            plugin: plugin.to_owned(),
+            label: label.to_owned(),
+            controls: controls_fn(plugin),
+        }),
+        None => warn!("VC: {name} requested but {not_found} — skipping"),
+    }
+}
+
 pub(crate) fn collect_stages(config: &VcLadspaConfig) -> Vec<Stage> {
     let mut stages = Vec::new();
 
-    if config.pitch.enabled {
-        match find_plugin(PITCH_CANDIDATES) {
-            Some((plugin, label)) => stages.push(Stage {
-                name: "pitch".to_owned(),
-                plugin: plugin.to_owned(),
-                label: label.to_owned(),
-                controls: pitch_controls(&config.pitch, plugin),
-            }),
-            None => warn!("VC: pitch requested but no pitch-shift plugin found — skipping"),
-        }
-    }
-
-    if config.chorus.enabled {
-        match find_plugin(CHORUS_CANDIDATES) {
-            Some((plugin, label)) => stages.push(Stage {
-                name: "chorus".to_owned(),
-                plugin: plugin.to_owned(),
-                label: label.to_owned(),
-                controls: chorus_controls(&config.chorus),
-            }),
-            None => warn!("VC: chorus requested but multivoice_chorus not found — skipping"),
-        }
-    }
-
-    if config.delay.enabled {
-        match find_plugin(DELAY_CANDIDATES) {
-            Some((plugin, label)) => stages.push(Stage {
-                name: "delay".to_owned(),
-                plugin: plugin.to_owned(),
-                label: label.to_owned(),
-                controls: delay_controls(&config.delay),
-            }),
-            None => warn!("VC: delay requested but delay_1898 not found — skipping"),
-        }
-    }
-
-    if config.distortion.enabled {
-        match find_plugin(DISTORTION_CANDIDATES) {
-            Some((plugin, label)) => stages.push(Stage {
-                name: "distortion".to_owned(),
-                plugin: plugin.to_owned(),
-                label: label.to_owned(),
-                controls: distortion_controls(&config.distortion),
-            }),
-            None => warn!("VC: distortion requested but valve_1209 not found — skipping"),
-        }
-    }
-
-    if config.reverb.enabled {
-        match find_plugin(REVERB_CANDIDATES) {
-            Some((plugin, label)) => stages.push(Stage {
-                name: "reverb".to_owned(),
-                plugin: plugin.to_owned(),
-                label: label.to_owned(),
-                controls: reverb_controls(&config.reverb),
-            }),
-            None => warn!("VC: reverb requested but gverb_1216 not found — skipping"),
-        }
-    }
+    push_stage(
+        &mut stages,
+        config.pitch.enabled,
+        "pitch",
+        PITCH_CANDIDATES,
+        "no pitch-shift plugin found",
+        |plugin| pitch_controls(&config.pitch, plugin),
+    );
+    push_stage(
+        &mut stages,
+        config.chorus.enabled,
+        "chorus",
+        CHORUS_CANDIDATES,
+        "multivoice_chorus not found",
+        |_| chorus_controls(&config.chorus),
+    );
+    push_stage(
+        &mut stages,
+        config.delay.enabled,
+        "delay",
+        DELAY_CANDIDATES,
+        "delay_1898 not found",
+        |_| delay_controls(&config.delay),
+    );
+    push_stage(
+        &mut stages,
+        config.distortion.enabled,
+        "distortion",
+        DISTORTION_CANDIDATES,
+        "valve_1209 not found",
+        |_| distortion_controls(&config.distortion),
+    );
+    push_stage(
+        &mut stages,
+        config.reverb.enabled,
+        "reverb",
+        REVERB_CANDIDATES,
+        "gverb_1216 not found",
+        |_| reverb_controls(&config.reverb),
+    );
 
     stages
 }
