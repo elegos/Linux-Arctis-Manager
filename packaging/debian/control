@@ -20,7 +20,7 @@ Depends: ${shlibs:Depends},
          ${misc:Depends},
          python3,
          libcap2-bin
-Recommends: python3-torch
+Suggests: python3-torch
 Description: SteelSeries Arctis manager for Linux
  Replaces the SteelSeries GG software to manage SteelSeries Arctis headsets
  on Linux. Provides a user-space daemon written in Rust and a Qt6 GUI written

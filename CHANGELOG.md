@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Fedora and Debian packages no longer pull `python3-torch` (and its ~3GB of ROCm/CUDA/TeX transitive weak deps) by default on install; it's now an opt-in `Suggests`/`optdepends` instead of an auto-installed `Recommends`, matching the already-optional Arch packaging.
+
 ## [3.0.0]
 
 ### Added
