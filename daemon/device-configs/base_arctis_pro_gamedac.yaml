@@ -1,0 +1,415 @@
+# Pro GameDAC — wired USB desktop dock (STM32 MCU + Cirrus Logic DAC),
+# genuinely separate hardware from the standalone "Arctis Pro" (wired)
+# headset (`arctis_pro_wired.yaml`): different main PID (0x1280 vs 0x1252),
+# no shared include, no shared control plane. Ported from the raw spec's
+# own `arctis-pro-gameDac.device`.
+#
+# Deliberately out of scope, all excluded structs/APIs from the raw spec:
+# - Firmware update paths (`update_st_chip`, `update_cnxt_chip`,
+#   `headset_fw_update`, `fw_update`, `enter_boot_mode`, `fw_versions`) —
+#   same precedent as every other device this project ships: no
+#   firmware-flashing capability anywhere in this codebase.
+# - RGB lighting, entirely (`left_lighting`/`right_lighting`/`mic_lighting`/
+#   `mic_mute_lighting`, `get_illumination`, `illumination_dw`,
+#   `zone_x_color`/`zone_1..4_color`, `get_preset_settings`,
+#   `select_preset_earcups`/`select_preset_mic`/`select_preset_mic_muted`,
+#   `reset_all_illumination`, `lighting_up_to_four_zones`) — no `lighting`
+#   capability exists in this project's vocabulary, same precedent as
+#   Arctis 5/Nova 3 wired/Arctis Pro (wired).
+# - `save_to_flash` (report 0x00/0x09, a fixed `[0x00, 0xAC]` message
+#   followed by the struct's own payload) — the raw spec's own comment on
+#   its `api-write` says it only "save[s] the lighting settings on the
+#   headset". With lighting entirely out of scope, this API has no
+#   in-scope effect, so it isn't modeled at all — not a missed two-step
+#   `WriteApi::Sequence`, a deliberately-unused one.
+# - OLED bitmap content (`draw_bitmap`, `reload_display`, `set_oled`) — no
+#   device in this project has ever modeled OLED bitmap pushing, same
+#   precedent as Arctis Pro Wireless (which only exposes OLED
+#   brightness/timer settings, never bitmap content).
+# - DTS Headphone:X v2 spatial audio (`surround_offload`,
+#   `dts_hpx_v2_surround`, referenced throughout `sync_settings_function`/
+#   `translate_sync_data`/the raw spec's `(shutdown ...)` block) — lives in
+#   `sshz_dtshpx-v2`, an included file this port doesn't pull in; the
+#   plain on/off `surround_sound` toggle (command 0x2A) is modeled instead,
+#   same shape as every other device's `surround` setting.
+# - `type_id`/`set_type_id`/`connection_status` — administrative/
+#   diagnostic reads with no settings-UI purpose, same precedent as other
+#   devices' excluded low-level status structs.
+# - `i2c_tunnel`/`one_wire_tunnel`/`one_wire_status`/`one_wire_connection`
+#   — raw hardware tunnel primitives, not settings.
+# - `eq_band_x`/`eq_band_1`..`eq_band_10` (per-band EQ writes, command
+#   0x31) — `custom_eq_all` (command 0x33) bundles all 10 bands into one
+#   message, same "resend the whole EQ on any change" convention this
+#   project already uses everywhere else; modeling 10 near-identical
+#   per-band APIs on top would be pure redundancy.
+# - `custom_eq_offset_all` (command 0x35, a *delta*-from-current API) —
+#   `custom_eq_all` already covers the full state; no need for a second,
+#   narrower write path to the same values.
+# - `set_audio_settings` (command 0x21, a single bulk write of nearly every
+#   audio setting at once) — every field it covers already has its own
+#   narrower, single-purpose write API below (`host_mode`, `current_volume`,
+#   `dac_gain`, `volume_limiter`, `surround_sound`, `select_eq_preset`,
+#   `custom_eq_all`, `mic_volume`, `side_tone`, `mic_agc`,
+#   `mic_noise_gate`, `aux_mode`, `line_out_mode`, `hp_speaker_mix`,
+#   `stream_mix`), matching this project's usual per-setting granularity;
+#   no reason to also carry a second, redundant bulk-write struct.
+# - `ux_settings`/`screensaver_mode` write vs. the granular structs below:
+#   `screen_brightness` (0x85) and `inactivity_timer` (0x83) each already
+#   have their own single-field write API; `ux_settings` (0x81) is the only
+#   way to write `idle_brightness` (no dedicated single-field API exists
+#   for it in the raw spec), but bundling all 4 fields into one write just
+#   to reach that one field would fight the granular convention used
+#   everywhere else in this file — `idle_brightness` ships read-only
+#   (populated by `sync_read` from `get_ux_settings`), a disclosed gap
+#   rather than a silent omission.
+#
+# Genuine DSL gap hit by this device (documented in `docs/v3-backlog.md`,
+# not device-specific): `sync_events:` field extraction is fixed at one
+# byte per field (`SyncEventField.byte: u8`), so it cannot represent this
+# device's `int32`/`uint32` live-push fields — `mic_volume` (command 0x37)
+# and `inactivity_timer` (command 0x83) — nor `eq_band_x`'s (command 0x31)
+# second-level dispatch on a sub-index byte to choose which of 10 target
+# fields to update. All three still populate correctly via `sync_read` at
+# connect time; they just won't live-update if changed from elsewhere
+# (e.g. the GameDAC's own physical dial for mic volume) until the next
+# reconnect.
+#
+# `custom_eq_all`'s (write, command 0x33) gain fields are spec'd `uint32`,
+# but the read-back equivalents in `get_audio_settings`/`set_audio_settings`
+# (command 0x20/0x21, `custom_eq1..10`) are spec'd `int32` for the same
+# conceptual values — no dB-per-unit conversion formula exists anywhere in
+# the raw spec archive for either shape (checked against every other file
+# sharing this field/struct naming; the one family with a similar-looking
+# field, Arctis Nova Pro, uses a completely different wire shape — a
+# ranged `uint8` through an `offset_db` transform — not reusable here).
+# Shipped as raw `int32` (matching the signed read side), unranged, unit
+# unconfirmed — same disclosed-gap treatment as every other unconfirmed
+# numeric range in this project. `mic_volume` (int32) carries the same
+# caveat.
+
+structs:
+  reset:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x01}
+
+  # Combined settings snapshot, read once on connect and the source of
+  # most of the fields below. Command bytes for the individual write APIs
+  # are listed per-struct; this struct only documents the read shape.
+  get_audio_settings:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: command,   type: uint8, constant: 0x20}
+    incoming:
+      - {name: report_id,        type: uint8, constant: 0x00}
+      - {name: command,          type: uint8, constant: 0x20}
+      - {name: host_mode,        type: uint8}
+      - {name: volume,           type: uint8}
+      - {name: dac_gain,         type: uint8}
+      - {name: volume_limiter,   type: uint8}
+      - {name: surround,         type: uint8}
+      - {name: surround_offload, type: uint8}
+      - {name: eq_preset,        type: uint8}
+      - {name: custom_eq1,       type: int32}
+      - {name: custom_eq2,       type: int32}
+      - {name: custom_eq3,       type: int32}
+      - {name: custom_eq4,       type: int32}
+      - {name: custom_eq5,       type: int32}
+      - {name: custom_eq6,       type: int32}
+      - {name: custom_eq7,       type: int32}
+      - {name: custom_eq8,       type: int32}
+      - {name: custom_eq9,       type: int32}
+      - {name: custom_eq10,      type: int32}
+      - {name: mic_volume,       type: int32}
+      - {name: sidetone,         type: uint8}
+      - {name: mic_agc,          type: uint8, range: [0, 1]}
+      - {name: mic_noise_gate,   type: uint8, range: [0, 1]}
+      - {name: aux_mode,         type: uint8, range: [1, 2]}
+      - {name: line_out_mode,    type: uint8, range: [1, 2]}
+      - {name: hp_speaker_game,  type: uint8}
+      - {name: hp_speaker_chat,  type: uint8}
+      - {name: stream_game,      type: uint8}
+      - {name: stream_chat,      type: uint8}
+      - {name: stream_aux,       type: uint8}
+      - {name: stream_mic,       type: uint8}
+
+  # 1 = PC, 2 = PC Hi-Res, 3 = PS4, 4 = PS4 Slim.
+  host_mode:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x23}
+    - {name: host_mode, type: uint8, range: [1, 4]}
+
+  current_volume:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x25}
+    - {name: volume,    type: uint8}
+
+  dac_gain:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x27}
+    - {name: dac_gain,  type: uint8}
+
+  volume_limiter:
+    - {name: report_id,      type: uint8, constant: 0x00}
+    - {name: command,        type: uint8, constant: 0x29}
+    - {name: volume_limiter, type: uint8}
+
+  surround_sound:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x2A}
+    - {name: surround,  type: uint8, range: [0, 1]}
+
+  select_eq_preset:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x2E}
+    - {name: eq_preset, type: uint8, range: [0, 4]}
+
+  custom_eq_all:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x33}
+    - {name: custom_eq1,  type: int32}
+    - {name: custom_eq2,  type: int32}
+    - {name: custom_eq3,  type: int32}
+    - {name: custom_eq4,  type: int32}
+    - {name: custom_eq5,  type: int32}
+    - {name: custom_eq6,  type: int32}
+    - {name: custom_eq7,  type: int32}
+    - {name: custom_eq8,  type: int32}
+    - {name: custom_eq9,  type: int32}
+    - {name: custom_eq10, type: int32}
+
+  mic_volume:
+    - {name: report_id,  type: uint8, constant: 0x00}
+    - {name: command,    type: uint8, constant: 0x37}
+    - {name: mic_volume, type: int32}
+
+  side_tone:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x39}
+    - {name: sidetone,  type: uint8}
+
+  mic_agc:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x3A}
+    - {name: mic_agc,   type: uint8, range: [0, 1]}
+
+  mic_noise_gate:
+    - {name: report_id,      type: uint8, constant: 0x00}
+    - {name: command,        type: uint8, constant: 0x3C}
+    - {name: mic_noise_gate, type: uint8, range: [0, 1]}
+
+  aux_mode:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x41}
+    - {name: aux_mode,  type: uint8, range: [1, 2]}
+
+  line_out_mode:
+    - {name: report_id,     type: uint8, constant: 0x00}
+    - {name: command,       type: uint8, constant: 0x43}
+    - {name: line_out_mode, type: uint8, range: [1, 2]}
+
+  hp_speaker_mix:
+    - {name: report_id,        type: uint8, constant: 0x00}
+    - {name: command,          type: uint8, constant: 0x45}
+    - {name: hp_speaker_game,  type: uint8}
+    - {name: hp_speaker_chat,  type: uint8}
+
+  stream_mix:
+    - {name: report_id,   type: uint8, constant: 0x00}
+    - {name: command,     type: uint8, constant: 0x47}
+    - {name: stream_game, type: uint8}
+    - {name: stream_chat, type: uint8}
+    - {name: stream_aux,  type: uint8}
+    - {name: stream_mic,  type: uint8}
+
+  # Read once on connect; source of the OLED/inactivity-timer fields below.
+  get_ux_settings:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: command,   type: uint8, constant: 0x80}
+    incoming:
+      - {name: report_id,          type: uint8, constant: 0x00}
+      - {name: command,            type: uint8, constant: 0x80}
+      - {name: timer_delay,        type: uint32}
+      - {name: active_brightness,  type: uint8}
+      - {name: idle_brightness,    type: uint8}
+      - {name: screensaver,        type: uint8}
+
+  screen_brightness:
+    - {name: report_id,         type: uint8, constant: 0x00}
+    - {name: command,           type: uint8, constant: 0x85}
+    - {name: active_brightness, type: uint8}
+
+  # Milliseconds before the OLED dims/screensaver kicks in.
+  inactivity_timer:
+    - {name: report_id,   type: uint8, constant: 0x00}
+    - {name: command,     type: uint8, constant: 0x83}
+    - {name: timer_delay, type: uint32}
+
+  screensaver_mode:
+    - {name: report_id,  type: uint8, constant: 0x00}
+    - {name: command,    type: uint8, constant: 0x87}
+    - {name: screensaver, type: uint8}
+
+apis:
+  reset:
+    action: true
+    write: {transport: HID_IO, chunk_size: 65}
+
+  get_audio_settings:
+    read: {transport: HID_IO, chunk_size: 65}
+
+  host_mode:
+    write:
+      steps:
+        - {transport: HID_IO, chunk_size: 65}
+        - {sleep_ms: 2000}
+
+  current_volume:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  dac_gain:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  volume_limiter:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  surround_sound:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  select_eq_preset:
+    write:
+      steps:
+        # Full EQ deploy can take up to 60ms per the raw spec's own comment.
+        - {transport: HID_IO, chunk_size: 65}
+        - {sleep_ms: 70}
+
+  custom_eq_all:
+    write:
+      steps:
+        - {transport: HID_IO, chunk_size: 65}
+        - {sleep_ms: 70}
+
+  mic_volume:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  side_tone:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  mic_agc:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  mic_noise_gate:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  aux_mode:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  line_out_mode:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  hp_speaker_mix:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  stream_mix:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  get_ux_settings:
+    read: {transport: HID_IO, chunk_size: 65}
+
+  screen_brightness:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  inactivity_timer:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  screensaver_mode:
+    write: {transport: HID_IO, chunk_size: 65}
+
+# Only single-byte-width fields can be live-pushed (see the DSL-gap note
+# above for what's excluded: mic_volume, inactivity_timer, per-band EQ).
+sync_events:
+  0x23:
+    emit: host_mode_changed
+    fields:
+      - {name: host_mode, byte: 2}
+
+  0x27:
+    emit: dac_gain_changed
+    fields:
+      - {name: dac_gain, byte: 2}
+
+  0x2A:
+    emit: surround_changed
+    fields:
+      - {name: surround, byte: 2, display_type: on_off}
+
+  0x2E:
+    emit: eq_preset_changed
+    fields:
+      - {name: eq_preset, byte: 2}
+
+  0x39:
+    emit: sidetone_changed
+    fields:
+      - {name: sidetone, byte: 2}
+
+  0x43:
+    emit: line_out_mode_changed
+    fields:
+      - {name: line_out_mode, byte: 2}
+
+  0x47:
+    emit: stream_mix_changed
+    fields:
+      - {name: stream_game, byte: 2}
+      - {name: stream_chat, byte: 3}
+      - {name: stream_aux,  byte: 4}
+      - {name: stream_mic,  byte: 5}
+
+  0x85:
+    emit: screen_brightness_changed
+    fields:
+      - {name: active_brightness, byte: 2}
+
+sync_read:
+  - struct: get_audio_settings
+    maps:
+      - {emit: host_mode_changed,      field: host_mode}
+      - {emit: volume_changed,         field: volume}
+      - {emit: dac_gain_changed,       field: dac_gain}
+      - {emit: volume_limiter_changed, field: volume_limiter}
+      - {emit: surround_changed,       field: surround, display_type: on_off}
+      - {emit: eq_preset_changed,      field: eq_preset}
+      - emit: custom_eq_changed
+        fields:
+          - custom_eq1
+          - custom_eq2
+          - custom_eq3
+          - custom_eq4
+          - custom_eq5
+          - custom_eq6
+          - custom_eq7
+          - custom_eq8
+          - custom_eq9
+          - custom_eq10
+      - {emit: mic_volume_changed,     field: mic_volume}
+      - {emit: sidetone_changed,       field: sidetone}
+      - {emit: mic_agc_changed,        field: mic_agc, display_type: on_off}
+      - {emit: mic_noise_gate_changed, field: mic_noise_gate, display_type: on_off}
+      - {emit: aux_mode_changed,       field: aux_mode}
+      - {emit: line_out_mode_changed,  field: line_out_mode}
+      - emit: hp_speaker_mix_changed
+        fields: [hp_speaker_game, hp_speaker_chat]
+      - emit: stream_mix_changed
+        fields: [stream_game, stream_chat, stream_aux, stream_mic]
+
+  - struct: get_ux_settings
+    maps:
+      - {emit: inactivity_timer_changed,  field: timer_delay}
+      - {emit: screen_brightness_changed, field: active_brightness}
+      - {emit: idle_brightness_changed,   field: idle_brightness}
+      - {emit: screensaver_mode_changed,  field: screensaver}
+
+lifecycle:
+  init:
+    - call: sync_all

@@ -1,0 +1,28 @@
+extends: base_arctis_pro_gamedac
+
+device:
+  name: "SteelSeries Arctis Pro GameDAC"
+  vendor_id: 0x1038
+
+  # command_interface is undeclared in the raw spec and has no v2
+  # precedent — unconfirmed, wants real hardware, same caveat as every
+  # other port in this project. sync_interface, unusually, *is* explicitly
+  # declared by the raw spec (`(sync-interface 0xffc1 0x0001 2)`) — a
+  # different usage page from the main 0xffc0/0x0001 interface.
+  variants:
+    - product_id: 0x1280
+      bootloader_pid: 0x1281
+
+  hid:
+    usage_page: 0xFFC0
+    usage: 0x0001
+    command_interface:
+      interface: 2
+    sync_interface:
+      interface: 2
+      usage_page: 0xFFC1
+      usage: 0x0001
+
+  capabilities:
+    - custom_eq
+    - microphone
