@@ -2,8 +2,7 @@ from typing import cast
 
 import usb
 
-from linux_arctis_manager.core import TypedDevice
-from linux_arctis_manager.typing.protocols import UsbConfig
+from linux_arctis_manager.typing.protocols import TypedDevice, UsbConfig
 
 
 def endpoint_type(bmAttributes: int) -> str:

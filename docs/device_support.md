@@ -18,8 +18,6 @@ In particular we're going to focus on two different folders:
 
 In order to reload the configurations, you can either restart the service (`systemd --user restart arctis-manager`), or calling the config reload Dbus method.
 
-Every time you add a new configuration for the first time though, you'll need to run `lam-cli udev write-rules --force --reload` to write and reload the udev rules (this will prompt you for your sudoer password).
-
 ## Wireshark tutorial
 
 First things first, take a look at the video below on YouTube, as it describes how to use Wireshark and interact with the SteelSeries GG software to get the required packets, from a general point of view. Don't worry to track packets down during the first view, as we're going to go down the rabbit's hole in a bit.
