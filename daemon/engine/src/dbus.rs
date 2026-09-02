@@ -34,6 +34,47 @@ const EQ_PATH: &str = "/name/giacomofurlan/ArctisManager/Next/EQ";
 const NC_PATH: &str = "/name/giacomofurlan/ArctisManager/Next/NC";
 const VC_PATH: &str = "/name/giacomofurlan/ArctisManager/Next/VC";
 
+/// Serialises `value` to JSON, falling back to `fallback` (typically `"{}"` or
+/// `"[]"`) on failure. D-Bus methods return plain strings, not `Result`, so
+/// every JSON-returning method needs this fallback — serialisation of our own
+/// types practically never fails, but a panic-free string is still required.
+fn to_json_or<T: serde::Serialize>(value: &T, fallback: &str) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| fallback.to_string())
+}
+
+/// Spawns a fire-and-forget background task following the shape shared by
+/// `InstallExportDeps`, `DownloadBaseModels` and `InstallCudnn`: emit
+/// `progress`, run `fut`, then emit `on_complete(json)` where `json` is
+/// `{"success": true, "message": success_message}` or `{"success": false,
+/// "message": "<error>"}`.
+fn spawn_progress_task<Fut, E>(
+    signal_tx: broadcast::Sender<SignalEvent>,
+    progress: SignalEvent,
+    fut: Fut,
+    success_message: &'static str,
+    on_complete: fn(String) -> SignalEvent,
+) where
+    Fut: std::future::Future<Output = Result<(), E>> + Send + 'static,
+    E: std::fmt::Display,
+{
+    tokio::spawn(async move {
+        let _ = signal_tx.send(progress);
+        let json = match fut.await {
+            Ok(()) => serde_json::json!({
+                "success": true,
+                "message": success_message,
+            })
+            .to_string(),
+            Err(e) => serde_json::json!({
+                "success": false,
+                "message": e.to_string(),
+            })
+            .to_string(),
+        };
+        let _ = signal_tx.send(on_complete(json));
+    });
+}
+
 // ── Status interface ──────────────────────────────────────────────────────────
 
 struct StatusInterface {
@@ -253,11 +294,11 @@ impl SettingsInterface {
         match list_name {
             "pulse_audio_devices" => {
                 let sinks = crate::audio::list_audio_sinks().await;
-                serde_json::to_string(&sinks).unwrap_or_else(|_| "[]".to_string())
+                to_json_or(&sinks, "[]")
             }
             "pulse_audio_sources" => {
                 let sources = crate::audio::list_audio_sources().await;
-                serde_json::to_string(&sources).unwrap_or_else(|_| "[]".to_string())
+                to_json_or(&sources, "[]")
             }
             _ => "[]".to_string(),
         }
@@ -449,7 +490,7 @@ impl EqInterface {
     /// Returns the full EQ settings JSON (both channels).
     async fn get_eq_settings(&self) -> String {
         let settings = load_eq_settings(&self.settings_base_dir);
-        serde_json::to_string(&settings).unwrap_or_else(|_| "{}".to_string())
+        to_json_or(&settings, "{}")
     }
 
     /// Set a single EQ field on a channel.
@@ -539,14 +580,14 @@ impl EqInterface {
             .iter()
             .map(|p| serde_json::json!({"name": p.name, "band_mode": p.band_mode}))
             .collect();
-        serde_json::to_string(&summaries).unwrap_or_else(|_| "[]".to_string())
+        to_json_or(&summaries, "[]")
     }
 
     /// Returns the full preset JSON for `name`, or `{}` if not found.
     async fn get_preset(&self, name: &str) -> String {
         let path = preset_path(&self.settings_base_dir, name);
         match load_preset(&path) {
-            Ok(p) => serde_json::to_string(&p).unwrap_or_else(|_| "{}".to_string()),
+            Ok(p) => to_json_or(&p, "{}"),
             Err(_) => "{}".to_string(),
         }
     }
@@ -692,7 +733,7 @@ async fn running_streams_json() -> String {
             Some(serde_json::json!({"name": name, "pid": pid}))
         })
         .collect();
-    serde_json::to_string(&result).unwrap_or_else(|_| "[]".to_string())
+    to_json_or(&result, "[]")
 }
 
 fn steam_games_json() -> String {
@@ -733,7 +774,7 @@ fn steam_games_json() -> String {
             .unwrap_or("")
             .cmp(b["name"].as_str().unwrap_or(""))
     });
-    serde_json::to_string(&games).unwrap_or_else(|_| "[]".to_string())
+    to_json_or(&games, "[]")
 }
 
 // ── Config interface ──────────────────────────────────────────────────────────
@@ -832,7 +873,7 @@ impl NcInterface {
     #[zbus(name = "GetNCSettings")]
     async fn get_nc_settings(&self) -> String {
         let cfg = load_nc_config(&self.settings_base_dir);
-        serde_json::to_string(&cfg).unwrap_or_else(|_| "{}".to_string())
+        to_json_or(&cfg, "{}")
     }
 
     #[zbus(name = "SetNCSettings")]
@@ -858,7 +899,7 @@ impl NcInterface {
 
         apply_and_route_nc(&cfg, &self.nc_runtime, &self.mic_router).await;
 
-        let out_json = serde_json::to_string(&cfg).unwrap_or_else(|_| "{}".to_string());
+        let out_json = to_json_or(&cfg, "{}");
         let _ = self.signal_tx.send(SE::NCChanged { json: out_json });
         true
     }
@@ -1034,7 +1075,7 @@ impl VcInterface {
     #[zbus(name = "GetVCSettings")]
     async fn get_vc_settings(&self) -> String {
         let cfg = load_vc_config(&self.settings_base_dir);
-        serde_json::to_string(&cfg).unwrap_or_else(|_| "{}".to_string())
+        to_json_or(&cfg, "{}")
     }
 
     /// `VcSettings::mode` (`"ladspa"` | `"rvc"`) and `enabled` are
@@ -1082,7 +1123,7 @@ impl VcInterface {
         )
         .await;
 
-        let out_json = serde_json::to_string(&cfg).unwrap_or_else(|_| "{}".to_string());
+        let out_json = to_json_or(&cfg, "{}");
         let _ = self.signal_tx.send(SE::VCChanged { json: out_json });
         true
     }
@@ -1090,7 +1131,7 @@ impl VcInterface {
     #[zbus(name = "GetRVCMetrics")]
     async fn get_rvc_metrics(&self) -> String {
         let rt = self.rvc_live.lock().await;
-        serde_json::to_string(&rt.metrics_snapshot()).unwrap_or_else(|_| "{}".to_string())
+        to_json_or(&rt.metrics_snapshot(), "{}")
     }
 
     /// Live tuning update on the running RVC chain — no rebuild. Does NOT
@@ -1118,7 +1159,7 @@ impl VcInterface {
     #[zbus(name = "GetRVCModels")]
     async fn get_rvc_models(&self) -> String {
         let models = crate::vc_models::list_models(&self.settings_base_dir);
-        serde_json::to_string(&models).unwrap_or_else(|_| "[]".to_string())
+        to_json_or(&models, "[]")
     }
 
     #[zbus(name = "DeleteRVCModel")]
@@ -1149,25 +1190,15 @@ impl VcInterface {
     /// `ExportDepsComplete`.
     #[zbus(name = "InstallExportDeps")]
     async fn install_export_deps(&self) {
-        let signal_tx = self.signal_tx.clone();
-        tokio::spawn(async move {
-            let _ = signal_tx.send(SE::VCExportDepsProgress {
+        spawn_progress_task(
+            self.signal_tx.clone(),
+            SE::VCExportDepsProgress {
                 message: "Installing export dependencies (torch, numpy, onnx)...".to_owned(),
-            });
-            let json = match crate::vc_export::install_export_deps().await {
-                Ok(()) => serde_json::json!({
-                    "success": true,
-                    "message": "Export dependencies installed.",
-                })
-                .to_string(),
-                Err(e) => serde_json::json!({
-                    "success": false,
-                    "message": e,
-                })
-                .to_string(),
-            };
-            let _ = signal_tx.send(SE::VCExportDepsComplete { json });
-        });
+            },
+            crate::vc_export::install_export_deps(),
+            "Export dependencies installed.",
+            |json| SE::VCExportDepsComplete { json },
+        );
     }
 
     #[zbus(signal)]
@@ -1236,7 +1267,7 @@ impl VcInterface {
     async fn search_hf_models(&self, query: &str, sort_by: &str) -> String {
         let token = crate::vc_hf_client::get_token(&self.settings_base_dir);
         match crate::vc_hf_client::search_models(query, sort_by, 20, token.as_deref()).await {
-            Ok(models) => serde_json::to_string(&models).unwrap_or_else(|_| "[]".to_string()),
+            Ok(models) => to_json_or(&models, "[]"),
             Err(e) => {
                 warn!("SearchHFModels: {e}");
                 "[]".to_string()
@@ -1248,7 +1279,7 @@ impl VcInterface {
     async fn list_repo_files(&self, repo_id: &str) -> String {
         let token = crate::vc_hf_client::get_token(&self.settings_base_dir);
         match crate::vc_hf_client::list_repo_model_files(repo_id, token.as_deref()).await {
-            Ok(files) => serde_json::to_string(&files).unwrap_or_else(|_| "[]".to_string()),
+            Ok(files) => to_json_or(&files, "[]"),
             Err(e) => {
                 warn!("ListRepoFiles({repo_id}): {e}");
                 "[]".to_string()
@@ -1329,27 +1360,16 @@ impl VcInterface {
     #[zbus(name = "DownloadBaseModels")]
     async fn download_base_models(&self) {
         let models_dir = crate::vc_base_models::base_models_dir(&self.settings_base_dir);
-        let signal_tx = self.signal_tx.clone();
-        tokio::spawn(async move {
-            let _ = signal_tx.send(SE::VCBaseModelProgress {
+        // Same {success, message} shape as the legacy service's `_run_base_download`.
+        spawn_progress_task(
+            self.signal_tx.clone(),
+            SE::VCBaseModelProgress {
                 message: "Downloading base models...".to_string(),
-            });
-            // Same {success, message} shape as the legacy service's
-            // `_run_base_download`.
-            let json = match crate::vc_base_models::download_base_models(&models_dir).await {
-                Ok(()) => serde_json::json!({
-                    "success": true,
-                    "message": "Base models downloaded successfully.",
-                })
-                .to_string(),
-                Err(e) => serde_json::json!({
-                    "success": false,
-                    "message": e.to_string(),
-                })
-                .to_string(),
-            };
-            let _ = signal_tx.send(SE::VCBaseModelComplete { json });
-        });
+            },
+            async move { crate::vc_base_models::download_base_models(&models_dir).await },
+            "Base models downloaded successfully.",
+            |json| SE::VCBaseModelComplete { json },
+        );
     }
 
     #[zbus(signal)]
@@ -1517,7 +1537,7 @@ impl VcInterface {
     #[zbus(name = "CalibrationGetStatus")]
     async fn calibration_get_status(&self) -> String {
         let session = self.calibration.lock().await;
-        serde_json::to_string(&session.status()).unwrap_or_else(|_| "{}".to_string())
+        to_json_or(&session.status(), "{}")
     }
 
     // ── libonnxruntime install helper ([E10-S7]) ────────────────────────
@@ -1579,25 +1599,15 @@ impl VcInterface {
     /// it. Reports via `CudnnInstallProgress`/`CudnnInstallComplete`.
     #[zbus(name = "InstallCudnn")]
     async fn install_cudnn(&self) {
-        let signal_tx = self.signal_tx.clone();
-        tokio::spawn(async move {
-            let _ = signal_tx.send(SE::VCCudnnInstallProgress {
+        spawn_progress_task(
+            self.signal_tx.clone(),
+            SE::VCCudnnInstallProgress {
                 message: "Installing cuDNN...".to_owned(),
-            });
-            let json = match crate::vc_onnxruntime_detect::install_cudnn().await {
-                Ok(()) => serde_json::json!({
-                    "success": true,
-                    "message": "cuDNN installed.",
-                })
-                .to_string(),
-                Err(e) => serde_json::json!({
-                    "success": false,
-                    "message": e,
-                })
-                .to_string(),
-            };
-            let _ = signal_tx.send(SE::VCCudnnInstallComplete { json });
-        });
+            },
+            crate::vc_onnxruntime_detect::install_cudnn(),
+            "cuDNN installed.",
+            |json| SE::VCCudnnInstallComplete { json },
+        );
     }
 
     #[zbus(signal)]
@@ -2125,7 +2135,7 @@ fn build_status_json(state: &AppState) -> String {
         if result.is_empty() {
             return "{}".to_string();
         }
-        return serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string());
+        return to_json_or(&result, "{}");
     }
 
     // Fallback: group all fields under "headset" when no representation is defined.
@@ -2135,7 +2145,7 @@ fn build_status_json(state: &AppState) -> String {
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
     let result = serde_json::json!({"headset": fields});
-    serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
+    to_json_or(&result, "{}")
 }
 
 pub(crate) fn build_settings_json(state: &AppState) -> String {
