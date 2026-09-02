@@ -215,24 +215,24 @@ pub fn general_settings_path() -> PathBuf {
 /// Runs a reconnect loop: if the headset is off when the daemon starts, or
 /// powers off while running, the loop retries `device_init` automatically.
 /// The task runs until aborted by the hotplug Removed handler (dongle removed).
-async fn run_device(
-    info: DeviceInfo,
-    config: Arc<DeviceConfig>,
-    helper_sock: PathBuf,
-    app_state: Arc<Mutex<AppState>>,
-    signal_tx: broadcast::Sender<SignalEvent>,
-    audio_shared: Arc<Mutex<Option<audio::AudioSetup>>>,
-) {
-    let path_str = info.hidraw_path.to_string_lossy().to_string();
-    info!("monitoring {path_str} (PID={:#06x})", info.pid);
-
+/// Registers `info` in `AppState` with a placeholder command channel (replaced
+/// once the first session connects) and emits `DeviceConnected`. Runs once per
+/// dongle plug-in, before the reconnect loop that actually talks to the headset.
+/// Returns the device's friendly display name.
+async fn register_device(
+    info: &DeviceInfo,
+    config: &Arc<DeviceConfig>,
+    app_state: &Arc<Mutex<AppState>>,
+    signal_tx: &broadcast::Sender<SignalEvent>,
+    path_str: &str,
+) -> String {
     let friendly_name = config
         .device
         .as_ref()
         .and_then(|d| d.variants.as_ref())
         .and_then(|vs| vs.iter().find(|v| v.product_id == info.pid))
         .and_then(|v| v.name.clone())
-        .unwrap_or_else(|| path_str.clone());
+        .unwrap_or_else(|| path_str.to_owned());
 
     let capabilities: Vec<String> = config
         .device
@@ -241,15 +241,13 @@ async fn run_device(
         .cloned()
         .unwrap_or_default();
 
-    // Register the device once (the dongle is present).  A placeholder
-    // cmd_tx is used until the first successful session replaces it.
     let (placeholder_tx, _) = mpsc::channel::<DeviceCommand>(1);
     {
         let mut s = app_state.lock().await;
         s.devices.insert(
             info.hidraw_path.clone(),
             DeviceEntry {
-                config: Arc::clone(&config),
+                config: Arc::clone(config),
                 vid: info.vid,
                 pid: info.pid,
                 name: friendly_name.clone(),
@@ -264,6 +262,23 @@ async fn run_device(
         name: friendly_name.clone(),
         capabilities,
     });
+
+    friendly_name
+}
+
+async fn run_device(
+    info: DeviceInfo,
+    config: Arc<DeviceConfig>,
+    helper_sock: PathBuf,
+    app_state: Arc<Mutex<AppState>>,
+    signal_tx: broadcast::Sender<SignalEvent>,
+    audio_shared: Arc<Mutex<Option<audio::AudioSetup>>>,
+) {
+    let path_str = info.hidraw_path.to_string_lossy().to_string();
+    info!("monitoring {path_str} (PID={:#06x})", info.pid);
+
+    let friendly_name =
+        register_device(&info, &config, &app_state, &signal_tx, &path_str).await;
 
     // Reconnection loop: retries whenever the headset is powered off or
     // disconnects.  Exits only when the task is aborted (dongle removed).
@@ -442,133 +457,17 @@ async fn run_device(
             }
         }
 
-        let (event_tx, mut event_rx) = mpsc::channel::<EmitEvent>(64);
+        let (event_tx, event_rx) = mpsc::channel::<EmitEvent>(64);
 
         // Forward EmitEvents to the state map; manage audio lifecycle from
         // radio_connection_status; apply chatmix on slider changes.
-        let state_for_events = Arc::clone(&app_state);
-        let signal_tx_clone = signal_tx.clone();
-        let hidraw_path_clone = info.hidraw_path.clone();
-        let audio_for_task = Arc::clone(&audio_shared);
-        tokio::spawn(async move {
-            // Edge-detect state: the device re-emits full status (including
-            // radio_connection_status and chatmix_*) on every periodic poll,
-            // not only on change. Without tracking the last-seen value here,
-            // the audio lifecycle/redirect logic below would re-fire every
-            // poll cycle (~10s) even while nothing changed, spamming pactl
-            // calls against sinks that were already torn down.
-            let mut last_radio_status: Option<String> = None;
-            let mut last_chatmix: Option<(u8, u8)> = None;
-            while let Some(ev) = event_rx.recv().await {
-                debug!(signal = %ev.signal, fields = ?ev.fields, "sync event");
-                let mut chatmix_changed = false;
-                let mut radio_status: Option<String> = None;
-                {
-                    let mut s = state_for_events.lock().await;
-                    if let Some(entry) = s.devices.get_mut(&hidraw_path_clone) {
-                        for (field, val) in &ev.fields {
-                            let dt = ev.display_types.get(field).map(String::as_str);
-                            entry
-                                .status
-                                .insert(field.clone(), state::event_value_to_json(val, dt));
-                            match field.as_str() {
-                                "chatmix_game" | "chatmix_chat" => chatmix_changed = true,
-                                "radio_connection_status" => {
-                                    if let EventValue::Str(s) = val {
-                                        radio_status = Some(s.clone());
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-                let _ = signal_tx_clone.send(SignalEvent::StatusChanged);
-
-                // Drive audio sink lifecycle from the wireless connection event.
-                // Only react on an actual transition — the device re-sends the
-                // same radio_connection_status on every periodic poll, and
-                // acting on every poll spams pactl against already-torn-down
-                // sinks and repeatedly redirects the default sink.
-                // Guards are never held across .await — take/set value, drop, then await.
-                if let Some(ref status) = radio_status {
-                    let changed = last_radio_status.as_deref() != Some(status.as_str());
-                    last_radio_status = Some(status.clone());
-                    if changed {
-                        if status.contains("NOT_CONNECTED") || status == "DISCONNECTED" {
-                            let setup = audio_for_task.lock().await.take();
-                            if let Some(s) = setup {
-                                info!("headset wireless off: removing virtual sinks");
-                                audio::teardown_sinks(s).await;
-                            }
-                            // Redirect to user-chosen sink on wireless disconnect.
-                            let (do_redirect, target) = {
-                                let s = state_for_events.lock().await;
-                                (
-                                    s.general_settings.redirect_audio_on_disconnect,
-                                    s.general_settings
-                                        .redirect_audio_on_disconnect_device
-                                        .clone(),
-                                )
-                            };
-                            if do_redirect {
-                                if let Some(ref sink) = target {
-                                    audio::set_default_sink(sink).await;
-                                }
-                            }
-                        } else if status == "PAIRED_CONNECTED" || status == "CONNECTED" {
-                            let needs = audio_for_task.lock().await.is_none();
-                            if needs {
-                                match audio::setup_sinks().await {
-                                    Ok(s) => {
-                                        info!("headset wireless on: virtual sinks created");
-                                        *audio_for_task.lock().await = Some(s);
-
-                                        // Redirect default sink to Arctis_Media on
-                                        // wireless (re)connect, mirroring the
-                                        // cold-start redirect. Without this, a
-                                        // reconnect after the initial session start
-                                        // (e.g. headset powered on later) never
-                                        // switches the default sink.
-                                        let redirect = state_for_events
-                                            .lock()
-                                            .await
-                                            .general_settings
-                                            .redirect_audio_on_connect;
-                                        if redirect {
-                                            audio::set_default_sink(audio::MEDIA_SINK).await;
-                                        }
-                                    }
-                                    Err(e) => warn!("audio setup on reconnect failed: {e}"),
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if chatmix_changed {
-                    let (game, chat) = {
-                        let s = state_for_events.lock().await;
-                        let e = s.devices.get(&hidraw_path_clone);
-                        let g = e
-                            .and_then(|e| e.status.get("chatmix_game"))
-                            .and_then(|v| v["value"].as_u64())
-                            .map(|v| v as u8);
-                        let c = e
-                            .and_then(|e| e.status.get("chatmix_chat"))
-                            .and_then(|v| v["value"].as_u64())
-                            .map(|v| v as u8);
-                        (g, c)
-                    };
-                    if let (Some(g), Some(c)) = (game, chat) {
-                        if last_chatmix != Some((g, c)) {
-                            last_chatmix = Some((g, c));
-                            audio::set_chatmix(g, c).await;
-                        }
-                    }
-                }
-            }
-        });
+        tokio::spawn(forward_events(
+            event_rx,
+            Arc::clone(&app_state),
+            signal_tx.clone(),
+            info.hidraw_path.clone(),
+            Arc::clone(&audio_shared),
+        ));
 
         match session.run_event_loop_with_commands(event_tx, cmd_rx).await {
             Err(EngineError::Io(ref io_e))
@@ -587,6 +486,138 @@ async fn run_device(
         }
 
         tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
+
+/// Consumes `event_rx` for the lifetime of one device session: mirrors each
+/// `EmitEvent` into `AppState`'s status map, signals D-Bus, and reacts to two
+/// specific fields — driving the virtual-sink lifecycle from
+/// `radio_connection_status` transitions and re-applying chatmix balance from
+/// `chatmix_game`/`chatmix_chat`. Runs as its own spawned task so it can keep
+/// draining events while `run_event_loop_with_commands` talks to the device.
+async fn forward_events(
+    mut event_rx: mpsc::Receiver<EmitEvent>,
+    state_for_events: Arc<Mutex<AppState>>,
+    signal_tx: broadcast::Sender<SignalEvent>,
+    hidraw_path: PathBuf,
+    audio_for_task: Arc<Mutex<Option<audio::AudioSetup>>>,
+) {
+    // Edge-detect state: the device re-emits full status (including
+    // radio_connection_status and chatmix_*) on every periodic poll,
+    // not only on change. Without tracking the last-seen value here,
+    // the audio lifecycle/redirect logic below would re-fire every
+    // poll cycle (~10s) even while nothing changed, spamming pactl
+    // calls against sinks that were already torn down.
+    let mut last_radio_status: Option<String> = None;
+    let mut last_chatmix: Option<(u8, u8)> = None;
+    while let Some(ev) = event_rx.recv().await {
+        debug!(signal = %ev.signal, fields = ?ev.fields, "sync event");
+        let mut chatmix_changed = false;
+        let mut radio_status: Option<String> = None;
+        {
+            let mut s = state_for_events.lock().await;
+            if let Some(entry) = s.devices.get_mut(&hidraw_path) {
+                for (field, val) in &ev.fields {
+                    let dt = ev.display_types.get(field).map(String::as_str);
+                    entry
+                        .status
+                        .insert(field.clone(), state::event_value_to_json(val, dt));
+                    match field.as_str() {
+                        "chatmix_game" | "chatmix_chat" => chatmix_changed = true,
+                        "radio_connection_status" => {
+                            if let EventValue::Str(s) = val {
+                                radio_status = Some(s.clone());
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        let _ = signal_tx.send(SignalEvent::StatusChanged);
+
+        // Drive audio sink lifecycle from the wireless connection event.
+        // Only react on an actual transition — the device re-sends the
+        // same radio_connection_status on every periodic poll, and
+        // acting on every poll spams pactl against already-torn-down
+        // sinks and repeatedly redirects the default sink.
+        // Guards are never held across .await — take/set value, drop, then await.
+        if let Some(ref status) = radio_status {
+            let changed = last_radio_status.as_deref() != Some(status.as_str());
+            last_radio_status = Some(status.clone());
+            if changed {
+                if status.contains("NOT_CONNECTED") || status == "DISCONNECTED" {
+                    let setup = audio_for_task.lock().await.take();
+                    if let Some(s) = setup {
+                        info!("headset wireless off: removing virtual sinks");
+                        audio::teardown_sinks(s).await;
+                    }
+                    // Redirect to user-chosen sink on wireless disconnect.
+                    let (do_redirect, target) = {
+                        let s = state_for_events.lock().await;
+                        (
+                            s.general_settings.redirect_audio_on_disconnect,
+                            s.general_settings
+                                .redirect_audio_on_disconnect_device
+                                .clone(),
+                        )
+                    };
+                    if do_redirect {
+                        if let Some(ref sink) = target {
+                            audio::set_default_sink(sink).await;
+                        }
+                    }
+                } else if status == "PAIRED_CONNECTED" || status == "CONNECTED" {
+                    let needs = audio_for_task.lock().await.is_none();
+                    if needs {
+                        match audio::setup_sinks().await {
+                            Ok(s) => {
+                                info!("headset wireless on: virtual sinks created");
+                                *audio_for_task.lock().await = Some(s);
+
+                                // Redirect default sink to Arctis_Media on
+                                // wireless (re)connect, mirroring the
+                                // cold-start redirect. Without this, a
+                                // reconnect after the initial session start
+                                // (e.g. headset powered on later) never
+                                // switches the default sink.
+                                let redirect = state_for_events
+                                    .lock()
+                                    .await
+                                    .general_settings
+                                    .redirect_audio_on_connect;
+                                if redirect {
+                                    audio::set_default_sink(audio::MEDIA_SINK).await;
+                                }
+                            }
+                            Err(e) => warn!("audio setup on reconnect failed: {e}"),
+                        }
+                    }
+                }
+            }
+        }
+
+        if chatmix_changed {
+            let (game, chat) = {
+                let s = state_for_events.lock().await;
+                let e = s.devices.get(&hidraw_path);
+                let g = e
+                    .and_then(|e| e.status.get("chatmix_game"))
+                    .and_then(|v| v["value"].as_u64())
+                    .map(|v| v as u8);
+                let c = e
+                    .and_then(|e| e.status.get("chatmix_chat"))
+                    .and_then(|v| v["value"].as_u64())
+                    .map(|v| v as u8);
+                (g, c)
+            };
+            if let (Some(g), Some(c)) = (game, chat) {
+                if last_chatmix != Some((g, c)) {
+                    last_chatmix = Some((g, c));
+                    audio::set_chatmix(g, c).await;
+                }
+            }
+        }
     }
 }
 
