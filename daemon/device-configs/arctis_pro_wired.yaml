@@ -1,0 +1,32 @@
+extends: base_arctis_5
+
+# "Arctis Pro" (standalone, no GameDAC) — raw spec (`arctis-pro.device`)
+# literally says "Basic firmware API is identical to Arctis 5" and just
+# `include`s it: same CX20892/STM8 control plane, same structs/apis, one
+# PID. The only spec-side additions over Arctis 5 are two extra RGB
+# lighting zones (`mic_lighting`/`muted_mic_lighting`, derived from the
+# same `left_lighting` struct Arctis 5 already excludes) — still no
+# `lighting` capability in this project's vocabulary, same precedent as
+# Arctis 5/Nova 3 wired, so left out here too, not a device-specific gap.
+
+device:
+  name: "SteelSeries Arctis Pro"
+  vendor_id: 0x1038
+
+  # Same caveats as Arctis 5: Consumer usage page per the raw spec (not a
+  # transcription error), command_interface/sync_interface undeclared in
+  # the raw spec and no v2 precedent — unconfirmed, wants real hardware.
+  variants:
+    - product_id: 0x1252
+
+  hid:
+    usage_page: 0x000C
+    usage: 0x0001
+    command_interface:
+      interface: 3
+    sync_interface:
+      interface: 3
+
+  capabilities:
+    - custom_eq
+    - microphone

@@ -1303,6 +1303,61 @@ mod nova_yaml_tests {
         assert_eq!(preset_payload.len(), 33, "padded to chunk_size");
     }
 
+    #[test]
+    fn gamedac_select_eq_preset_and_custom_eq_all_write_then_sleep() {
+        use crate::api_executor::{ApiExecutor, WriteAction};
+        use crate::codec::FieldValue;
+        use std::time::Duration;
+
+        let Some(cfg) = load_tier2_device("arctis_pro_gamedac.yaml") else {
+            return;
+        };
+        let api = ApiExecutor::new(&cfg);
+
+        let mut preset_values = HashMap::new();
+        preset_values.insert("eq_preset".to_string(), FieldValue::U8(3));
+        let op = api
+            .prepare_write("select_eq_preset", &preset_values)
+            .unwrap();
+        assert_eq!(op.actions.len(), 2, "write message + sleep");
+        let WriteAction::Send { payload, .. } = &op.actions[0] else {
+            panic!("expected a Send action");
+        };
+        assert_eq!(&payload[0..3], [0x00, 0x2E, 3]);
+        assert_eq!(payload.len(), 65, "padded to chunk_size");
+        assert_eq!(op.actions[1], WriteAction::Sleep(Duration::from_millis(70)));
+
+        let mut eq_values = HashMap::new();
+        for i in 1..=10 {
+            eq_values.insert(format!("custom_eq{i}"), FieldValue::I32(i * 100));
+        }
+        let op = api.prepare_write("custom_eq_all", &eq_values).unwrap();
+        assert_eq!(op.actions.len(), 2, "write message + sleep");
+        let WriteAction::Send { payload, .. } = &op.actions[0] else {
+            panic!("expected a Send action");
+        };
+        assert_eq!(&payload[0..2], [0x00, 0x33]);
+        assert_eq!(
+            &payload[2..6],
+            100_i32.to_be_bytes(),
+            "gain1 serialised big-endian, matching the raw spec's bytes->int32"
+        );
+        assert_eq!(op.actions[1], WriteAction::Sleep(Duration::from_millis(70)));
+
+        let op = api
+            .prepare_write("host_mode", &{
+                let mut v = HashMap::new();
+                v.insert("host_mode".to_string(), FieldValue::U8(2));
+                v
+            })
+            .unwrap();
+        assert_eq!(op.actions.len(), 2, "write message + sleep");
+        assert_eq!(
+            op.actions[1],
+            WriteAction::Sleep(Duration::from_millis(2000))
+        );
+    }
+
     /// Regression guard: every device file (anything not starting with
     /// `base_`) in `device-configs/` must parse without error. Catches DSL
     /// typos/schema mistakes in new device conversions without needing a
