@@ -199,20 +199,18 @@ pub fn parametric_eq_name_payload(
 /// compact shape via `gain_encoding`; Q factor becomes a little-endian
 /// uint16 in thousandths on every known device (the vendor spec stores Q
 /// factor little-endian specifically — everything else is big-endian).
-pub fn parametric_eq_bands_payload(
+/// Encodes `band_count` parametric-EQ bands starting at `bands_offset` in the
+/// raw codec-serialised `bytes`, appending each band's on-wire form —
+/// `[frequency_be(2), filter_type(1), gain(1), q_factor_le(2)]` — to `out`.
+/// Shared by every parametric-EQ payload transform; they differ only in how
+/// they build the header that precedes the band data.
+fn encode_parametric_bands(
+    out: &mut Vec<u8>,
     bytes: &[u8],
     bands_offset: usize,
     band_count: usize,
     gain_encoding: GainEncoding,
-) -> Vec<Vec<u8>> {
-    let name_offset = bands_offset + band_count * PARAMETRIC_EQ_BAND_SRC_SIZE;
-    if bytes.len() < name_offset {
-        return vec![bytes.to_vec()];
-    }
-    let mut out = Vec::with_capacity(3 + band_count * 6);
-    out.push(bytes[0]);
-    out.push(bytes[4]);
-    out.push(bytes[2]);
+) {
     for band in 0..band_count {
         let base = bands_offset + band * PARAMETRIC_EQ_BAND_SRC_SIZE;
         // frequency: passthrough, 2 bytes BE
@@ -227,6 +225,23 @@ pub fn parametric_eq_bands_payload(
         let q_u16 = (q * 1000.0).round().clamp(0.0, u16::MAX as f32) as u16;
         out.extend_from_slice(&q_u16.to_le_bytes());
     }
+}
+
+pub fn parametric_eq_bands_payload(
+    bytes: &[u8],
+    bands_offset: usize,
+    band_count: usize,
+    gain_encoding: GainEncoding,
+) -> Vec<Vec<u8>> {
+    let name_offset = bands_offset + band_count * PARAMETRIC_EQ_BAND_SRC_SIZE;
+    if bytes.len() < name_offset {
+        return vec![bytes.to_vec()];
+    }
+    let mut out = Vec::with_capacity(3 + band_count * 6);
+    out.push(bytes[0]);
+    out.push(bytes[4]);
+    out.push(bytes[2]);
+    encode_parametric_bands(&mut out, bytes, bands_offset, band_count, gain_encoding);
     vec![out]
 }
 
@@ -263,16 +278,13 @@ pub fn gamebuds_eq_bands_payload(
     let mut out = Vec::with_capacity(2 + band_count * 6);
     out.push(bytes[0]);
     out.push(bytes[4]);
-    for band in 0..band_count {
-        let base = bands_offset + band * PARAMETRIC_EQ_BAND_SRC_SIZE;
-        out.extend_from_slice(&bytes[base..base + 2]);
-        out.push(bytes[base + 2]);
-        let gain_db = f32::from_be_bytes(bytes[base + 3..base + 7].try_into().unwrap());
-        out.push(GainEncoding::SignedTenthsDb.encode(gain_db));
-        let q = f32::from_be_bytes(bytes[base + 7..base + 11].try_into().unwrap());
-        let q_u16 = (q * 1000.0).round().clamp(0.0, u16::MAX as f32) as u16;
-        out.extend_from_slice(&q_u16.to_le_bytes());
-    }
+    encode_parametric_bands(
+        &mut out,
+        bytes,
+        bands_offset,
+        band_count,
+        GainEncoding::SignedTenthsDb,
+    );
     vec![out]
 }
 
@@ -402,16 +414,7 @@ pub fn parametric_eq_named_slot_payload(
         return vec![bytes.to_vec()];
     }
     let mut out = bytes[0..header_len].to_vec();
-    for band in 0..band_count {
-        let base = header_len + band * PARAMETRIC_EQ_BAND_SRC_SIZE;
-        out.extend_from_slice(&bytes[base..base + 2]); // frequency: passthrough, 2 bytes BE
-        out.push(bytes[base + 2]); // filter_type: passthrough
-        let gain_db = f32::from_be_bytes(bytes[base + 3..base + 7].try_into().unwrap());
-        out.push(gain_encoding.encode(gain_db));
-        let q = f32::from_be_bytes(bytes[base + 7..base + 11].try_into().unwrap());
-        let q_u16 = (q * 1000.0).round().clamp(0.0, u16::MAX as f32) as u16;
-        out.extend_from_slice(&q_u16.to_le_bytes()); // little-endian, same as every other device
-    }
+    encode_parametric_bands(&mut out, bytes, header_len, band_count, gain_encoding);
     vec![out]
 }
 
