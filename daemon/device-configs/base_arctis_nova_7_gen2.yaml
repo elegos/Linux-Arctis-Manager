@@ -138,16 +138,15 @@ structs:
   # three separate HID reports. `apis:` below expresses this as a 3-step
   # `write.steps` sequence, each step slicing a different part of this same
   # serialisation via its own `payload_transform` builtin — see
-  # `nova7gen2_eq_{name,bands,commit}_payload` in builtins.rs for exactly
+  # `parametric_eq_{name,bands,commit}_payload` (generic, parameterised via
+  # `payload_transform_args`) in builtins.rs for exactly
   # which bytes each step picks out and how gain/Q-factor get re-encoded
   # into the firmware's compact per-band wire format.
-  parametric_eq:
-    - {name: report_id,        type: uint8, constant: 0x00}
-    - {name: eq_name_command,  type: uint8, constant: 0xA7}
-    - {name: connection_type,  type: uint8, constant: 0x00}
-    - {name: preset_type,      type: uint8, range: [0, 1]}
-    - {name: eqband_command,   type: uint8, constant: 0x33}
-    - {name: update_complete,  type: uint8, constant: 0x27}
+  # Shared by all three write-side domains below via `{struct:
+  # parametric_eq_bands}` — they're byte-identical band groups (the vendor
+  # spec's own `parametric_eq_bt`/`parametric_eq_mic` are `derived-struct`s
+  # of `parametric_eq`, same field ranges).
+  parametric_eq_bands:
     - {name: band1_frequency,   type: uint16,  range: [20, 20001]}
     - {name: band1_filter_type, type: uint8,   range: [0, 6]}
     - {name: band1_gain,        type: float32, range: [-12.0, 12.0]}
@@ -188,6 +187,15 @@ structs:
     - {name: band10_filter_type, type: uint8,   range: [0, 6]}
     - {name: band10_gain,        type: float32, range: [-12.0, 12.0]}
     - {name: band10_q_factor,    type: float32, range: [0.2, 10.0]}
+
+  parametric_eq:
+    - {name: report_id,        type: uint8, constant: 0x00}
+    - {name: eq_name_command,  type: uint8, constant: 0xA7}
+    - {name: connection_type,  type: uint8, constant: 0x00}
+    - {name: preset_type,      type: uint8, range: [0, 1]}
+    - {name: eqband_command,   type: uint8, constant: 0x33}
+    - {name: update_complete,  type: uint8, constant: 0x27}
+    - {struct: parametric_eq_bands}
     - {name: name, type: varstring, size: 60}
 
   parametric_eq_bt:
@@ -197,46 +205,7 @@ structs:
     - {name: preset_type,      type: uint8, range: [0, 1]}
     - {name: eqband_command,   type: uint8, constant: 0x33}
     - {name: update_complete,  type: uint8, constant: 0x27}
-    - {name: band1_frequency,   type: uint16,  range: [20, 20001]}
-    - {name: band1_filter_type, type: uint8,   range: [0, 6]}
-    - {name: band1_gain,        type: float32, range: [-12.0, 12.0]}
-    - {name: band1_q_factor,    type: float32, range: [0.2, 10.0]}
-    - {name: band2_frequency,   type: uint16,  range: [20, 20001]}
-    - {name: band2_filter_type, type: uint8,   range: [0, 6]}
-    - {name: band2_gain,        type: float32, range: [-12.0, 12.0]}
-    - {name: band2_q_factor,    type: float32, range: [0.2, 10.0]}
-    - {name: band3_frequency,   type: uint16,  range: [20, 20001]}
-    - {name: band3_filter_type, type: uint8,   range: [0, 6]}
-    - {name: band3_gain,        type: float32, range: [-12.0, 12.0]}
-    - {name: band3_q_factor,    type: float32, range: [0.2, 10.0]}
-    - {name: band4_frequency,   type: uint16,  range: [20, 20001]}
-    - {name: band4_filter_type, type: uint8,   range: [0, 6]}
-    - {name: band4_gain,        type: float32, range: [-12.0, 12.0]}
-    - {name: band4_q_factor,    type: float32, range: [0.2, 10.0]}
-    - {name: band5_frequency,   type: uint16,  range: [20, 20001]}
-    - {name: band5_filter_type, type: uint8,   range: [0, 6]}
-    - {name: band5_gain,        type: float32, range: [-12.0, 12.0]}
-    - {name: band5_q_factor,    type: float32, range: [0.2, 10.0]}
-    - {name: band6_frequency,   type: uint16,  range: [20, 20001]}
-    - {name: band6_filter_type, type: uint8,   range: [0, 6]}
-    - {name: band6_gain,        type: float32, range: [-12.0, 12.0]}
-    - {name: band6_q_factor,    type: float32, range: [0.2, 10.0]}
-    - {name: band7_frequency,   type: uint16,  range: [20, 20001]}
-    - {name: band7_filter_type, type: uint8,   range: [0, 6]}
-    - {name: band7_gain,        type: float32, range: [-12.0, 12.0]}
-    - {name: band7_q_factor,    type: float32, range: [0.2, 10.0]}
-    - {name: band8_frequency,   type: uint16,  range: [20, 20001]}
-    - {name: band8_filter_type, type: uint8,   range: [0, 6]}
-    - {name: band8_gain,        type: float32, range: [-12.0, 12.0]}
-    - {name: band8_q_factor,    type: float32, range: [0.2, 10.0]}
-    - {name: band9_frequency,   type: uint16,  range: [20, 20001]}
-    - {name: band9_filter_type, type: uint8,   range: [0, 6]}
-    - {name: band9_gain,        type: float32, range: [-12.0, 12.0]}
-    - {name: band9_q_factor,    type: float32, range: [0.2, 10.0]}
-    - {name: band10_frequency,   type: uint16,  range: [20, 20001]}
-    - {name: band10_filter_type, type: uint8,   range: [0, 6]}
-    - {name: band10_gain,        type: float32, range: [-12.0, 12.0]}
-    - {name: band10_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {struct: parametric_eq_bands}
     - {name: name, type: varstring, size: 60}
 
   parametric_eq_mic:
@@ -246,46 +215,7 @@ structs:
     - {name: preset_type,      type: uint8, range: [0, 1]}
     - {name: eqband_command,   type: uint8, constant: 0x33}
     - {name: update_complete,  type: uint8, constant: 0x27}
-    - {name: band1_frequency,   type: uint16,  range: [20, 20001]}
-    - {name: band1_filter_type, type: uint8,   range: [0, 6]}
-    - {name: band1_gain,        type: float32, range: [-12.0, 12.0]}
-    - {name: band1_q_factor,    type: float32, range: [0.2, 10.0]}
-    - {name: band2_frequency,   type: uint16,  range: [20, 20001]}
-    - {name: band2_filter_type, type: uint8,   range: [0, 6]}
-    - {name: band2_gain,        type: float32, range: [-12.0, 12.0]}
-    - {name: band2_q_factor,    type: float32, range: [0.2, 10.0]}
-    - {name: band3_frequency,   type: uint16,  range: [20, 20001]}
-    - {name: band3_filter_type, type: uint8,   range: [0, 6]}
-    - {name: band3_gain,        type: float32, range: [-12.0, 12.0]}
-    - {name: band3_q_factor,    type: float32, range: [0.2, 10.0]}
-    - {name: band4_frequency,   type: uint16,  range: [20, 20001]}
-    - {name: band4_filter_type, type: uint8,   range: [0, 6]}
-    - {name: band4_gain,        type: float32, range: [-12.0, 12.0]}
-    - {name: band4_q_factor,    type: float32, range: [0.2, 10.0]}
-    - {name: band5_frequency,   type: uint16,  range: [20, 20001]}
-    - {name: band5_filter_type, type: uint8,   range: [0, 6]}
-    - {name: band5_gain,        type: float32, range: [-12.0, 12.0]}
-    - {name: band5_q_factor,    type: float32, range: [0.2, 10.0]}
-    - {name: band6_frequency,   type: uint16,  range: [20, 20001]}
-    - {name: band6_filter_type, type: uint8,   range: [0, 6]}
-    - {name: band6_gain,        type: float32, range: [-12.0, 12.0]}
-    - {name: band6_q_factor,    type: float32, range: [0.2, 10.0]}
-    - {name: band7_frequency,   type: uint16,  range: [20, 20001]}
-    - {name: band7_filter_type, type: uint8,   range: [0, 6]}
-    - {name: band7_gain,        type: float32, range: [-12.0, 12.0]}
-    - {name: band7_q_factor,    type: float32, range: [0.2, 10.0]}
-    - {name: band8_frequency,   type: uint16,  range: [20, 20001]}
-    - {name: band8_filter_type, type: uint8,   range: [0, 6]}
-    - {name: band8_gain,        type: float32, range: [-12.0, 12.0]}
-    - {name: band8_q_factor,    type: float32, range: [0.2, 10.0]}
-    - {name: band9_frequency,   type: uint16,  range: [20, 20001]}
-    - {name: band9_filter_type, type: uint8,   range: [0, 6]}
-    - {name: band9_gain,        type: float32, range: [-12.0, 12.0]}
-    - {name: band9_q_factor,    type: float32, range: [0.2, 10.0]}
-    - {name: band10_frequency,   type: uint16,  range: [20, 20001]}
-    - {name: band10_filter_type, type: uint8,   range: [0, 6]}
-    - {name: band10_gain,        type: float32, range: [-12.0, 12.0]}
-    - {name: band10_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {struct: parametric_eq_bands}
     - {name: name, type: varstring, size: 60}
 
   # Readback of the currently active preset's name (RF/BT/mic domains) — the
@@ -543,24 +473,28 @@ apis:
   get_eq_preset_data_mic:
     read: {transport: HID_IO, chunk_size: 65}
 
+  # `header_len: 6` (report_id, eq_name_command, connection_type,
+  # preset_type, eqband_command, update_complete), `commit_byte_offset: 5` —
+  # shared by all three domains, only `connection_type`'s constant (baked
+  # into each struct above) differs.
   parametric_eq:
     write:
       steps:
-        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:nova7gen2_eq_name"}
-        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:nova7gen2_eq_bands"}
-        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:nova7gen2_eq_commit"}
+        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:parametric_eq_name", payload_transform_args: {header_len: 6, band_count: 10}}
+        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:parametric_eq_bands", payload_transform_args: {header_len: 6, band_count: 10, gain_flavour: signed_tenths_db}}
+        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:parametric_eq_commit", payload_transform_args: {commit_byte_offset: 5}}
   parametric_eq_bt:
     write:
       steps:
-        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:nova7gen2_eq_name"}
-        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:nova7gen2_eq_bands"}
-        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:nova7gen2_eq_commit"}
+        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:parametric_eq_name", payload_transform_args: {header_len: 6, band_count: 10}}
+        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:parametric_eq_bands", payload_transform_args: {header_len: 6, band_count: 10, gain_flavour: signed_tenths_db}}
+        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:parametric_eq_commit", payload_transform_args: {commit_byte_offset: 5}}
   parametric_eq_mic:
     write:
       steps:
-        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:nova7gen2_eq_name"}
-        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:nova7gen2_eq_bands"}
-        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:nova7gen2_eq_commit"}
+        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:parametric_eq_name", payload_transform_args: {header_len: 6, band_count: 10}}
+        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:parametric_eq_bands", payload_transform_args: {header_len: 6, band_count: 10, gain_flavour: signed_tenths_db}}
+        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:parametric_eq_commit", payload_transform_args: {commit_byte_offset: 5}}
 
 sync_events:
   0x37:

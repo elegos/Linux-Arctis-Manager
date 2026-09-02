@@ -464,11 +464,23 @@ apis:
     action: true
     write: {transport: HID_IO, chunk_size: 64}
   parametric_eq:
-    write: {transport: HID_FEATURE, chunk_size: 1036, payload_transform: "builtin:nova_elite_parametric_eq"}
+    write:
+      transport: HID_FEATURE
+      chunk_size: 1036
+      payload_transform: "builtin:parametric_eq_named_slot"
+      payload_transform_args: {header_len: 70, band_count: 10, gain_flavour: signed_tenths_db}
   ten_band_eq_mic:
-    write: {transport: HID_FEATURE, chunk_size: 1036, payload_transform: "builtin:nova_elite_ten_band_eq"}
+    write:
+      transport: HID_FEATURE
+      chunk_size: 1036
+      payload_transform: "builtin:named_slot_signed_gains"
+      payload_transform_args: {header_len: 70}
   ten_band_eq_bt:
-    write: {transport: HID_FEATURE, chunk_size: 1036, payload_transform: "builtin:nova_elite_ten_band_eq"}
+    write:
+      transport: HID_FEATURE
+      chunk_size: 1036
+      payload_transform: "builtin:named_slot_signed_gains"
+      payload_transform_args: {header_len: 70}
 
 # Field `name:` values are deliberately chosen to match the corresponding
 # `sync_read:` struct field name below for the same `emit:`, so a live event

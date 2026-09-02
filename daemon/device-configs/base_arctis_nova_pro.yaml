@@ -204,7 +204,8 @@ apis:
     write:
       transport: HID_IO
       chunk_size: 64
-      payload_transform: "builtin:custom_eq_gains"
+      payload_transform: "builtin:graphic_eq_gains"
+      payload_transform_args: {offset_db: 10.0, clamp_max: 255}
 
   selected_eq_preset:
     write: {transport: HID_IO, chunk_size: 64}

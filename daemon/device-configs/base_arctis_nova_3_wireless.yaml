@@ -1,0 +1,462 @@
+transforms:
+  connection_status_to_label:
+    type: case_int_to_str
+    default: UNKNOWN
+    values: {0: NOT_PAIRED_NOT_SEARCHING, 1: NOT_PAIRED_SEARCHING, 2: PAIRED_NOT_CONNECTED, 3: PAIRED_CONNECTED}
+
+  charging_status_to_label:
+    type: case_int_to_str
+    default: UNKNOWN
+    values: {0: UNKNOWN_OR_HEADSET_NOT_CONNECTED, 1: PLUGGED_IN_CHARGING, 2: PLUGGED_IN_NOT_CHARGING, 3: DISCHARGING}
+
+  audio_mode_to_label:
+    type: case_int_to_str
+    default: UNKNOWN
+    values: {0: DONGLE_TAB, 1: BLUETOOTH_TAB}
+
+structs:
+  fw_versions:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: command,   type: uint8, constant: 0x10}
+    incoming:
+      - {name: report_id,   type: uint8, constant: 0x00}
+      - {name: command,     type: uint8, constant: 0x10}
+      - {name: mcu_ver,     type: bytearray, size: 12}
+      - {name: headset_ver, type: bytearray, size: 12}
+
+  save_to_flash:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x09}
+
+  software_chatmix_status:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x49}
+    - {name: status,    type: uint8, range: [0, 1]}
+
+  # Raw spec names this struct/field `range_extend`/`sample_rate` (not
+  # "wireless_mode"/"mode" like Nova 5's own 0x35/0x36 pair) — kept literal
+  # rather than reusing Nova 5's RANGE/SPEED label guess, since the naming
+  # difference suggests this may be a different setting (an extended-range
+  # toggle, not a range-vs-speed tradeoff) and there's no spec comment
+  # confirming either way. The vendor spec also marks this write
+  # `HIDIONOFAIL` (no-retry-on-failure) — a transport-level retry policy
+  # this DSL doesn't model, so it's just a normal HID_IO write here.
+  range_extend:
+    - {name: report_id,     type: uint8, constant: 0x00}
+    - {name: write_command, type: uint8, constant: 0x35}
+    - {name: sample_rate,   type: uint8, range: [0, 1]}
+
+  read_range_extend:
+    outgoing:
+      - {name: report_id,     type: uint8, constant: 0x00}
+      - {name: write_command, type: uint8, constant: 0x36}
+    incoming:
+      - {name: report_id,     type: uint8, constant: 0x00}
+      - {name: write_command, type: uint8, constant: 0x36}
+      - {name: sample_rate,   type: uint8, range: [0, 1]}
+
+  audio_mode:
+    - {name: report_id,     type: uint8, constant: 0x00}
+    - {name: write_command, type: uint8, constant: 0xAA}
+    - {name: mode,          type: uint8, range: [0, 1]}
+
+  get_audio_mode:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: command,   type: uint8, constant: 0xAB}
+    incoming:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: command,   type: uint8, constant: 0xAB}
+      - {name: mode,      type: uint8, range: [0, 1]}
+
+  mic_volume:
+    - {name: report_id,     type: uint8, constant: 0x00}
+    - {name: write_command, type: uint8, constant: 0x37}
+    - {name: level,         type: uint8, range: [0, 15]}
+
+  sidetone:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x39}
+    - {name: level,     type: uint8, range: [0, 10]}
+
+  volume_limiter:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x27}
+    - {name: enabled,   type: uint8, range: [0, 1]}
+
+  headset_status:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: command,   type: uint8, constant: 0xB0}
+    incoming:
+      - {name: report_id,          type: uint8, constant: 0x00}
+      - {name: command,            type: uint8, constant: 0xB0}
+      - {name: connection_status,  type: uint8, range: [0, 3]}
+      - {name: unused,             type: uint8}
+      - {name: battery_status,     type: uint8, range: [0, 100]}
+      - {name: charging_status,    type: uint8, range: [0, 3]}
+      - {name: game_chatmix_level, type: uint8, range: [0, 100]}
+      - {name: chat_chatmix_level, type: uint8, range: [0, 100]}
+
+  # Mic jack presence + mute state — live-only on this family (no
+  # equivalent field on `headset_status`, unlike some other families'
+  # mic-mute-in-status-byte convention).
+  mic_status:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: command,   type: uint8, constant: 0x52}
+    incoming:
+      - {name: report_id,        type: uint8, constant: 0x00}
+      - {name: command,          type: uint8, constant: 0x52}
+      - {name: mic_jack_state,   type: uint8, range: [0, 255]}
+      - {name: mic_mute_state,   type: uint8, range: [0, 255]}
+
+  ux_settings:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: command,   type: uint8, constant: 0xA0}
+    incoming:
+      - {name: report_id,          type: uint8, constant: 0x00}
+      - {name: command,            type: uint8, constant: 0xA0}
+      - {name: inactivity_timer,   type: uint8, range: [0, 255]}
+      - {name: unused,             type: bytearray, size: 3}
+      - {name: audio_mode,         type: uint8, range: [0, 1]}
+
+  # 10-band PARAMETRIC EQ (frequency + filter type + gain + Q factor per
+  # band) — same struct shape as `base_arctis_nova_5.yaml`'s own
+  # `parametric_eq`/`parametric_eq_bt` (2-message write: name/preset
+  # announce via 0xA5, band data via 0x33/0x34, no commit step), reusing the
+  # same generic `builtin:parametric_eq_name`/`builtin:parametric_eq_bands`
+  # builtins via `payload_transform_args`. The gain byte encoding is
+  # *different* from Nova 5 though: this device uses the same
+  # signed-tenths-dB encoding as the Arctis Nova 7 Gen2/Nova Elite families
+  # (`0x00 = 0.0dB … 0x78 = +12dB … 0x88 = -12dB`, confirmed from this raw
+  # spec's own `create_eq_band_payload`), not Nova 5's unsigned
+  # half-dB-offset one — despite the otherwise byte-identical struct.
+  parametric_eq_bands:
+    - {name: band1_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band1_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band1_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band1_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band2_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band2_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band2_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band2_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band3_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band3_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band3_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band3_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band4_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band4_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band4_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band4_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band5_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band5_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band5_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band5_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band6_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band6_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band6_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band6_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band7_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band7_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band7_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band7_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band8_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band8_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band8_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band8_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band9_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band9_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band9_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band9_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band10_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band10_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band10_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band10_q_factor,    type: float32, range: [0.2, 10.0]}
+
+  parametric_eq:
+    - {name: report_id,        type: uint8, constant: 0x00}
+    - {name: eq_name_command,  type: uint8, constant: 0xA5}
+    - {name: connection_type,  type: uint8, constant: 0x00}
+    - {name: preset_type,      type: uint8, range: [0, 1]}
+    - {name: eqband_command,   type: uint8, constant: 0x33}
+    - {struct: parametric_eq_bands}
+    - {name: name, type: varstring, size: 60}
+
+  parametric_eq_bt:
+    - {name: report_id,        type: uint8, constant: 0x00}
+    - {name: eq_name_command,  type: uint8, constant: 0xA5}
+    - {name: connection_type,  type: uint8, constant: 0x01}
+    - {name: preset_type,      type: uint8, range: [0, 1]}
+    - {name: eqband_command,   type: uint8, constant: 0x34}
+    - {struct: parametric_eq_bands}
+    - {name: name, type: varstring, size: 60}
+
+  # Bulk read of the current curve + mic/sidetone settings — declared for
+  # structural completeness (unsigned gain byte, unscaled Q factor, matching
+  # the write side's own wire format for this device), not wired into
+  # `sync_read` as a live signal, same convention as every other shipped EQ
+  # device: this daemon resets EQ state on init rather than restoring the
+  # hardware's persisted curve.
+  audio_settings:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: command,   type: uint8, constant: 0x20}
+    incoming:
+      - {name: report_id,      type: uint8, constant: 0x00}
+      - {name: command,        type: uint8, constant: 0x20}
+      - {name: band1_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band1_filter_type, type: uint8,  range: [1, 6]}
+      - {name: band1_gain,        type: int8}
+      - {name: band1_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band2_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band2_filter_type, type: uint8,  range: [1, 6]}
+      - {name: band2_gain,        type: int8}
+      - {name: band2_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band3_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band3_filter_type, type: uint8,  range: [1, 6]}
+      - {name: band3_gain,        type: int8}
+      - {name: band3_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band4_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band4_filter_type, type: uint8,  range: [1, 6]}
+      - {name: band4_gain,        type: int8}
+      - {name: band4_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band5_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band5_filter_type, type: uint8,  range: [1, 6]}
+      - {name: band5_gain,        type: int8}
+      - {name: band5_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band6_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band6_filter_type, type: uint8,  range: [1, 6]}
+      - {name: band6_gain,        type: int8}
+      - {name: band6_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band7_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band7_filter_type, type: uint8,  range: [1, 6]}
+      - {name: band7_gain,        type: int8}
+      - {name: band7_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band8_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band8_filter_type, type: uint8,  range: [1, 6]}
+      - {name: band8_gain,        type: int8}
+      - {name: band8_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band9_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band9_filter_type, type: uint8,  range: [1, 6]}
+      - {name: band9_gain,        type: int8}
+      - {name: band9_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band10_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band10_filter_type, type: uint8,  range: [1, 6]}
+      - {name: band10_gain,        type: int8}
+      - {name: band10_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: mic_volume,     type: uint8, range: [0, 15]}
+      - {name: sidetone,       type: uint8, range: [0, 10]}
+      - {name: volume_limiter, type: uint8, range: [0, 1]}
+
+  audio_settings_bt:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: command,   type: uint8, constant: 0x22}
+    incoming:
+      - {name: report_id,      type: uint8, constant: 0x00}
+      - {name: command,        type: uint8, constant: 0x22}
+      - {name: band1_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band1_filter_type, type: uint8,  range: [1, 6]}
+      - {name: band1_gain,        type: int8}
+      - {name: band1_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band2_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band2_filter_type, type: uint8,  range: [1, 6]}
+      - {name: band2_gain,        type: int8}
+      - {name: band2_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band3_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band3_filter_type, type: uint8,  range: [1, 6]}
+      - {name: band3_gain,        type: int8}
+      - {name: band3_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band4_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band4_filter_type, type: uint8,  range: [1, 6]}
+      - {name: band4_gain,        type: int8}
+      - {name: band4_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band5_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band5_filter_type, type: uint8,  range: [1, 6]}
+      - {name: band5_gain,        type: int8}
+      - {name: band5_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band6_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band6_filter_type, type: uint8,  range: [1, 6]}
+      - {name: band6_gain,        type: int8}
+      - {name: band6_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band7_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band7_filter_type, type: uint8,  range: [1, 6]}
+      - {name: band7_gain,        type: int8}
+      - {name: band7_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band8_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band8_filter_type, type: uint8,  range: [1, 6]}
+      - {name: band8_gain,        type: int8}
+      - {name: band8_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band9_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band9_filter_type, type: uint8,  range: [1, 6]}
+      - {name: band9_gain,        type: int8}
+      - {name: band9_q_factor,    type: uint16, range: [200, 10000]}
+      - {name: band10_frequency,   type: uint16, range: [20, 20001]}
+      - {name: band10_filter_type, type: uint8,  range: [1, 6]}
+      - {name: band10_gain,        type: int8}
+      - {name: band10_q_factor,    type: uint16, range: [200, 10000]}
+
+apis:
+  fw_versions:
+    read: {transport: HID_IO, chunk_size: 65}
+
+  save_to_flash:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  software_chatmix_status:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  range_extend:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  read_range_extend:
+    read: {transport: HID_IO, chunk_size: 65}
+
+  audio_mode:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  get_audio_mode:
+    read: {transport: HID_IO, chunk_size: 65}
+
+  mic_volume:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  sidetone:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  volume_limiter:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  headset_status:
+    read: {transport: HID_IO, chunk_size: 65}
+
+  mic_status:
+    read: {transport: HID_IO, chunk_size: 65}
+
+  ux_settings:
+    read: {transport: HID_IO, chunk_size: 65}
+
+  # `header_len: 5` (no commit byte — report_id, eq_name_command,
+  # connection_type, preset_type, eqband_command), 10 bands,
+  # signed-tenths-dB gain (unlike Nova 5's unsigned half-dB-offset one —
+  # see the `parametric_eq_bands` struct comment above), 600ms sleep
+  # between name and band-data messages (matching the vendor spec's own
+  # explicit `time-between-commands` override for this write sequence).
+  parametric_eq:
+    write:
+      steps:
+        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:parametric_eq_name", payload_transform_args: {header_len: 5, band_count: 10}}
+        - {sleep_ms: 600}
+        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:parametric_eq_bands", payload_transform_args: {header_len: 5, band_count: 10, gain_flavour: signed_tenths_db}}
+
+  parametric_eq_bt:
+    write:
+      steps:
+        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:parametric_eq_name", payload_transform_args: {header_len: 5, band_count: 10}}
+        - {sleep_ms: 600}
+        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:parametric_eq_bands", payload_transform_args: {header_len: 5, band_count: 10, gain_flavour: signed_tenths_db}}
+
+  audio_settings:
+    read: {transport: HID_IO, chunk_size: 65}
+
+  audio_settings_bt:
+    read: {transport: HID_IO, chunk_size: 65}
+
+sync_events:
+  0x27:
+    emit: volume_limiter_changed
+    fields:
+      - {name: volume_limiter, byte: 2, display_type: on_off}
+
+  0x37:
+    emit: mic_volume_changed
+    fields:
+      - {name: mic_volume, byte: 2}
+
+  0x39:
+    emit: sidetone_changed
+    fields:
+      - {name: sidetone, byte: 2}
+
+  0x45:
+    emit: chatmix_changed
+    fields:
+      - {name: game_chatmix_level, byte: 2}
+      - {name: chat_chatmix_level, byte: 3}
+
+  0xA3:
+    emit: inactivity_timer_changed
+    fields:
+      - {name: inactivity_timer, byte: 2}
+
+  0xAA:
+    emit: audio_mode_changed
+    fields:
+      - {name: audio_mode, byte: 2, transform: audio_mode_to_label}
+
+  0x52:
+    emit: mic_status_changed
+    fields:
+      - {name: mic_jack_state, byte: 2}
+      - {name: mic_mute_state, byte: 3, display_type: on_off}
+
+  0xB7:
+    emit: battery_changed
+    fields:
+      - {name: battery_status, byte: 2, display_type: percentage}
+
+  0xB9:
+    emit: connection_changed
+    fields:
+      - {name: connection_status, byte: 2, transform: connection_status_to_label}
+    side_effects:
+      - call: sync_all
+
+  0xBB:
+    emit: charging_changed
+    fields:
+      - {name: charging_status, byte: 2, transform: charging_status_to_label}
+
+sync_read:
+  - struct: headset_status
+    maps:
+      - {emit: connection_changed, field: connection_status, transform: connection_status_to_label}
+      - {emit: battery_changed,    field: battery_status,    display_type: percentage}
+      - {emit: charging_changed,   field: charging_status,   transform: charging_status_to_label}
+      - emit: chatmix_changed
+        fields: [game_chatmix_level, chat_chatmix_level]
+
+  - struct: mic_status
+    maps:
+      - emit: mic_status_changed
+        fields: [mic_jack_state, mic_mute_state]
+
+  - struct: ux_settings
+    maps:
+      - {emit: inactivity_timer_changed, field: inactivity_timer}
+      - {emit: audio_mode_changed,       field: audio_mode, transform: audio_mode_to_label}
+
+  - struct: read_range_extend
+    maps:
+      - {emit: range_extend_changed, field: sample_rate}
+
+  - struct: audio_settings
+    maps:
+      - {emit: mic_volume_changed,     field: mic_volume}
+      - {emit: sidetone_changed,       field: sidetone}
+      - {emit: volume_limiter_changed, field: volume_limiter, display_type: on_off}
+      # EQ band fields are intentionally not mapped here — see the comment
+      # above `parametric_eq`/`audio_settings`: this daemon resets EQ state
+      # on init rather than restoring the hardware's persisted curve,
+      # matching every other shipped EQ device.
+
+lifecycle:
+  init:
+    - call: discord_certified_set_attributes
+      args: {echo_cancellation: true, noise_suppression: true}
+    - call: enable_chatmix
+  shutdown:
+    - call: disable_chatmix

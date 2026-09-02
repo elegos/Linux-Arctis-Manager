@@ -31,9 +31,9 @@ Cross-checked against SteelSeries' own device specs, not just the previous v2 li
 | Arctis 9 / 9X | ❌ | — |
 | Arctis Pro (wired) + Pro GameDAC | ❌ | — |
 | Arctis Pro Wireless | ❌ | — |
-| Arctis Nova 3 (wired) | ❌ | — |
-| Arctis Nova 3 / 3X Wireless | ❌ | — |
-| Arctis Nova 4 / 4X | ❌ | — |
+| Arctis Nova 3 (wired) | ✅ | — |
+| Arctis Nova 3 / 3X Wireless | ✅ | — |
+| Arctis Nova 4 / 4X | ✅ | — |
 | Arctis Nova 5 / 5X / 5X White | ✅ | — |
 | Arctis Nova 7 / 7X / WoW / Diablo IV (original firmware) | ✅ | — |
 | Arctis Nova 7 / 7X / 7P Gen 2 (native hardware *or* Gen 2 upgrade firmware) | ✅ | — |

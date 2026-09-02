@@ -12,6 +12,9 @@ For per-device known gaps (what's modelled but not yet wired up, what's still un
 | SteelSeries Arctis 7+ | `0x220E`, `0x2236` | battery, chatmix, custom_eq, microphone |
 | SteelSeries Arctis 7P+ | `0x2212` | battery, custom_eq, microphone |
 | SteelSeries Arctis 7X+ | `0x2216` | battery, custom_eq, microphone |
+| SteelSeries Arctis Nova 3 | `0x12EC` | custom_eq, microphone |
+| SteelSeries Arctis Nova 3 Wireless | `0x2269`, `0x226D` | battery, bluetooth, chatmix, custom_eq, microphone, wireless |
+| SteelSeries Arctis Nova 4 | `0x12F2`, `0x12F6` | battery, chatmix, custom_eq, microphone, wireless |
 | SteelSeries Arctis Nova 5 Wireless | `0x2232`, `0x2253`, `0x2264` | battery, chatmix, custom_eq, microphone, wireless |
 | SteelSeries Arctis Nova 7 | `0x2202`, `0x227A`, `0x223A`, `0x2206`, `0x2258` | battery, bluetooth, chatmix, custom_eq, microphone |
 | SteelSeries Arctis Nova 7 (Gen 2 protocol) | `0x227E`, `0x229E`, `0x2298`, `0x22A1`, `0x22A5`, `0x22AD`, `0x22A7`, `0x22AB`, `0x22A9` | battery, bluetooth, chatmix, custom_eq, microphone |

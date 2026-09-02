@@ -1,0 +1,107 @@
+# Wired USB headset (BERENA/ALC4032 DSP chip family — same `report_id:
+# 0x06`/`chunk_size: 64` convention as `base_arctis_nova_pro.yaml`'s own
+# GameDAC chip). Not a tx/rx pair like the rest of the Nova line — single
+# device, no dongle, no sync-interface/live-push data of any kind in the
+# raw spec (every setting is write-only, nothing to poll beyond
+# `fw_versions`), same "nothing to poll" situation as the Arctis 7+ family.
+# No chatmix, no wireless, no battery — plain wired USB audio, no dongle to
+# mix streams.
+#
+# RGB lighting (`custom_lighting_left/right`, `select_left/right_preset`,
+# `direct_write`, illumination structs) is present in the raw spec but not
+# modeled — there is no `lighting` capability in the current vocabulary and
+# no shipped device exposes one yet. Flagged as a known gap, not a bug —
+# see the [E7-S16] backlog note.
+#
+# Firmware push (`fw_update_usb_dsp`/`fw_update_mcu`, transport `BERENA`) is
+# also not modeled — no device ported so far models firmware push, and this
+# device's variant (`BERENAFW`) isn't a transport this DSL's `Transport`
+# enum (`HID_IO`/`HID_FEATURE`) can express.
+
+structs:
+  fw_versions:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x06}
+      - {name: command,   type: uint8, constant: 0x10}
+    incoming:
+      - {name: report_id,    type: uint8, constant: 0x06}
+      - {name: command,      type: uint8, constant: 0x10}
+      - {name: usb_dsp_ver,  type: bytearray, size: 12}
+      - {name: mcu_ver,      type: bytearray, size: 12}
+
+  save_to_flash:
+    - {name: report_id, type: uint8, constant: 0x06}
+    - {name: command,   type: uint8, constant: 0x09}
+
+  # One-shot MCU reset — fire-and-forget, no persisted state (same shape as
+  # Arctis 7+'s `pairing_mode`/Nova Elite's `restore_factory_default`, see
+  # [E7-S9]). Exposed via `TriggerAction("reset_mcu", "")`.
+  reset_mcu:
+    - {name: report_id, type: uint8, constant: 0x06}
+    - {name: command,   type: uint8, constant: 0x01}
+
+  # 6-band graphic EQ (fixed frequencies, gain only, reduced ±6dB range —
+  # narrower than every other graphic-EQ device shipped so far). Firmware
+  # byte = round(2 x (10 + gain_dB)), same offset as the Nova Pro family's
+  # own graphic EQ but a different band count and range — reuses
+  # builtin:graphic_eq_gains as-is (it walks 4-byte chunks regardless of
+  # count), no new Rust code.
+  eq:
+    - {name: report_id, type: uint8,   constant: 0x06}
+    - {name: command,   type: uint8,   constant: 0x33}
+    - {name: gain1,     type: float32, range: [-6.0, 6.0]}
+    - {name: gain2,     type: float32, range: [-6.0, 6.0]}
+    - {name: gain3,     type: float32, range: [-6.0, 6.0]}
+    - {name: gain4,     type: float32, range: [-6.0, 6.0]}
+    - {name: gain5,     type: float32, range: [-6.0, 6.0]}
+    - {name: gain6,     type: float32, range: [-6.0, 6.0]}
+
+  mic_volume:
+    - {name: report_id,     type: uint8, constant: 0x06}
+    - {name: write_command, type: uint8, constant: 0x37}
+    - {name: level,         type: uint8, range: [1, 10]}
+
+  sidetone:
+    - {name: report_id, type: uint8, constant: 0x06}
+    - {name: command,   type: uint8, constant: 0x39}
+    - name: level
+      type: uint8
+      range: [0, 3]
+      values_mapping: {"0": "off", "1": "low", "2": "medium", "3": "high"}
+
+  muted_mic_brightness:
+    - {name: report_id, type: uint8, constant: 0x06}
+    - {name: command,   type: uint8, constant: 0xAE}
+    - {name: level,     type: uint8, range: [0, 3]}
+
+apis:
+  fw_versions:
+    read: {transport: HID_IO, chunk_size: 64}
+
+  save_to_flash:
+    write: {transport: HID_IO, chunk_size: 64}
+
+  reset_mcu:
+    action: true
+    write: {transport: HID_IO, chunk_size: 64}
+
+  eq:
+    write:
+      transport: HID_IO
+      chunk_size: 64
+      payload_transform: "builtin:graphic_eq_gains"
+      payload_transform_args: {offset_db: 10.0, clamp_max: 32}
+
+  mic_volume:
+    write: {transport: HID_IO, chunk_size: 64}
+
+  sidetone:
+    write: {transport: HID_IO, chunk_size: 64}
+
+  muted_mic_brightness:
+    write: {transport: HID_IO, chunk_size: 64}
+
+lifecycle:
+  init:
+    - call: discord_certified_set_attributes
+      args: {echo_cancellation: true, noise_suppression: true}

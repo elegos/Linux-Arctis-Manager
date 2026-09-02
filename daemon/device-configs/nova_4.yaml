@@ -1,0 +1,35 @@
+extends: base_arctis_nova_4
+
+device:
+  name: "SteelSeries Arctis Nova 4"
+  vendor_id: 0x1038
+
+  # NOTE ON command_interface/sync_interface: same discrepancy pattern as
+  # Nova 5/Nova 7/Arctis 7+ — the raw spec declares `(sync-interface 0xff00
+  # 0x0001 5)` but never a command interface number. Following the same
+  # precedent as those families (command AND sync both on interface 3),
+  # unconfirmed against real hardware.
+  variants:
+    - product_id: 0x12F2
+      name: "Arctis Nova 4"
+      bootloader_pid: 0x12F3
+    - product_id: 0x12F6
+      name: "Arctis Nova 4X"
+      bootloader_pid: 0x12F7
+
+  hid:
+    usage_page: 0xFFC0
+    usage: 0x0001
+    command_interface:
+      interface: 3
+    sync_interface:
+      interface: 5
+      usage_page: 0xFF00
+      usage: 0x0001
+
+  capabilities:
+    - battery
+    - chatmix
+    - custom_eq
+    - microphone
+    - wireless

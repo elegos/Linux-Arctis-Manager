@@ -87,11 +87,18 @@ pub struct ReadOp {
 
 // ── ApiExecutor ───────────────────────────────────────────────────────────────
 
+/// Parameters passed to a builtin from the DSL's `payload_transform_args:`
+/// map (e.g. `header_len`, `band_count`, `gain_flavour`) — lets one generic
+/// Rust function serve every device sharing its logic, with the per-device
+/// numbers living in YAML instead of in a dedicated per-device wrapper.
+pub type BuiltinArgs = HashMap<String, serde_yaml::Value>;
+
 /// A registered payload transform.  Returns one packet for single-chunk APIs,
 /// or multiple packets for APIs like `draw_bitmap` that require a split send.
-pub type BuiltinFn = Box<dyn Fn(&[u8]) -> Vec<Vec<u8>> + Send + Sync>;
+pub type BuiltinFn = Box<dyn Fn(&[u8], &BuiltinArgs) -> Vec<Vec<u8>> + Send + Sync>;
 
 static EMPTY_APIS: OnceLock<HashMap<String, ApiDef>> = OnceLock::new();
+static EMPTY_ARGS: OnceLock<BuiltinArgs> = OnceLock::new();
 
 /// Prepares API call payloads and parses responses using the config's struct
 /// definitions, constants, and transport/chunk-size metadata.
@@ -119,7 +126,7 @@ impl<'a> ApiExecutor<'a> {
     pub fn register_builtin(
         &mut self,
         name: impl Into<String>,
-        f: impl Fn(&[u8]) -> Vec<Vec<u8>> + Send + Sync + 'static,
+        f: impl Fn(&[u8], &BuiltinArgs) -> Vec<Vec<u8>> + Send + Sync + 'static,
     ) {
         self.builtins.insert(name.into(), Box::new(f));
     }
@@ -150,11 +157,13 @@ impl<'a> ApiExecutor<'a> {
                             transport,
                             chunk_size,
                             payload_transform,
+                            payload_transform_args,
                         } => {
                             let op = ApiOp {
                                 transport: transport.clone(),
                                 chunk_size: *chunk_size,
                                 payload_transform: payload_transform.clone(),
+                                payload_transform_args: payload_transform_args.clone(),
                             };
                             self.push_op_actions(&op, &bytes, &mut actions)?;
                         }
@@ -212,7 +221,11 @@ impl<'a> ApiExecutor<'a> {
         bytes: &[u8],
         actions: &mut Vec<WriteAction>,
     ) -> Result<(), ApiError> {
-        let mut payloads = self.apply_transform(bytes.to_vec(), &op.payload_transform)?;
+        let mut payloads = self.apply_transform(
+            bytes.to_vec(),
+            &op.payload_transform,
+            &op.payload_transform_args,
+        )?;
         for p in &mut payloads {
             pad(p, op.chunk_size as usize);
             actions.push(WriteAction::Send {
@@ -236,13 +249,17 @@ impl<'a> ApiExecutor<'a> {
         &self,
         bytes: Vec<u8>,
         name: &Option<String>,
+        args: &Option<BuiltinArgs>,
     ) -> Result<Vec<Vec<u8>>, ApiError> {
         if let Some(n) = name {
             let f = self
                 .builtins
                 .get(n.as_str())
                 .ok_or_else(|| ApiError::UnknownTransform(n.clone()))?;
-            Ok(f(&bytes))
+            let args = args
+                .as_ref()
+                .unwrap_or_else(|| EMPTY_ARGS.get_or_init(HashMap::new));
+            Ok(f(&bytes, args))
         } else {
             Ok(vec![bytes])
         }
@@ -341,7 +358,7 @@ apis:
       payload_transform: "builtin:double_all"
 "#);
         let mut exec = ApiExecutor::new(&c);
-        exec.register_builtin("builtin:double_all", |b| {
+        exec.register_builtin("builtin:double_all", |b, _args| {
             vec![b.iter().map(|x| x * 2).collect()]
         });
         let mut values = HashMap::new();
@@ -401,8 +418,10 @@ apis:
           payload_transform: "builtin:last_byte_only"
 "#);
         let mut exec = ApiExecutor::new(&c);
-        exec.register_builtin("builtin:first_byte_only", |b| vec![vec![b[0]]]);
-        exec.register_builtin("builtin:last_byte_only", |b| vec![vec![*b.last().unwrap()]]);
+        exec.register_builtin("builtin:first_byte_only", |b, _args| vec![vec![b[0]]]);
+        exec.register_builtin("builtin:last_byte_only", |b, _args| {
+            vec![vec![*b.last().unwrap()]]
+        });
         let mut values = HashMap::new();
         // Exactly `size` bytes: a sized varstring is now zero-padded to
         // `size` on write, so a shorter string's last byte would be padding
