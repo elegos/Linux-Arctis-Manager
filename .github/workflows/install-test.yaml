@@ -15,16 +15,17 @@ jobs:
   install-test:
     needs: build-pkg
     runs-on: ubuntu-latest
-    # CachyOS install-test disabled: flaky on GH-hosted runners (lam-daemon
-    # SIGILL on some, not all, runner instances — see removed diagnostic
-    # step's findings), not a real packaging issue. Re-enable once GH's
-    # runner fleet is consistent or the flakiness is otherwise root-caused.
-    if: matrix.slug != 'cachyos'
 
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJson(needs.build-pkg.outputs.matrix) }}
+        # CachyOS install-test disabled: flaky on GH-hosted runners (lam-daemon
+        # SIGILL on some, not all, runner instances — see removed diagnostic
+        # step's findings), not a real packaging issue. Re-enable once GH's
+        # runner fleet is consistent or the flakiness is otherwise root-caused.
+        exclude:
+          - slug: cachyos
 
     container:
       image: ${{ matrix.image }}
