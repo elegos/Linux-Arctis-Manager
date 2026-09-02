@@ -58,6 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Side navigation now uses icon buttons instead of text labels.
 - The Voice Changer panel is labelled "(Preview)" — usable, not yet considered production quality.
 - README's Supported Devices table rewritten and re-checked against SteelSeries' own device specs (not just the previous v2 list): simplified to Supported/Notes columns, split a few v2 rows that had actually-different hardware bundled together (e.g. Arctis 7 2018/2019 wireless vs. the wired Arctis Pro/Pro GameDAC), and every unsupported row now notes what EQ (if any) that hardware actually has — several legacy models turned out to have DSP-fixed or no EQ at all, not the software-writable kind this project can expose.
+- Rust daemon (v3): internal cleanup pass, no behavior change — replaced the "media"/"chat" channel string convention with a `Channel` enum across the engine crate, deduplicated D-Bus's background-task and JSON-fallback boilerplate, the focus-monitor media/chat event fan-out and hardware-preset write, the reconnect/disconnect delays shared by the sway/hyprland/x11 focus backends, the three parametric-EQ payload-transform functions, and `vc_ladspa_chain`'s five stage-collection branches; also split `main.rs`'s `run_device` into smaller functions and table-drove `device_session`'s simple lifecycle-call writes.
 
 ### Fixed
 
