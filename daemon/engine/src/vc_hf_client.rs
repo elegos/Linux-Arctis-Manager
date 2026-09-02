@@ -406,7 +406,7 @@ impl std::fmt::Display for HfError {
 
 fn client() -> reqwest::Client {
     reqwest::Client::builder()
-        .user_agent(concat!("linux-arctis-manager/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("linux-arctis-manager/", env!("LAM_VERSION")))
         .build()
         .expect("reqwest client builder should not fail with default settings")
 }

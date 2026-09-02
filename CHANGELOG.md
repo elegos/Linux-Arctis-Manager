@@ -42,6 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Noise Cancellation no longer swallows quiet consonants.
 - EQ preset/gain changes no longer interrupt other apps' playback or leak PipeWire modules.
 - Settings with many options no longer overflow the window; sliders no longer stutter while dragging.
+- `lam-hidraw-helper` and the daemon's HTTP user agent now report the real project version instead of the crate-internal `0.1.0`/`CARGO_PKG_VERSION` placeholder.
+- `pyproject.toml`'s version is now synced from the shared `VERSION` file before packaging (`make sync-version`), so a stale `pyproject.toml` can no longer ship a mismatched GUI version.
 
 ## [2.4.1]
 
