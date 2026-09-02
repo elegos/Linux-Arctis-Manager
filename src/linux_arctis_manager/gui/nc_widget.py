@@ -1,15 +1,27 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtWidgets import (QComboBox, QFrame, QGroupBox, QHBoxLayout,
-                               QLabel, QPushButton, QScrollArea, QSizePolicy,
-                               QSlider, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFrame,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSlider,
+    QVBoxLayout,
+    QWidget,
+)
 
 from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
-from linux_arctis_manager.gui.qt_widgets.q_checkable_button_group import \
-    QCheckableButtonGroup
+from linux_arctis_manager.gui.qt_widgets.q_checkable_button_group import (
+    QCheckableButtonGroup,
+)
 from linux_arctis_manager.gui.qt_widgets.q_dual_state import QDualState
 from linux_arctis_manager.i18n import I18n
 
@@ -36,8 +48,8 @@ _COMP_DEFAULTS = {'threshold': -18, 'ratio': 18, 'makeup': 4}
 
 def _slider_row(
     label: str, minimum: int, maximum: int, default: int,
-    fmt_fn: 'function', step: int = 1,
-) -> 'tuple[QHBoxLayout, QSlider, QLabel]':
+    fmt_fn: Callable[[int], str], step: int = 1,
+) -> tuple[QHBoxLayout, QSlider, QLabel]:
     row = QHBoxLayout()
     lbl = QLabel(label)
     lbl.setFixedWidth(100)
@@ -319,7 +331,7 @@ class QNCWidget(QWidget):
 
         self._apply_preset_ui(_PRESET_OFF)
 
-    def showEvent(self, event) -> None:  # noqa: N802
+    def showEvent(self, event) -> None:
         super().showEvent(event)
         self.refresh()
 

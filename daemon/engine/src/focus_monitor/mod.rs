@@ -123,7 +123,8 @@ impl<'a> ChannelStacks<'a> {
 
 /// Writes a factory hardware EQ preset directly (bypasses the LADSPA/custom-slot path).
 async fn write_hw_preset(ctx: &eq_manager::HwEqContext, hw_idx: u8) {
-    let values = std::collections::HashMap::from([("eq_preset".to_string(), FieldValue::U8(hw_idx))]);
+    let values =
+        std::collections::HashMap::from([("eq_preset".to_string(), FieldValue::U8(hw_idx))]);
     let _ = ctx
         .cmd_tx
         .send(DeviceCommand::WriteApi {

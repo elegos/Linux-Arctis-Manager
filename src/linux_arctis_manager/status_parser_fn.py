@@ -1,11 +1,16 @@
-from typing import Callable, Literal, ParamSpec, TypeVar
+# pyright: reportFunctionMemberAccess=false
+# Tags each parser function with a dynamic `_status_type` attribute, read
+# back reflectively in config.py — not visible to the type checker.
+
+from collections.abc import Callable
+from typing import Literal, ParamSpec, TypeVar
 
 P = ParamSpec("P")
 R = TypeVar("R")
 
 def status_type(name: str) -> Callable[[Callable[P, R]], Callable[P, R]]:
     def decorator(func: Callable[P, R]) -> Callable[P, R]:
-        setattr(func, "_status_type", name)
+        func._status_type = name
         return func
     return decorator
 
@@ -13,7 +18,6 @@ def status_type(name: str) -> Callable[[Callable[P, R]], Callable[P, R]]:
 def percentage(perc_min: int, perc_max: int, value: int) -> int:
     if perc_max < perc_min:
         value = perc_min - value
-        perc_min, perc_max = perc_min, perc_max
 
         return 100 - (value - perc_min) * 100 // (perc_max - perc_min)
 
@@ -25,8 +29,8 @@ def on_off(value: int, on: int, off: int) -> Literal['on', 'off']:
 
 @status_type("int_str_mapping")
 def int_str_mapping(values: dict[int, str], value: int) -> str|None:
-    return values.get(value, None)
+    return values.get(value)
 
 @status_type("int_int_mapping")
 def int_int_mapping(values: dict[int, int], value: int) -> int|None:
-    return values.get(value, None)
+    return values.get(value)

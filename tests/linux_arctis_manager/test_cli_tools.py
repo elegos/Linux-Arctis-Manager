@@ -3,8 +3,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 import usb
 
-from linux_arctis_manager.cli_tools import arctis_usb_info, endpoint_direction, endpoint_type
-
+from linux_arctis_manager.cli_tools import (
+    arctis_usb_info,
+    endpoint_direction,
+    endpoint_type,
+)
 
 # --- endpoint_type ---
 
@@ -90,15 +93,15 @@ def _make_device(vendor_id, product_id, manufacturer, product, configs, langids=
 
 
 def test_arctis_usb_info_raises_when_no_devices_found():
-    with patch('usb.core.find', return_value=None):
-        with pytest.raises(ValueError, match="No devices found"):
-            arctis_usb_info()
+    with patch('usb.core.find', return_value=None), \
+         pytest.raises(ValueError, match="No devices found"):
+        arctis_usb_info()
 
 
 def test_arctis_usb_info_raises_when_empty_list():
-    with patch('usb.core.find', return_value=[]):
-        with pytest.raises(ValueError, match="No devices found"):
-            arctis_usb_info()
+    with patch('usb.core.find', return_value=[]), \
+         pytest.raises(ValueError, match="No devices found"):
+        arctis_usb_info()
 
 
 def test_arctis_usb_info_patches_missing_langids(capsys):

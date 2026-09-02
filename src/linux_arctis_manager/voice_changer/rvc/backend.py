@@ -1,8 +1,16 @@
+# pyright: reportMissingImports=false
+# numpy is provisioned in a separate AI env (see packaging/onnxruntime-install/),
+# not this project's dev venv — only used here for a type-checking-only import.
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import numpy as np
 
 
 @dataclass
@@ -45,7 +53,7 @@ class RVCBackend(ABC):
         return None
 
     @abstractmethod
-    def convert(self, audio: 'np.ndarray', sr: int, pitch_offset: float) -> 'np.ndarray':
+    def convert(self, audio: np.ndarray, sr: int, pitch_offset: float) -> np.ndarray:
         """
         Convert a chunk of audio samples.
 

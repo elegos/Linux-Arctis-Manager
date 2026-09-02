@@ -26,6 +26,10 @@ Writes <model>.onnx next to the input file, and numerically verifies the
 exported ONNX Runtime output against the PyTorch wrapper's output before
 reporting success.
 """
+# pyright: reportMissingImports=false
+# torch/numpy are provisioned in a separate AI env (see
+# packaging/onnxruntime-install/), not this project's dev venv.
+
 from __future__ import annotations
 
 import argparse

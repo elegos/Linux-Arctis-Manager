@@ -4,11 +4,25 @@ import logging
 import subprocess
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QGroupBox,
-                               QHBoxLayout, QLabel, QLineEdit, QListWidget,
-                               QListWidgetItem, QMessageBox, QPushButton,
-                               QScrollArea, QSizePolicy, QSlider,
-                               QStackedWidget, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QFrame,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSlider,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
 from linux_arctis_manager.gui.onnxruntime_install_dialog import OnnxRuntimeInstallDialog
@@ -22,7 +36,7 @@ _T = I18n.translate   # shorthand
 def _slider_row(
     label: str, minimum: int, maximum: int, default: int,
     fmt_fn, step: int = 1,
-) -> 'tuple[QHBoxLayout, QSlider, QLabel]':
+) -> tuple[QHBoxLayout, QSlider, QLabel]:
     row = QHBoxLayout()
     lbl = QLabel(label)
     lbl.setFixedWidth(140)
@@ -44,7 +58,7 @@ def _slider_row(
 def _fslider_row(
     label: str, minimum: float, maximum: float, default: float,
     fmt_fn, steps: int = 100,
-) -> 'tuple[QHBoxLayout, QSlider, QLabel]':
+) -> tuple[QHBoxLayout, QSlider, QLabel]:
     """Float slider backed by an integer slider (minimum=0, maximum=steps)."""
     row = QHBoxLayout()
     lbl = QLabel(label)
@@ -854,12 +868,12 @@ class QVCWidget(QWidget):
 
     # ── Lifecycle ──────────────────────────────────────────────────────
 
-    def showEvent(self, event) -> None:  # noqa: N802
+    def showEvent(self, event) -> None:
         super().showEvent(event)
         self.refresh()
         self._settings_poll_timer.start()
 
-    def hideEvent(self, event) -> None:  # noqa: N802
+    def hideEvent(self, event) -> None:
         super().hideEvent(event)
         self._settings_poll_timer.stop()
 
@@ -1212,7 +1226,7 @@ class QVCWidget(QWidget):
             sl.blockSignals(False)
             lbl.setText(fmt(value))
 
-        v = int(round(float(mp.get('pitch_offset', 0.0))))
+        v = round(float(mp.get('pitch_offset', 0.0)))
         _sl(self._rvc_pitch_sl, self._rvc_pitch_lbl, v,
             lambda x: f'{x:+d} st' if x != 0 else '0 st')
         hidx = self._rvc_hubert_combo.findData(str(mp.get('hubert_model', 'torchaudio')))
@@ -1220,21 +1234,21 @@ class QVCWidget(QWidget):
             self._rvc_hubert_combo.blockSignals(True)
             self._rvc_hubert_combo.setCurrentIndex(hidx)
             self._rvc_hubert_combo.blockSignals(False)
-        v = int(round(float(mp.get('vtln_alpha', 1.0)) * 100))
+        v = round(float(mp.get('vtln_alpha', 1.0)) * 100)
         _sl(self._rvc_vtln_sl, self._rvc_vtln_lbl, v, lambda x: f'{x/100:.2f}')
-        v = int(round(float(mp.get('rms_mix_rate', 0.25)) * 100))
+        v = round(float(mp.get('rms_mix_rate', 0.25)) * 100)
         _sl(self._rvc_rms_sl, self._rvc_rms_lbl, v, lambda x: f'{x} %')
         fidx = self._rvc_f0filt_combo.findData(int(mp.get('filter_radius', 3)))
         if fidx >= 0:
             self._rvc_f0filt_combo.blockSignals(True)
             self._rvc_f0filt_combo.setCurrentIndex(fidx)
             self._rvc_f0filt_combo.blockSignals(False)
-        v = int(round(float(mp.get('target_rms', 0.06)) * 100))
+        v = round(float(mp.get('target_rms', 0.06)) * 100)
         _sl(self._rvc_drive_sl, self._rvc_drive_lbl, v, lambda x: f'{x/100:.2f}')
-        v = int(round(float(mp.get('limiter_thr', 0.80)) * 100))
+        v = round(float(mp.get('limiter_thr', 0.80)) * 100)
         _sl(self._rvc_lim_sl, self._rvc_lim_lbl, v,
             lambda x: 'Off' if x >= 100 else f'{x/100:.2f}')
-        v = int(round(float(mp.get('index_rate', 0.0)) * 100))
+        v = round(float(mp.get('index_rate', 0.0)) * 100)
         _sl(self._rvc_index_sl, self._rvc_index_lbl, v,
             lambda x: 'Off' if x == 0 else f'{x/100:.2f}')
 

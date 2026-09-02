@@ -1,22 +1,37 @@
 from __future__ import annotations
 
+import contextlib
 import logging
+from typing import TYPE_CHECKING, cast
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QComboBox, QFrame, QHBoxLayout, QLabel,
-                               QPushButton, QScrollArea, QSizePolicy,
-                               QSlider, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSlider,
+    QVBoxLayout,
+    QWidget,
+)
 
-from linux_arctis_manager.config import SettingType, ConfigSetting
+from linux_arctis_manager.config import ConfigSetting, SettingType
 from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
 from linux_arctis_manager.gui.qt_widgets.q_toggle import QToggle
 from linux_arctis_manager.gui.tray_quick_settings_editor import (
-    QQuickSettingsEditor, load_config,
+    QQuickSettingsEditor,
+    load_config,
 )
 from linux_arctis_manager.i18n import I18n
 
+if TYPE_CHECKING:
+    from linux_arctis_manager.gui.tray_panel import QTrayPanel
+
 logger = logging.getLogger('tray_quick_settings_tab')
-_T = lambda s, k: I18n.translate(s, k)  # noqa: E731
+_T = I18n.translate
 
 _NC_PRESETS: list[tuple[str, str]] = [
     ('off',      'nc_preset_off'),
@@ -116,7 +131,7 @@ class QTrayQuickSettingsTab(QWidget):
             self._update_live()
 
     def update_status(self, status: dict) -> None:
-        for _cat, fields in status.items():
+        for fields in status.values():
             for name, obj in fields.items():
                 self._current_values[name] = obj.get('value')
         self._update_live()
@@ -137,21 +152,21 @@ class QTrayQuickSettingsTab(QWidget):
         self._active_editor.finished.connect(self._on_editor_closed)
         panel = self._tray_panel()
         if panel:
-            panel._suppress_hide = True  # type: ignore[attr-defined]
+            panel._suppress_hide = True
             panel.hide()
         self._active_editor.show()
 
     def _on_editor_closed(self) -> None:
         panel = self._tray_panel()
         if panel:
-            panel._suppress_hide = False  # type: ignore[attr-defined]
+            panel._suppress_hide = False
         self._active_editor = None
 
-    def _tray_panel(self):
+    def _tray_panel(self) -> QTrayPanel | None:
         w = self.parent()
         while w is not None:
             if hasattr(w, '_suppress_hide'):
-                return w
+                return cast('QTrayPanel', w)
             w = w.parent() if hasattr(w, 'parent') else None
         return None
 
@@ -320,10 +335,8 @@ class QTrayQuickSettingsTab(QWidget):
         slider.setMaximum(getattr(cfg, 'max', 100))
         slider.setSingleStep(getattr(cfg, 'step', 1))
         if raw_val is not None:
-            try:
-                slider.setValue(int(float(raw_val)))
-            except (TypeError, ValueError):
-                pass
+            with contextlib.suppress(TypeError, ValueError):
+                slider.setValue(int(float(raw_val)))  # pyright: ignore[reportArgumentType]
         val_lbl = QLabel(str(raw_val) if raw_val is not None else '0')
         val_lbl.setFixedWidth(28)
         val_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -343,13 +356,13 @@ class QTrayQuickSettingsTab(QWidget):
         combo = QComboBox()
         combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         mapping = cfg.get_kwargs().get('values_mapping', {}) or {}
-        ordered_keys = sorted(mapping.keys(), key=lambda k: int(k))
+        ordered_keys = sorted(mapping.keys(), key=int)
         current_idx = 0
         for i, k in enumerate(ordered_keys):
             label = _T('settings_values', mapping[k])
             combo.addItem(label, userData=int(k))
             try:
-                if raw_val is not None and int(k) == int(raw_val):
+                if raw_val is not None and int(k) == int(raw_val):  # pyright: ignore[reportArgumentType]
                     current_idx = i
             except (TypeError, ValueError):
                 pass
@@ -427,10 +440,8 @@ class QTrayQuickSettingsTab(QWidget):
                 slider = ctrl.findChild(QSlider)
                 if slider:
                     slider.blockSignals(True)
-                    try:
-                        slider.setValue(int(float(raw)))
-                    except (TypeError, ValueError):
-                        pass
+                    with contextlib.suppress(TypeError, ValueError):
+                        slider.setValue(int(float(raw)))  # pyright: ignore[reportArgumentType]
                     slider.blockSignals(False)
 
             elif cfg.type in (SettingType.DISCRETE_MAP, SettingType.SELECT):
@@ -439,10 +450,8 @@ class QTrayQuickSettingsTab(QWidget):
                         item_data = ctrl.itemData(i)
                         match = (item_data == raw)
                         if not match:
-                            try:
-                                match = int(item_data) == int(raw)
-                            except (TypeError, ValueError):
-                                pass
+                            with contextlib.suppress(TypeError, ValueError):
+                                match = int(item_data) == int(raw)  # pyright: ignore[reportArgumentType]
                         if match:
                             ctrl.blockSignals(True)
                             ctrl.setCurrentIndex(i)

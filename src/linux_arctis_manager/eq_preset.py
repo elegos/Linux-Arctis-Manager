@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -83,7 +84,7 @@ class EQPreset:
 
 def _b(name: str, gains: list[float], description: str = '') -> EQPreset:
     """Shorthand for defining a builtin simple-mode preset."""
-    bands = [EQBand(frequency=f, gain=g) for f, g in zip(SIMPLE_BAND_FREQUENCIES, gains)]
+    bands = [EQBand(frequency=f, gain=g) for f, g in zip(SIMPLE_BAND_FREQUENCIES, gains, strict=True)]
     return EQPreset(name=name, mode='simple', description=description, bands=bands, builtin=True)
 
 
@@ -158,8 +159,6 @@ def list_presets() -> list[EQPreset]:
     result: list[EQPreset] = list(BUILTIN_PRESETS)
     if EQ_PRESETS_FOLDER.exists():
         for f in sorted(EQ_PRESETS_FOLDER.glob('*.yaml')):
-            try:
+            with contextlib.suppress(Exception):
                 result.append(EQPreset.load(f))
-            except Exception:
-                pass
     return result

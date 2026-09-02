@@ -1,12 +1,22 @@
 import logging
 import threading
+from collections.abc import Callable
 from typing import Literal
 
 from PySide6.QtCore import QSize, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import (QApplication, QButtonGroup, QHBoxLayout, QLabel,
-                               QMessageBox, QProgressBar, QSizePolicy, QToolButton,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (
+    QApplication,
+    QButtonGroup,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QProgressBar,
+    QSizePolicy,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from linux_arctis_manager.constants import SYSTEMD_SERVICE_NAME
 from linux_arctis_manager.gui.base_app import QBaseDesktopApp
@@ -141,12 +151,12 @@ class QMainApp(QBaseDesktopApp):
         side_layout.setSpacing(2)
         self.side_panel.setLayout(side_layout)
 
-        self._nav_buttons: dict[str, QToolButton] = {}
+        self._nav_buttons = {}
         btn_group = QButtonGroup(self.side_panel)
         btn_group.setExclusive(True)
 
         # (key, label, icon candidates in priority order)
-        nav_items = [
+        nav_items: list[tuple[Literal['status', 'general', 'device', 'eq', 'mic'], str, list[str]]] = [
             ('status',  I18n.get_instance().translate('ui', 'status'),  ['dialog-information-symbolic', 'audio-headset', 'computer']),
             ('general', I18n.get_instance().translate('ui', 'general'), ['itmages-settings', 'preferences-system',     'configure']),
             ('device',  I18n.get_instance().translate('ui', 'device'),  ['audio-headset-symbolic',  'input-gaming', 'audio-headset']),
@@ -160,6 +170,11 @@ class QMainApp(QBaseDesktopApp):
                 if not icon.isNull():
                     return icon
             return QIcon()
+
+        def _switch_panel_handler(
+            panel: Literal['status', 'general', 'device', 'eq', 'mic'],
+        ) -> Callable[[bool], None]:
+            return lambda _checked: self.switch_panel(panel)
 
         for key, label, icon_names in nav_items:
             btn = QToolButton()
@@ -184,7 +199,7 @@ class QMainApp(QBaseDesktopApp):
                 }
             """)
             btn.setIcon(_first_icon(icon_names))
-            btn.clicked.connect(lambda checked, k=key: self.switch_panel(k))
+            btn.clicked.connect(_switch_panel_handler(key))
             btn_group.addButton(btn)
             side_layout.addWidget(btn)
             self._nav_buttons[key] = btn

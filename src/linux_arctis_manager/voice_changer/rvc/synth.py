@@ -1,15 +1,19 @@
+# pyright: reportMissingImports=false
+# torch is provisioned in a separate AI env (see packaging/onnxruntime-install/),
+# not this project's dev venv — this module only runs there, as a Rust subprocess.
+
 from __future__ import annotations
 
 import math
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 from linux_arctis_manager.voice_changer.rvc.synth_modules import (
-    TextEncoder768,
-    ResidualCouplingBlock,
     GeneratorNSF,
+    ResidualCouplingBlock,
+    TextEncoder768,
 )
 
 

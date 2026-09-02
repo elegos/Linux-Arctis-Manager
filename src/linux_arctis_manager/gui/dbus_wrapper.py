@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 from threading import Thread
-from time import sleep
 
 from dbus_next.aio.message_bus import MessageBus
 from dbus_next.aio.proxy_object import ProxyInterface
@@ -10,18 +9,19 @@ from dbus_next.constants import MessageType
 from dbus_next.message import Message
 from PySide6.QtCore import QObject, Signal, SignalInstance
 
-from linux_arctis_manager.constants import (DBUS_BUS_NAME,
-                                            DBUS_EQ_INTERFACE_NAME,
-                                            DBUS_EQ_OBJECT_PATH,
-                                            DBUS_NC_INTERFACE_NAME,
-                                            DBUS_NC_OBJECT_PATH,
-                                            DBUS_SETTINGS_INTERFACE_NAME,
-                                            DBUS_SETTINGS_OBJECT_PATH,
-                                            DBUS_STATUS_INTERFACE_NAME,
-                                            DBUS_STATUS_OBJECT_PATH,
-                                            DBUS_VC_INTERFACE_NAME,
-                                            DBUS_VC_OBJECT_PATH)
-
+from linux_arctis_manager.constants import (
+    DBUS_BUS_NAME,
+    DBUS_EQ_INTERFACE_NAME,
+    DBUS_EQ_OBJECT_PATH,
+    DBUS_NC_INTERFACE_NAME,
+    DBUS_NC_OBJECT_PATH,
+    DBUS_SETTINGS_INTERFACE_NAME,
+    DBUS_SETTINGS_OBJECT_PATH,
+    DBUS_STATUS_INTERFACE_NAME,
+    DBUS_STATUS_OBJECT_PATH,
+    DBUS_VC_INTERFACE_NAME,
+    DBUS_VC_OBJECT_PATH,
+)
 
 # ── V3 EQ translation ─────────────────────────────────────────────────────────
 # V3 daemon uses band_mode ('fixed10'/'parametric10'/'fixed5') and 'preset'.
@@ -112,7 +112,7 @@ def _v3_preset_to_gui(p3: dict) -> dict:
         freqs = _BAND_MODE_FREQS.get(bm, _BAND_MODE_FREQS['fixed10'])
         mode = 'simple'
         bands = [{'frequency': f, 'gain': b.get('gain', 0.0)}
-                 for f, b in zip(freqs, bands_v3)]
+                 for f, b in zip(freqs, bands_v3, strict=True)]
     return {'name': p3['name'], 'mode': mode, 'description': '', 'builtin': False, 'bands': bands}
 
 
@@ -485,6 +485,7 @@ class DbusWrapper(QObject):
         async def _call() -> None:
             try:
                 caps_v3 = await DbusWrapper._eq_call_json('GetEqCapabilities', '', [])
+                assert isinstance(caps_v3, dict), 'GetEqCapabilities must return a JSON object'
                 qt_signal.emit({
                     'ladspa_available': caps_v3.get('ladspa_available', True),
                     'ladspa_plugin': 'mbeq_1197',
@@ -502,6 +503,7 @@ class DbusWrapper(QObject):
         async def _call() -> None:
             try:
                 s3 = await DbusWrapper._eq_call_json('GetEqSettings', '', [])
+                assert isinstance(s3, dict), 'GetEqSettings must return a JSON object'
                 qt_signal.emit(_v3_settings_to_gui(s3))
             except Exception as e:
                 DbusWrapper.logger.warning(f'EQ GetEQSettings failed: {e}')
@@ -512,10 +514,12 @@ class DbusWrapper(QObject):
         async def _call() -> None:
             try:
                 summaries = await DbusWrapper._eq_call_json('ListPresets', '', [])
+                assert isinstance(summaries, list), 'ListPresets must return a JSON array'
                 presets = []
                 for s in summaries:
                     p3 = await DbusWrapper._eq_call_json('GetPreset', 's', [s['name']])
                     if p3:
+                        assert isinstance(p3, dict), 'GetPreset must return a JSON object'
                         presets.append(_v3_preset_to_gui(p3))
                 qt_signal.emit(presets)
             except Exception as e:

@@ -277,8 +277,7 @@ async fn run_device(
     let path_str = info.hidraw_path.to_string_lossy().to_string();
     info!("monitoring {path_str} (PID={:#06x})", info.pid);
 
-    let friendly_name =
-        register_device(&info, &config, &app_state, &signal_tx, &path_str).await;
+    let friendly_name = register_device(&info, &config, &app_state, &signal_tx, &path_str).await;
 
     // Reconnection loop: retries whenever the headset is powered off or
     // disconnects.  Exits only when the task is aborted (dongle removed).

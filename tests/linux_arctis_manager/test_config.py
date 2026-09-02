@@ -5,13 +5,19 @@ from unittest.mock import patch
 import pytest
 from ruamel.yaml import YAML
 
-from linux_arctis_manager.config import (ConfigPadding, ConfigSetting,
-                                         ConfigStatus, ConfigStatusParser,
-                                         ConfigStatusResponseMapping,
-                                         DeviceConfiguration,
-                                         OnlineStatusConfig, PaddingPosition,
-                                         SettingType, StatusParseType,
-                                         parsed_status)
+from linux_arctis_manager.config import (
+    ConfigPadding,
+    ConfigSetting,
+    ConfigStatus,
+    ConfigStatusParser,
+    ConfigStatusResponseMapping,
+    DeviceConfiguration,
+    OnlineStatusConfig,
+    PaddingPosition,
+    SettingType,
+    StatusParseType,
+    parsed_status,
+)
 
 
 def test_config_parse():
@@ -45,7 +51,7 @@ def test_config_parse():
     assert len(config.status.response_mapping[1].__dict__.keys()) == 3
     assert len(config.status.response_mapping[2].__dict__.keys()) == 15
     assert hasattr(config.status.response_mapping[2], 'headset_power_status')
-    assert getattr(config.status.response_mapping[2], 'headset_power_status') == 0x0f
+    assert config.status.response_mapping[2].headset_power_status == 0x0f  # pyright: ignore[reportAttributeAccessIssue]
     assert len(config.status.representation.keys()) == 5
     assert list(config.status.representation.keys()) == ['headset', 'mic', 'gamedac', 'bluetooth', 'wireless']
     assert config.status.representation['gamedac'] == ['station_volume', 'charge_slot_battery_charge']
@@ -213,32 +219,32 @@ def test_device_configuration_raises_when_device_section_missing():
 
 
 def test_device_configuration_raises_when_name_empty():
-    with pytest.raises(ValueError, match="'device.name'"):
+    with pytest.raises(ValueError, match=r"'device.name'"):
         DeviceConfiguration(_minimal_raw({'name': ''}))
 
 
 def test_device_configuration_raises_when_vendor_id_zero():
-    with pytest.raises(ValueError, match="'device.vendor_id'"):
+    with pytest.raises(ValueError, match=r"'device.vendor_id'"):
         DeviceConfiguration(_minimal_raw({'vendor_id': 0}))
 
 
 def test_device_configuration_raises_when_product_ids_empty():
-    with pytest.raises(ValueError, match="'device.product_ids'"):
+    with pytest.raises(ValueError, match=r"'device.product_ids'"):
         DeviceConfiguration(_minimal_raw({'product_ids': []}))
 
 
 def test_device_configuration_raises_when_listen_interface_indexes_empty():
-    with pytest.raises(ValueError, match="'device.listen_interface_indexes'"):
+    with pytest.raises(ValueError, match=r"'device.listen_interface_indexes'"):
         DeviceConfiguration(_minimal_raw({'listen_interface_indexes': []}))
 
 
 def test_device_configuration_raises_when_listen_interface_indexes_negative():
-    with pytest.raises(ValueError, match="'device.listen_interface_indexes'"):
+    with pytest.raises(ValueError, match=r"'device.listen_interface_indexes'"):
         DeviceConfiguration(_minimal_raw({'listen_interface_indexes': [-1]}))
 
 
 def test_device_configuration_raises_when_command_padding_missing():
-    with pytest.raises(ValueError, match="'device.command_padding'"):
+    with pytest.raises(ValueError, match=r"'device.command_padding'"):
         DeviceConfiguration(_minimal_raw({'command_padding': {}}))
 
 
