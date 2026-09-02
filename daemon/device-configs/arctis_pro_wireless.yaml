@@ -1,0 +1,28 @@
+extends: base_arctis_pro_wireless
+
+device:
+  name: "SteelSeries Arctis Pro Wireless"
+  vendor_id: 0x1038
+
+  variants:
+    - product_id: 0x1290
+      bootloader_pid: 0x1291
+
+  # Raw spec: `(interface-num 0) (usage-page 0xff00) (usage 0x0001)` for
+  # commands, `(sync-interface 0xffc0 0x0001 1)` for the (unwired, see
+  # base file) push-event interface.
+  hid:
+    usage_page: 0xff00
+    usage: 0x0001
+    command_interface:
+      interface: 0
+    sync_interface:
+      interface: 1
+      usage_page: 0xffc0
+      usage: 0x0001
+
+  capabilities:
+    - battery
+    - bluetooth
+    - custom_eq
+    - wireless

@@ -31,7 +31,7 @@ Cross-checked against SteelSeries' own device specs, not just the previous v2 li
 | Arctis 9 | ✅ | Hardware EQ isn't adjustable — its register format is entirely undocumented, unlike Arctis 7/1 Wireless/5. Software EQ via PipeWire is the substitute. |
 | Arctis 9X | ❌ | Uses a transport (AVNERA/LIGHTXIO) this project's engine doesn't implement yet. |
 | Arctis Pro (wired) + Pro GameDAC | ❌ | — |
-| Arctis Pro Wireless | ❌ | — |
+| Arctis Pro Wireless | ✅ | Live updates from the base station's own OLED menu/dial aren't reflected until reconnect — the raw protocol's push-event report isn't documented well enough to wire up safely. |
 | Arctis Nova 3 (wired) | ✅ | — |
 | Arctis Nova 3 / 3X Wireless | ✅ | — |
 | Arctis Nova 4 / 4X | ✅ | — |

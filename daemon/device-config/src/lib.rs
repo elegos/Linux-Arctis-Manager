@@ -1252,6 +1252,57 @@ mod nova_yaml_tests {
         assert_eq!(&payload[0..5], [0x00, 0x04, 0x00, 0x01, 0x2C]);
     }
 
+    #[test]
+    fn arctis_pro_wireless_equalizer_write_splits_bands_and_preset() {
+        use crate::api_executor::{ApiExecutor, WriteAction};
+        use crate::builtins::{
+            arctis_pro_wireless_eq_bands_payload, arctis_pro_wireless_eq_preset_payload,
+        };
+        use crate::codec::FieldValue;
+
+        let Some(cfg) = load_tier2_device("arctis_pro_wireless.yaml") else {
+            return;
+        };
+        let mut api = ApiExecutor::new(&cfg);
+        api.register_builtin("builtin:arctis_pro_wireless_eq_bands", |b, _args| {
+            arctis_pro_wireless_eq_bands_payload(b)
+        });
+        api.register_builtin("builtin:arctis_pro_wireless_eq_preset", |b, _args| {
+            arctis_pro_wireless_eq_preset_payload(b)
+        });
+
+        let mut values = HashMap::new();
+        values.insert("band_100".to_string(), FieldValue::U8(6));
+        values.insert("band_300".to_string(), FieldValue::U8(7));
+        values.insert("band_900".to_string(), FieldValue::U8(8));
+        values.insert("band_2500".to_string(), FieldValue::U8(9));
+        values.insert("band_8000".to_string(), FieldValue::U8(10));
+        values.insert("preset".to_string(), FieldValue::U8(2));
+        let op = api.prepare_write("equalizer", &values).unwrap();
+        assert_eq!(op.actions.len(), 2, "band-write message + preset message");
+
+        let WriteAction::Send { payload, .. } = &op.actions[0] else {
+            panic!("expected a Send action");
+        };
+        assert_eq!(
+            &payload[0..9],
+            [0x00, 0x83, 0xAA, 0x06, 6, 7, 8, 9, 10],
+            "report_id, command, error_check, eq_index, bands"
+        );
+        assert!(payload[9..25].iter().all(|&b| b == 0), "blank slot name");
+        assert_eq!(payload.len(), 33, "padded to chunk_size");
+
+        let WriteAction::Send {
+            payload: preset_payload,
+            ..
+        } = &op.actions[1]
+        else {
+            panic!("expected a Send action");
+        };
+        assert_eq!(&preset_payload[0..4], [0x00, 0x2E, 0xAA, 2]);
+        assert_eq!(preset_payload.len(), 33, "padded to chunk_size");
+    }
+
     /// Regression guard: every device file (anything not starting with
     /// `base_`) in `device-configs/` must parse without error. Catches DSL
     /// typos/schema mistakes in new device conversions without needing a

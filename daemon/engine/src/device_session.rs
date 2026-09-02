@@ -412,6 +412,7 @@ fn make_api_executor(config: &DeviceConfig) -> ApiExecutor<'_> {
         av6x02_init_payload,
     };
     use device_config::builtins::{
+        arctis_pro_wireless_eq_bands_payload, arctis_pro_wireless_eq_preset_payload,
         dim_timer_write_payload, graphic_eq_gains_payload, high_gain_write_payload,
         muted_mic_brightness_write_payload, named_slot_signed_gains_payload_args,
         nova_pro_omni_mic_noise_reduction_write_payload, parametric_eq_bands_payload_args,
@@ -472,6 +473,15 @@ fn make_api_executor(config: &DeviceConfig) -> ApiExecutor<'_> {
         "builtin:arctis5_commit_settings",
         arctis5_commit_settings_payload,
     );
+
+    // Arctis Pro Wireless's plain-integer graphic EQ (no biquad math) split
+    // into its two vendor-mandated HID_IO messages — see builtins.rs.
+    exec.register_builtin("builtin:arctis_pro_wireless_eq_bands", |b, _args| {
+        arctis_pro_wireless_eq_bands_payload(b)
+    });
+    exec.register_builtin("builtin:arctis_pro_wireless_eq_preset", |b, _args| {
+        arctis_pro_wireless_eq_preset_payload(b)
+    });
     exec
 }
 
