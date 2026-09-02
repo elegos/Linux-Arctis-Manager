@@ -1358,6 +1358,126 @@ mod nova_yaml_tests {
         );
     }
 
+    #[test]
+    fn gamebuds_parametric_eq_writes_name_then_bands_with_no_connection_type_byte() {
+        use crate::api_executor::{ApiExecutor, WriteAction};
+        use crate::builtins::{gamebuds_eq_bands_payload_args, parametric_eq_name_payload_args};
+        use crate::codec::FieldValue;
+        use std::time::Duration;
+
+        let Some(cfg) = load_tier2_device("arctis_gamebuds_dongle.yaml") else {
+            return;
+        };
+        let mut api = ApiExecutor::new(&cfg);
+        api.register_builtin(
+            "builtin:parametric_eq_name",
+            parametric_eq_name_payload_args,
+        );
+        api.register_builtin("builtin:gamebuds_eq_bands", gamebuds_eq_bands_payload_args);
+
+        let mut values = HashMap::new();
+        values.insert("preset_type".to_string(), FieldValue::U8(0));
+        values.insert("name".to_string(), FieldValue::Str("My EQ".to_string()));
+        for i in 1..=10 {
+            values.insert(format!("band{i}_frequency"), FieldValue::U16(1000));
+            values.insert(format!("band{i}_filter_type"), FieldValue::U8(1));
+            values.insert(format!("band{i}_gain"), FieldValue::F32(0.0));
+            values.insert(format!("band{i}_q_factor"), FieldValue::F32(1.0));
+        }
+        // -1.2 dB -> round(-1.2 * 10) = -12 = 0xF4; 1.414 Q -> 1414 = 0x0586 LE.
+        values.insert("band1_gain".to_string(), FieldValue::F32(-1.2));
+        values.insert("band1_q_factor".to_string(), FieldValue::F32(1.414));
+
+        let op = api.prepare_write("parametric_eq", &values).unwrap();
+        assert_eq!(op.actions.len(), 3, "name message, sleep, band message");
+
+        let WriteAction::Send {
+            payload: name_payload,
+            ..
+        } = &op.actions[0]
+        else {
+            panic!("expected a Send action");
+        };
+        assert_eq!(
+            &name_payload[0..4],
+            [0x00, 0x19, 0x00, 0x00],
+            "report_id, eq_name_command, connection_type, preset_type"
+        );
+        assert_eq!(&name_payload[4..9], b"My EQ");
+        assert_eq!(name_payload.len(), 65, "padded to chunk_size");
+
+        assert_eq!(
+            op.actions[1],
+            WriteAction::Sleep(Duration::from_millis(600))
+        );
+
+        let WriteAction::Send {
+            payload: bands_payload,
+            ..
+        } = &op.actions[2]
+        else {
+            panic!("expected a Send action");
+        };
+        assert_eq!(
+            &bands_payload[0..2],
+            [0x00, 0x33],
+            "report_id, eqband_command — NO connection_type byte in between, \
+             unlike the generic parametric_eq_bands builtin"
+        );
+        assert_eq!(
+            &bands_payload[2..8],
+            [0x03, 0xE8, 0x01, 0xF4, 0x86, 0x05],
+            "band 1: freq 1000 BE, filter 1, gain -1.2dB -> 0xF4, q 1.414 -> 1414 LE"
+        );
+        assert_eq!(bands_payload.len(), 65, "padded to chunk_size");
+    }
+
+    #[test]
+    fn gamebuds_sidetone_and_transparency_quantize_ui_level_to_firmware_byte() {
+        use crate::api_executor::{ApiExecutor, WriteAction};
+        use crate::builtins::{
+            gamebuds_sidetone_write_payload, gamebuds_transparency_write_payload,
+        };
+        use crate::codec::FieldValue;
+
+        let Some(cfg) = load_tier2_device("arctis_gamebuds_dongle.yaml") else {
+            return;
+        };
+        let mut api = ApiExecutor::new(&cfg);
+        api.register_builtin("builtin:gamebuds_sidetone_write", |b, _args| {
+            gamebuds_sidetone_write_payload(b)
+        });
+        api.register_builtin("builtin:gamebuds_transparency_write", |b, _args| {
+            gamebuds_transparency_write_payload(b)
+        });
+
+        let mut sidetone_values = HashMap::new();
+        sidetone_values.insert("sidetone".to_string(), FieldValue::U8(2));
+        let op = api.prepare_write("sidetone", &sidetone_values).unwrap();
+        let WriteAction::Send { payload, .. } = &op.actions[0] else {
+            panic!("expected a Send action");
+        };
+        assert_eq!(
+            payload[0..3],
+            [0x00, 0x39, 6],
+            "UI level 2 -> firmware byte 6"
+        );
+
+        let mut transparency_values = HashMap::new();
+        transparency_values.insert("transparency_level".to_string(), FieldValue::U8(1));
+        let op = api
+            .prepare_write("transparency", &transparency_values)
+            .unwrap();
+        let WriteAction::Send { payload, .. } = &op.actions[0] else {
+            panic!("expected a Send action");
+        };
+        assert_eq!(
+            payload[0..3],
+            [0x00, 0xB9, 3],
+            "UI level 1 -> firmware byte 3"
+        );
+    }
+
     /// Regression guard: every device file (anything not starting with
     /// `base_`) in `device-configs/` must parse without error. Catches DSL
     /// typos/schema mistakes in new device conversions without needing a

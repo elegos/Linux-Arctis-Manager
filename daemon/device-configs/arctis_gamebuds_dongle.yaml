@@ -1,0 +1,42 @@
+extends: base_arctis_gamebuds_dongle
+
+device:
+  name: "SteelSeries Arctis GameBuds"
+  vendor_id: 0x1038
+
+  # NOTE ON command_interface/sync_interface: the raw spec only declares a
+  # sync (listen) interface (5, usage-page 0xFF00, usage 0x0001) — same
+  # "Windows resolves the write pipe automatically" gap as every other
+  # device port in this project (see base_arctis_nova_5.yaml's longer note).
+  # command_interface has NO real precedent to source from here: there is no
+  # v2 config for this device family in this repo (the only existing attempt,
+  # PR #57, was found to get the *sync* interface number wrong against this
+  # same raw spec, so it isn't trusted for the command interface either).
+  # Left at 3, matching the majority of already-shipped devices' empirically
+  # confirmed value — flagged as an unverified guess, wants confirming via
+  # `lam-cli tools arctis-devices` on real hardware before this ships.
+  variants:
+    - product_id: 0x230A
+      name: "Arctis GameBuds"
+      bootloader_pid: 0x230B
+    - product_id: 0x2317
+      name: "Arctis GameBuds X"
+      bootloader_pid: 0x2318
+
+  hid:
+    usage_page: 0xFFC0
+    usage: 0x0001
+    command_interface:
+      interface: 3
+    sync_interface:
+      interface: 5
+      usage_page: 0xFF00
+      usage: 0x0001
+
+  capabilities:
+    - battery
+    - bluetooth
+    - custom_eq
+    - microphone
+    - noise_cancelling
+    - wireless

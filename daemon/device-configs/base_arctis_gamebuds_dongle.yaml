@@ -1,0 +1,430 @@
+# SteelSeries Arctis GameBuds / GameBuds X — dongle (main control plane).
+# Ported straight from the raw spec's `base_arctis_gamebuds_dongle.device`
+# (1434 lines), NOT from the open, AI-written PR #57 (`gamebuds.yaml`, v2
+# format) — that PR was found to swap the `0x27`/`0xC5` command bytes between
+# `volume_limiter`/`wear_sense`, model `transparency` (`0xB9`) as a
+# continuous 0-10 slider when the firmware only accepts 3 discrete levels,
+# and claim a listen interface (3) that contradicts the raw spec's own
+# explicit `(sync-interface 0xff00 0x0001 5)` declaration. None of its values
+# were trusted here without independent confirmation against this file.
+#
+# The GameBuds and GameBuds X dongles (`arctis_gamebuds_dongle.device` /
+# `arctis_gamebuds_x_dongle.device`) both `include` this same base file with
+# only PID/firmware-file differences — protocol-identical, confirmed by
+# diffing the two leaf files.
+#
+# Deliberately out of scope, same treatment as every other device port in
+# this project:
+# - Firmware update (`fw_update`, SSE/`SSFWFIZZFEATURE` transport — not one
+#   of this engine's supported transports) and all FW-version reads
+#   (`fw_versions`/`anc_version` for dongle, headset, and case) — read-only
+#   telemetry with no consumer without the update feature itself.
+# - `unique_id` (dongle/left-bud/right-bud serial bytes) — no UI feature
+#   consumes it.
+# - `color_spin` (per-earbud/dongle LED color indicator) — cosmetic, no
+#   `lighting`/`rgb` entry in this project's capability vocabulary, same
+#   precedent as every other device's RGB exclusion.
+# - Button remapping (`button_mapping` write, `button_maps` fields inside
+#   `headset_settings`, sync event `0xC9`) — a real, modelable feature (8
+#   gesture slots × 3 actions + hold toggle) but no capability tag or UI
+#   surface exists for it anywhere in this project yet. The `button_maps`
+#   bytes are still declared as an opaque placeholder inside
+#   `headset_settings` (see below) so the fields that follow it land at the
+#   right offset — dropping it silently would corrupt every later field.
+# - `audio_settings` (cmd `0x20`, `HID_FEATURE` 515-byte bulk read) and its
+#   BT-profile EQ bands, and `read_eq_preset_name` (cmd `0x18`) — this
+#   daemon never restores the hardware's persisted EQ curve on init
+#   (matching every other shipped parametric-EQ device, see
+#   `base_arctis_nova_5.yaml`), so the bulk EQ readback this struct exists
+#   for is never needed. `mic_volume`/`sidetone`/`volume_limiter`/`mic_mute`
+#   ARE live-pushed via `sync_events` below (commands `0x37`/`0x39`/`0x27`/
+#   `0xBB`), so nothing is lost by skipping this struct — it would only have
+#   supplied the *initial* value before the first live push, which every
+#   other on/off/level setting on this device also goes without (see
+#   `wear_sense_status`/`eq_sync`/`mute_led_brightness`/spin-color fields
+#   below, none of which have a dedicated single-setting read API either).
+# - `wear_sense_status`, `eq_sync`, `mute_led_brightness`, and the 3
+#   spin-color fields inside `headset_settings` — read but not mapped to any
+#   D-Bus signal: no write API pairs with `wear_sense_status`/`eq_sync`
+#   (they're firmware-derived, not user settings), `mute_led_brightness` has
+#   no write struct anywhere in the raw spec, and spin color is the same
+#   cosmetic LED feature excluded above.
+#
+# `wear_sense` write only accepts 0/1, but the read struct's
+# `wear_sense_config` field is a real 4-state firmware enum (0 = both
+# disabled, 1 = both enabled, 2 = left only, 3 = right only) — the raw
+# spec's own sync handler for `0xC5` collapses this to a boolean ("Firmware
+# supports 4 states but GG only supports 2 states"), and this port does the
+# same via the `nonzero_to_bool` transform, matching vendor behaviour exactly
+# rather than exposing per-ear control the vendor's own app doesn't.
+#
+# `transparency`/`sidetone` are UI-level enums (transparency: 1-3, sidetone:
+# 0-3) that the firmware stores as quantized raw bytes (3/6/10 and 0/3/6/10
+# respectively) — both directions (write via `builtin:gamebuds_*_write`,
+# read via the `*_fw_to_ui` transforms below) mirror the raw spec's own
+# `transform_*_ui_to_fw`/`transform_*_fw_to_ui` functions exactly.
+
+transforms:
+  nonzero_to_bool:
+    type: case_int_to_int
+    default: 1
+    values: {0: 0}
+
+  sidetone_fw_to_ui:
+    type: case_int_to_int
+    default: 0
+    values: {0: 0, 1: 1, 2: 1, 3: 1, 4: 2, 5: 2, 6: 2, 7: 3, 8: 3, 9: 3, 10: 3}
+
+  transparency_fw_to_ui:
+    type: case_int_to_int
+    default: 1
+    values: {1: 1, 2: 1, 3: 1, 4: 2, 5: 2, 6: 2, 7: 3, 8: 3, 9: 3, 10: 3}
+
+  connection_status_to_label:
+    type: case_int_to_str
+    default: UNKNOWN
+    values: {0: NOT_PAIRED_NOT_SEARCHING, 1: NOT_PAIRED_SEARCHING, 2: PAIRED_NOT_CONNECTED, 3: PAIRED_CONNECTED}
+
+structs:
+  # No report-ID-less quirk here (unlike Nova 5) — the raw spec always sends
+  # an explicit 0x00 report_id byte first.
+  audio_mode:
+    - {name: report_id,     type: uint8, constant: 0x00}
+    - {name: write_command, type: uint8, constant: 0xAA}
+    # [0] 2.4G dongle  [1] Bluetooth
+    - {name: mode, type: uint8, range: [0, 1]}
+
+  inactivity_timer:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0xC1}
+    # 0 = never sleep; 1-255 = sleep after N minutes idle
+    - {name: inactivity_timer, type: uint8, range: [0, 255]}
+
+  volume_limiter:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x27}
+    # [0] disabled, 105dB max  [1] enabled, 99dB max
+    - {name: volume_limiter, type: uint8, range: [0, 1]}
+
+  mic_volume:
+    - {name: report_id,     type: uint8, constant: 0x00}
+    - {name: write_command, type: uint8, constant: 0x37}
+    - {name: mic_volume, type: uint8, range: [1, 10]}
+
+  sidetone:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x39}
+    - {name: sidetone,  type: uint8, range: [0, 3]}
+
+  transparency_anc:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0xBD}
+    # [0] off  [1] transparency  [2] ANC
+    - {name: transparency_anc_mode, type: uint8, range: [0, 2]}
+
+  transparency:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0xB9}
+    - {name: transparency_level, type: uint8, range: [1, 3]}
+
+  anc:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0xB8}
+    - {name: anc_level, type: uint8, range: [1, 3]}
+
+  wear_sense:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0xC5}
+    - {name: wear_sense_config, type: uint8, range: [0, 1]}
+
+  volume_24g:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x25}
+    - {name: level, type: uint8, range: [0, 15]}
+
+  volume_bt:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x23}
+    - {name: level, type: uint8, range: [0, 15]}
+
+  restore_factory_default:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0xFD}
+
+  save_to_flash:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x09}
+
+  # Get Earbuds/Wireless Settings (0xB0). `_reserved_button_maps` is the raw
+  # spec's `button_maps` sub-struct (8 × 3-byte tap/hold action bytes + 2
+  # single-byte hold-enable flags = 26 bytes) — declared unnamed/unmapped
+  # because button remapping is out of scope (see header comment), but the
+  # bytes must still be accounted for or every field after them
+  # (audio_mode/eq_sync/spin colors) would decode at the wrong offset.
+  headset_settings:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: command,   type: uint8, constant: 0xB0}
+    incoming:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: command,   type: uint8, constant: 0xB0}
+      - {name: bt_left_connect_status,  type: uint8, range: [0, 3]}
+      - {name: bt_right_connect_status, type: uint8, range: [0, 3]}
+      # 0x00 NOT PAIRED & NOT SEARCHING  0x01 NOT PAIRED & SEARCHING
+      # 0x02 PAIRED & NOT CONNECTED      0x03 PAIRED & CONNECTED
+      - {name: left_connect_status,  type: uint8, range: [0, 3]}
+      - {name: right_connect_status, type: uint8, range: [0, 3]}
+      - {name: left_battery_level,  type: uint8, range: [0, 100]}
+      - {name: right_battery_level, type: uint8, range: [0, 100]}
+      # Raw firmware level (1-10) — bucketed to UI 1-3 via transparency_fw_to_ui.
+      - {name: transparency_level, type: uint8, range: [1, 10]}
+      - {name: anc_level, type: uint8, range: [1, 3]}
+      - {name: transparency_anc_mode, type: uint8, range: [0, 2]}
+      - {name: mute_led_brightness, type: uint8, range: [1, 10]}
+      - {name: inactivity_timer, type: uint8, range: [0, 255]}
+      # 4-state firmware enum, collapsed to bool on read — see header comment.
+      - {name: wear_sense_config, type: uint8, range: [0, 3]}
+      - {name: wear_sense_status, type: uint8, range: [0, 3]}
+      - {name: _reserved_button_maps, type: bytearray, size: 26}
+      - {name: audio_mode, type: uint8, range: [0, 1]}
+      - {name: eq_sync, type: uint8, range: [0, 1]}
+      - {name: left_spin_color, type: uint8, range: [0, 255]}
+      - {name: right_spin_color, type: uint8, range: [0, 255]}
+      - {name: dongle_spin_color, type: uint8, range: [0, 255]}
+
+  # Shared 10-band group, reused by both connection-type profiles (RF and
+  # BT) below via `{struct: gamebuds_eq_bands}` — same trick as
+  # `base_arctis_nova_5.yaml`'s `parametric_eq_bands`. Wire shapes match the
+  # vendor spec's `eqBand` outgoing struct exactly: frequency u16,
+  # filter_type u8 (1=peak, 2=lowpass, 3=highpass, 4=low-shelf, 5=high-shelf,
+  # 6=notch), gain f32 dB (encoded to a signed tenths-dB byte on the wire,
+  # same `SignedTenthsDb` flavour as Nova 7 Gen2), q_factor f32 (encoded
+  # little-endian thousandths on the wire).
+  gamebuds_eq_bands:
+    - {name: band1_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band1_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band1_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band1_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band2_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band2_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band2_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band2_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band3_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band3_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band3_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band3_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band4_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band4_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band4_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band4_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band5_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band5_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band5_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band5_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band6_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band6_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band6_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band6_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band7_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band7_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band7_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band7_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band8_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band8_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band8_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band8_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band9_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band9_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band9_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band9_q_factor,    type: float32, range: [0.2, 10.0]}
+    - {name: band10_frequency,   type: uint16,  range: [20, 20001]}
+    - {name: band10_filter_type, type: uint8,   range: [1, 6]}
+    - {name: band10_gain,        type: float32, range: [-12.0, 12.0]}
+    - {name: band10_q_factor,    type: float32, range: [0.2, 10.0]}
+
+  # 2.4G RF profile. Any change re-announces name (0x19) then band data
+  # (0x33) as two separate HID_IO messages — see the `apis:` entry below.
+  parametric_eq:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: eq_name_command, type: uint8, constant: 0x19}
+    - {name: connection_type, type: uint8, constant: 0x00}
+    # [0] Preset  [1] Custom Preset
+    - {name: preset_type, type: uint8, range: [0, 1]}
+    - {name: eqband_command, type: uint8, constant: 0x33}
+    - {struct: gamebuds_eq_bands}
+    - {name: name, type: varstring, size: 60}
+
+  # Bluetooth profile — same shape, connection_type=1, band command 0x36.
+  parametric_eq_bt:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: eq_name_command, type: uint8, constant: 0x19}
+    - {name: connection_type, type: uint8, constant: 0x01}
+    - {name: preset_type, type: uint8, range: [0, 1]}
+    - {name: eqband_command, type: uint8, constant: 0x36}
+    - {struct: gamebuds_eq_bands}
+    - {name: name, type: varstring, size: 60}
+
+apis:
+  audio_mode:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  inactivity_timer:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  volume_limiter:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  mic_volume:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  sidetone:
+    write: {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:gamebuds_sidetone_write"}
+
+  transparency_anc:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  transparency:
+    write: {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:gamebuds_transparency_write"}
+
+  anc:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  wear_sense:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  # 200ms pre-write sleep: "device can't handle sliding of volume" per the
+  # raw spec's own comment on both volume_24g and volume_bt.
+  volume_24g:
+    write:
+      steps:
+        - {sleep_ms: 200}
+        - {transport: HID_IO, chunk_size: 65}
+
+  volume_bt:
+    write:
+      steps:
+        - {sleep_ms: 200}
+        - {transport: HID_IO, chunk_size: 65}
+
+  restore_factory_default:
+    write: {transport: HID_IO, chunk_size: 65}
+    action: true
+
+  save_to_flash:
+    write: {transport: HID_IO, chunk_size: 65}
+    action: true
+
+  headset_settings:
+    read: {transport: HID_IO, chunk_size: 65}
+
+  # The vendor spec brackets this write with a HIDCONFIG time-between-commands
+  # override (600ms gap, 1200ms USB timeout) — no HIDCONFIG-equivalent exists
+  # in this engine's Transport enum, same gap already accepted for Nova 5's
+  # identically-shaped write (see base_arctis_nova_5.yaml). The 600ms sleep
+  # step here is kept since it's a real inter-message delay requirement, not
+  # just the config toggle.
+  parametric_eq:
+    write:
+      steps:
+        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:parametric_eq_name", payload_transform_args: {header_len: 5, band_count: 10}}
+        - {sleep_ms: 600}
+        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:gamebuds_eq_bands", payload_transform_args: {header_len: 5, band_count: 10}}
+
+  parametric_eq_bt:
+    write:
+      steps:
+        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:parametric_eq_name", payload_transform_args: {header_len: 5, band_count: 10}}
+        - {sleep_ms: 600}
+        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:gamebuds_eq_bands", payload_transform_args: {header_len: 5, band_count: 10}}
+
+sync_events:
+  0xB5:
+    emit: connection_changed
+    fields:
+      - {name: left_connect_status, byte: 4}
+      - {name: right_connect_status, byte: 5}
+
+  0xB7:
+    emit: battery_changed
+    fields:
+      - {name: left_battery_level, byte: 2, display_type: percentage}
+      - {name: right_battery_level, byte: 3, display_type: percentage}
+
+  0x23:
+    emit: volume_bt_changed
+    fields:
+      - {name: level, byte: 2}
+
+  0x25:
+    emit: volume_24g_changed
+    fields:
+      - {name: level, byte: 2}
+
+  0x27:
+    emit: volume_limiter_changed
+    fields:
+      - {name: volume_limiter, byte: 2, transform: nonzero_to_bool, display_type: on_off}
+
+  0x37:
+    emit: mic_volume_changed
+    fields:
+      - {name: mic_volume, byte: 2}
+
+  0x39:
+    emit: sidetone_changed
+    fields:
+      - {name: sidetone, byte: 2, transform: sidetone_fw_to_ui}
+
+  0xB8:
+    emit: anc_changed
+    fields:
+      - {name: anc_level, byte: 2}
+
+  0xB9:
+    emit: transparency_changed
+    fields:
+      - {name: transparency_level, byte: 2, transform: transparency_fw_to_ui}
+
+  0xBB:
+    emit: mic_mute_changed
+    fields:
+      - {name: mic_mute, byte: 2}
+
+  0xBD:
+    emit: transparency_anc_changed
+    fields:
+      - {name: transparency_anc_mode, byte: 2}
+
+  0xC1:
+    emit: inactivity_timer_changed
+    fields:
+      - {name: inactivity_timer, byte: 2}
+
+  0xC5:
+    emit: wear_sense_changed
+    fields:
+      - {name: wear_sense_config, byte: 2, transform: nonzero_to_bool, display_type: on_off}
+
+  0xAA:
+    emit: audio_mode_changed
+    fields:
+      - {name: audio_mode, byte: 2, transform: nonzero_to_bool}
+
+sync_read:
+  - struct: headset_settings
+    maps:
+      - emit: connection_changed
+        fields: [left_connect_status, right_connect_status]
+      - emit: battery_changed
+        fields: [left_battery_level, right_battery_level]
+        display_type: percentage
+      - {emit: transparency_changed, field: transparency_level, transform: transparency_fw_to_ui}
+      - {emit: anc_changed, field: anc_level}
+      - {emit: transparency_anc_changed, field: transparency_anc_mode}
+      - {emit: inactivity_timer_changed, field: inactivity_timer}
+      - {emit: wear_sense_changed, field: wear_sense_config, transform: nonzero_to_bool, display_type: on_off}
+      - {emit: audio_mode_changed, field: audio_mode, transform: nonzero_to_bool}
+
+lifecycle:
+  init:
+    - call: sync_all
