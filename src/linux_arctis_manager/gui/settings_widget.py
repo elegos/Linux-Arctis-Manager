@@ -1,9 +1,16 @@
+from collections.abc import Callable
 from threading import Lock
-from typing import Callable
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QScrollArea,
-                               QSlider, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QScrollArea,
+    QSlider,
+    QVBoxLayout,
+    QWidget,
+)
 
 from linux_arctis_manager.config import ConfigSetting, SettingType
 from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
@@ -74,7 +81,7 @@ class QSettingsWidget(QWidget):
 
             # Mapp all the settings
             for name, value in self.settings.items():
-                if not name in self._settings_widgets:
+                if name not in self._settings_widgets:
                     widget = self.get_widget(self.settings_config[name], value, self.on_settings_updated)
 
                     if widget is None:
@@ -91,7 +98,7 @@ class QSettingsWidget(QWidget):
                 and self.settings_config[config_name].options_source not in self._option_lists:
                 DbusWrapper.request_list_options(self.settings_config[config_name].options_source, self.sig_list_received)
 
-        settings: dict[str, int|bool|str]|None = new_settings.get(self.dbus_settings_section, None)
+        settings: dict[str, int|bool|str]|None = new_settings.get(self.dbus_settings_section)
         if settings is None or settings == self.settings:
             return
 
@@ -158,7 +165,7 @@ class QSettingsWidget(QWidget):
         elif config.type == SettingType.DISCRETE_MAP:
             widget = QComboBox()
             mapping = config.get_kwargs().get('values_mapping', {})
-            ordered_keys = sorted(mapping.keys(), key=lambda k: int(k))
+            ordered_keys = sorted(mapping.keys(), key=int)
             for k in ordered_keys:
                 label = I18n.get_instance().translate('settings_values', mapping[k])
                 widget.addItem(label, userData=int(k))

@@ -3,18 +3,35 @@ from __future__ import annotations
 import ctypes
 import logging
 
-from PySide6.QtCore import QByteArray, QEvent, QObject, QPoint, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import (
+    QByteArray,
+    QEvent,
+    QObject,
+    QPoint,
+    QSize,
+    Qt,
+    QTimer,
+    Signal,
+)
 from PySide6.QtGui import QCursor
-from PySide6.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel,
-                               QPushButton, QSizePolicy, QTabWidget,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSizePolicy,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from linux_arctis_manager.gui.tray_quick_settings_tab import QTrayQuickSettingsTab
 from linux_arctis_manager.gui.tray_status_tab import QTrayStatusTab
 from linux_arctis_manager.i18n import I18n
 
 logger = logging.getLogger('tray_panel')
-_T = lambda s, k: I18n.translate(s, k)  # noqa: E731
+_T = I18n.translate
 
 _PANEL_WIDTH  = 360
 _PANEL_HEIGHT = 440
@@ -119,7 +136,8 @@ class QTrayPanel(QWidget):
 
         # ── Hide on app deactivation (Wayland + X11) ───────────────────────────
         app = QApplication.instance()
-        app.applicationStateChanged.connect(self._on_app_state_changed)
+        assert app is not None, 'a running QWidget always has a QApplication instance'
+        app.applicationStateChanged.connect(self._on_app_state_changed)  # pyright: ignore[reportAttributeAccessIssue]
         self._click_filter = _OutsideClickFilter(self)
         app.installEventFilter(self._click_filter)
 
@@ -135,7 +153,7 @@ class QTrayPanel(QWidget):
             xcb = ctypes.CDLL('libxcb.so.1')
             from PySide6.QtGui import QGuiApplication
 
-            ni = QGuiApplication.platformNativeInterface()
+            ni = QGuiApplication.platformNativeInterface()  # pyright: ignore[reportAttributeAccessIssue]
             conn = ni.nativeResourceForIntegration(QByteArray(b'connection'))
             if not conn:
                 return
@@ -198,10 +216,7 @@ class QTrayPanel(QWidget):
         centre the window; that is a Wayland / KWin limitation, not a bug here.
         """
         # Resolve the click position: SNI coordinates > cursor > fallback
-        if hint_x != 0 or hint_y != 0:
-            click = QPoint(hint_x, hint_y)
-        else:
-            click = QCursor.pos()
+        click = QPoint(hint_x, hint_y) if hint_x != 0 or hint_y != 0 else QCursor.pos()
 
         screen = QApplication.screenAt(click) or QApplication.primaryScreen()
         if not screen:
@@ -229,9 +244,9 @@ class QTrayPanel(QWidget):
         self.activateWindow()
 
     def _on_app_state_changed(self, state) -> None:
-        if state == Qt.ApplicationState.ApplicationInactive and self.isVisible():
-            if not self._suppress_hide and not self.findChildren(QDialog):
-                QTimer.singleShot(80, self._hide_if_still_inactive)
+        if (state == Qt.ApplicationState.ApplicationInactive and self.isVisible()
+                and not self._suppress_hide and not self.findChildren(QDialog)):
+            QTimer.singleShot(80, self._hide_if_still_inactive)
 
     def _hide_if_still_inactive(self) -> None:
         if QApplication.applicationState() == Qt.ApplicationState.ApplicationInactive:

@@ -5,7 +5,14 @@ import subprocess
 
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QHideEvent
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QPushButton, QTabWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QHBoxLayout,
+    QPushButton,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from linux_arctis_manager.gui.nc_widget import QNCWidget
 from linux_arctis_manager.gui.vc_widget import QVCWidget
@@ -13,7 +20,7 @@ from linux_arctis_manager.i18n import I18n
 
 logger = logging.getLogger('mic_widget')
 
-_T = lambda s, k: I18n.translate(s, k)  # noqa: E731
+_T = I18n.translate
 
 
 class _SidetonePreview:
@@ -39,7 +46,7 @@ class _SidetonePreview:
         if sink_name:
             cmd.append(f'sink={sink_name}')
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=3, check=False)
             if result.returncode == 0 and result.stdout.strip().isdigit():
                 self._module_id = int(result.stdout.strip())
                 return True
@@ -53,7 +60,7 @@ class _SidetonePreview:
             try:
                 subprocess.run(
                     ['pactl', 'unload-module', str(self._module_id)],
-                    capture_output=True, timeout=3,
+                    capture_output=True, timeout=3, check=False,
                 )
             except Exception as e:
                 logger.warning('sidetone stop error: %s', e)
@@ -70,13 +77,13 @@ class _SidetonePreview:
         """
         try:
             result = subprocess.run(['pactl', 'list', 'modules', 'short'],
-                                    capture_output=True, text=True, timeout=3)
+                                    capture_output=True, text=True, timeout=3, check=False)
             for line in result.stdout.splitlines():
                 parts = line.split('\t')
                 if (len(parts) >= 3 and parts[1] == 'module-loopback'
                         and any(m in parts[2] for m in self._STALE_MARKERS)):
                     subprocess.run(['pactl', 'unload-module', parts[0]],
-                                   capture_output=True, timeout=3)
+                                   capture_output=True, timeout=3, check=False)
                     logger.info('swept stale sidetone loopback (module %s)', parts[0])
         except Exception as e:
             logger.warning('stale sidetone sweep error: %s', e)

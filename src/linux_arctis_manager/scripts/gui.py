@@ -22,7 +22,7 @@ def _is_dbus_service_available() -> bool:
             ['dbus-send', '--session', '--print-reply', '--reply-timeout=2000',
              '--dest=org.freedesktop.DBus', '/org/freedesktop/DBus',
              'org.freedesktop.DBus.GetNameOwner', f'string:{DBUS_BUS_NAME}'],
-            capture_output=True, timeout=3,
+            capture_output=True, timeout=3, check=False,
         )
         return result.returncode == 0
     except (subprocess.TimeoutExpired, FileNotFoundError):
@@ -61,8 +61,7 @@ def main():
     log_level = logging.CRITICAL
     for _ in range(args.verbose):
         log_level -= 10
-    if log_level < logging.DEBUG:
-        log_level = logging.DEBUG
+    log_level = max(log_level, logging.DEBUG)
 
     logging.basicConfig(level=log_level, format='%(name)20s %(levelname)8s | %(message)s')
 

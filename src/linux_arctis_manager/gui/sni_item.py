@@ -12,6 +12,11 @@ Architecture:
     _MenuInterface (ServiceInterface) — com.canonical.dbusmenu
 """
 
+# dbus_next's @method/@dbus_property/@signal decorators are annotated with
+# D-Bus type-signature strings ('s', 'u', 'a(iiay)', ...), not real Python
+# types — no static checker can resolve these as forward references.
+# pyright: reportUndefinedVariable=false, reportInvalidTypeForm=false
+
 from __future__ import annotations
 
 import asyncio
@@ -21,7 +26,7 @@ from threading import Thread
 
 from dbus_next.aio.message_bus import MessageBus
 from dbus_next.constants import PropertyAccess
-from dbus_next.service import ServiceInterface, Variant, dbus_property, method, signal
+from dbus_next.service import ServiceInterface, dbus_property, method, signal
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QImage, QPixmap
 
@@ -42,7 +47,7 @@ def _pixmap_to_sni(pixmap: QPixmap) -> list[tuple[int, int, bytes]]:
     for i in range(0, len(src), 4):
         b, g, r, a = src[i], src[i + 1], src[i + 2], src[i + 3]
         out[i], out[i + 1], out[i + 2], out[i + 3] = a, r, g, b
-    return [[w, h, bytes(out)]]
+    return [(w, h, bytes(out))]
 
 
 # ── D-Bus interfaces ───────────────────────────────────────────────────────────
@@ -57,111 +62,111 @@ class _SniInterface(ServiceInterface):
     # Properties ──────────────────────────────────────────────────────────────
 
     @dbus_property(access=PropertyAccess.READ)
-    def Category(self) -> 's':
+    def Category(self) -> s:
         return 'ApplicationStatus'
 
     @dbus_property(access=PropertyAccess.READ)
-    def Id(self) -> 's':
+    def Id(self) -> s:
         return 'lam'
 
     @dbus_property(access=PropertyAccess.READ)
-    def Title(self) -> 's':
+    def Title(self) -> s:
         return 'Arctis Manager'
 
     @dbus_property(access=PropertyAccess.READ)
-    def Status(self) -> 's':
+    def Status(self) -> s:
         return 'Active'
 
     @dbus_property(access=PropertyAccess.READ)
-    def WindowId(self) -> 'u':
+    def WindowId(self) -> u:
         return 0
 
     @dbus_property(access=PropertyAccess.READ)
-    def IconName(self) -> 's':
+    def IconName(self) -> s:
         return ''
 
     @dbus_property(access=PropertyAccess.READ)
-    def IconPixmap(self) -> 'a(iiay)':
+    def IconPixmap(self) -> a(iiay):
         return self._owner._icon_data
 
     @dbus_property(access=PropertyAccess.READ)
-    def OverlayIconName(self) -> 's':
+    def OverlayIconName(self) -> s:
         return ''
 
     @dbus_property(access=PropertyAccess.READ)
-    def OverlayIconPixmap(self) -> 'a(iiay)':
+    def OverlayIconPixmap(self) -> a(iiay):
         return []
 
     @dbus_property(access=PropertyAccess.READ)
-    def AttentionIconName(self) -> 's':
+    def AttentionIconName(self) -> s:
         return ''
 
     @dbus_property(access=PropertyAccess.READ)
-    def AttentionIconPixmap(self) -> 'a(iiay)':
+    def AttentionIconPixmap(self) -> a(iiay):
         return []
 
     @dbus_property(access=PropertyAccess.READ)
-    def AttentionMovieName(self) -> 's':
+    def AttentionMovieName(self) -> s:
         return ''
 
     @dbus_property(access=PropertyAccess.READ)
-    def ToolTip(self) -> '(sa(iiay)ss)':
+    def ToolTip(self) -> '(sa(iiay)ss)':  # noqa: F722 # pyright: ignore
         return ['', [], 'Arctis Manager', '']
 
     @dbus_property(access=PropertyAccess.READ)
-    def ItemIsMenu(self) -> 'b':
+    def ItemIsMenu(self) -> b:
         return False
 
     @dbus_property(access=PropertyAccess.READ)
-    def Menu(self) -> 'o':
+    def Menu(self) -> o:
         return '/'
 
     # Methods ─────────────────────────────────────────────────────────────────
 
     @method()
-    async def Activate(self, x: 'i', y: 'i'):  # noqa: N802
+    async def Activate(self, x: i, y: i):
         self._owner.sig_activate.emit(x, y)
 
     @method()
-    async def ContextMenu(self, x: 'i', y: 'i'):  # noqa: N802
+    async def ContextMenu(self, x: i, y: i):
         self._owner.sig_activate.emit(x, y)
 
     @method()
-    async def SecondaryActivate(self, x: 'i', y: 'i'):  # noqa: N802
+    async def SecondaryActivate(self, x: i, y: i):
         pass
 
     @method()
-    async def Scroll(self, delta: 'i', orientation: 's'):  # noqa: N802
+    async def Scroll(self, delta: i, orientation: s):
         pass
 
     @method()
-    async def ProvideXdgActivationToken(self, token: 's'):  # noqa: N802
+    async def ProvideXdgActivationToken(self, token: s):
         self._owner._xdg_token = token
 
     # Signals ─────────────────────────────────────────────────────────────────
 
     @signal()
-    def NewTitle(self):  # noqa: N802
+    def NewTitle(self):
         pass
 
     @signal()
-    def NewIcon(self):  # noqa: N802
+    def NewIcon(self):
         pass
 
     @signal()
-    def NewAttentionIcon(self):  # noqa: N802
+    def NewAttentionIcon(self):
         pass
 
     @signal()
-    def NewOverlayIcon(self):  # noqa: N802
+    def NewOverlayIcon(self):
         pass
 
     @signal()
-    def NewToolTip(self):  # noqa: N802
+    def NewToolTip(self):
         pass
 
     @signal()
-    def NewStatus(self, status: str) -> 's':  # noqa: N802
+    def NewStatus(self, status: str) -> s:
         return status
 
 
@@ -230,7 +235,9 @@ class SniItem(QObject):
                 intro  = await bus.introspect(watcher_svc, '/StatusNotifierWatcher')
                 proxy  = bus.get_proxy_object(watcher_svc, '/StatusNotifierWatcher', intro)
                 iface  = proxy.get_interface(watcher_iface)
-                await iface.call_register_status_notifier_item(svc_name)
+                # dbus_next builds ProxyInterface methods dynamically from
+                # introspection XML — no static stub can see them.
+                await iface.call_register_status_notifier_item(svc_name)  # pyright: ignore[reportAttributeAccessIssue]
                 logger.info('SNI: registered with %s', watcher_svc)
                 registered = True
                 break

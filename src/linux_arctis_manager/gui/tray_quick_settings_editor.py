@@ -5,14 +5,22 @@ import logging
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QHBoxLayout, QLabel,
-                               QListWidget, QListWidgetItem, QPushButton,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from linux_arctis_manager.i18n import I18n
 
 logger = logging.getLogger('tray_quick_settings_editor')
-_T = lambda s, k: I18n.translate(s, k)  # noqa: E731
+_T = I18n.translate
 
 # Registry of all potentially available quick settings.
 # id → (i18n_section, i18n_key, source)

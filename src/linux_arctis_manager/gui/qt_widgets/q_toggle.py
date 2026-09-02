@@ -1,5 +1,4 @@
-from PySide6.QtCore import (Property, QEasingCurve, QPoint, QPropertyAnimation,
-                            QRect, Qt)
+from PySide6.QtCore import Property, QEasingCurve, QPoint, QPropertyAnimation, QRect, Qt
 from PySide6.QtGui import QPainter, QPaintEvent
 from PySide6.QtWidgets import QCheckBox, QWidget
 
@@ -37,7 +36,7 @@ class QToggle(QCheckBox):
         self.animation.start()
 
     @Property(float)
-    def circle_position(self) -> float:
+    def circle_position(self) -> float:  # pyright: ignore[reportRedeclaration]
         return self._circle_position
     
     @circle_position.setter
@@ -54,7 +53,7 @@ class QToggle(QCheckBox):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
         
-        box = QRect(0, 0, self.width(), self.height())
+        QRect(0, 0, self.width(), self.height())
 
         # Background
         painter.setBrush(self.palette().accent() if self.is_checkbox and self.isChecked() else self.palette().base())
@@ -62,6 +61,6 @@ class QToggle(QCheckBox):
 
         # Status circle
         painter.setBrush(self.palette().buttonText())
-        painter.drawEllipse(self._circle_position, 3, 22, 22)
+        painter.drawEllipse(int(self._circle_position), 3, 22, 22)
 
         painter.end()

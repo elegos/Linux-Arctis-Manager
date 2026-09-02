@@ -12,6 +12,7 @@ from linux_arctis_manager.gui.sni_item import SniItem
 from linux_arctis_manager.gui.tray_panel import QTrayPanel
 from linux_arctis_manager.gui.ui_utils import get_icon_pixmap
 
+
 class QSystrayApp(QBaseDesktopApp):
     _sig_status = Signal(object)
     _sig_settings = Signal(object)

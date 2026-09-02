@@ -13,8 +13,14 @@ import logging
 
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QGuiApplication
-from PySide6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QPushButton,
-                               QTextEdit, QVBoxLayout)
+from PySide6.QtWidgets import (
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QTextEdit,
+    QVBoxLayout,
+)
 
 from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
 from linux_arctis_manager.i18n import I18n

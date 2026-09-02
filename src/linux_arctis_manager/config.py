@@ -1,8 +1,9 @@
 import inspect
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, ClassVar, Literal
+from typing import Any, ClassVar, Literal
 
 from ruamel.yaml import YAML
 
@@ -127,7 +128,7 @@ class DeviceConfiguration:
     settings: dict[str, list[ConfigSetting]]
 
     def __init__(self, raw_configuration: dict[str, Any]):
-        raw_config: dict[str, Any] | None = raw_configuration.get('device', None)
+        raw_config: dict[str, Any] | None = raw_configuration.get('device')
         if raw_config is None:
             raise ValueError("Invalid configuration: missing 'device' section")
 
@@ -224,7 +225,7 @@ def load_device_configurations() -> list[DeviceConfiguration]:
     return result
 
 status_parsers: list[Callable[..., Any]] = []
-for name, obj in inspect.getmembers(status_parser_fn, inspect.isfunction):
+for _name, obj in inspect.getmembers(status_parser_fn, inspect.isfunction):
     if hasattr(obj, '_status_type'):
         status_parsers.append(obj)
 
@@ -238,7 +239,7 @@ def parsed_status(raw_status: dict[str, int]|None, device_config: DeviceConfigur
         if status_parse_config is None:
             result[key] = raw_value
             continue
-        parser = next((p for p in status_parsers if getattr(p, '_status_type') == status_parse_config.type.value), None)
+        parser = next((p for p in status_parsers if p._status_type == status_parse_config.type.value), None)  # pyright: ignore[reportFunctionMemberAccess]
         if parser is None:
             result[key] = raw_value
             continue

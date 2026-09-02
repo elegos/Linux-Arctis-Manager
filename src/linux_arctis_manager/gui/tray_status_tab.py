@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QFormLayout, QFrame, QLabel, QScrollArea,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (
+    QFormLayout,
+    QFrame,
+    QLabel,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
+)
 
 from linux_arctis_manager.i18n import I18n
 
-_T = lambda s, k: I18n.translate(s, k)  # noqa: E731
+_T = I18n.translate
 
 
 class QTrayStatusTab(QWidget):

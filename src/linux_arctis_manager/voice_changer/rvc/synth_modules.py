@@ -1,12 +1,16 @@
+# pyright: reportMissingImports=false
+# torch is provisioned in a separate AI env (see packaging/onnxruntime-install/),
+# not this project's dev venv — this module only runs there, as a Rust subprocess.
+
 from __future__ import annotations
 
 import math
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 from torch.nn import Conv1d, ConvTranspose1d
-from torch.nn.utils import weight_norm, remove_weight_norm
+from torch.nn.utils import remove_weight_norm, weight_norm
 
 
 def _get_padding(kernel_size: int, dilation: int = 1) -> int:
@@ -49,7 +53,8 @@ class MultiHeadAttention(nn.Module):
         return self.conv_o(out)
 
     def _get_rel_emb(self, emb: torch.Tensor, length: int) -> torch.Tensor:
-        w = self.window_size  # type: ignore[arg-type]
+        w = self.window_size
+        assert w is not None, "_get_rel_emb requires window_size to be set"
         pad = max(length - (w + 1), 0)
         start = max((w + 1) - length, 0)
         end = start + 2 * length - 1
@@ -137,7 +142,7 @@ class Encoder(nn.Module):
     def forward(self, x: torch.Tensor, x_mask: torch.Tensor) -> torch.Tensor:
         attn_mask = x_mask.unsqueeze(2) * x_mask.unsqueeze(-1)
         for attn, n1, ffn, n2 in zip(
-                self.attn_layers, self.norm_layers_1, self.ffn_layers, self.norm_layers_2):
+                self.attn_layers, self.norm_layers_1, self.ffn_layers, self.norm_layers_2, strict=True):
             y = self.drop(attn(x * x_mask, attn_mask))
             x = n1(x + y)
             y = self.drop(ffn(x, x_mask))
@@ -170,7 +175,7 @@ class WN(nn.Module):
         out = torch.zeros_like(x)
         g_split: torch.Tensor | None = self.cond_layer(g) if g is not None and hasattr(self, 'cond_layer') else None
         hc = self.hidden_channels
-        for i, (il, rsl) in enumerate(zip(self.in_layers, self.res_skip_layers)):
+        for i, (il, rsl) in enumerate(zip(self.in_layers, self.res_skip_layers, strict=True)):
             x_in = il(x)
             if g_split is not None:
                 x_in = x_in + g_split[:, 2 * hc * i: 2 * hc * (i + 1)]
@@ -280,7 +285,7 @@ class ResBlock1(nn.Module):
         ])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        for c1, c2 in zip(self.convs1, self.convs2):
+        for c1, c2 in zip(self.convs1, self.convs2, strict=True):
             xt = F.leaky_relu(x, 0.1)
             xt = c2(F.leaky_relu(c1(xt), 0.1))
             x = x + xt
@@ -329,7 +334,7 @@ class GeneratorNSF(nn.Module):
         self.ups = nn.ModuleList()
         self.noise_convs = nn.ModuleList()
         channels = [upsample_initial_channel]
-        for i, (u, k) in enumerate(zip(upsample_rates, upsample_kernel_sizes)):
+        for i, (u, k) in enumerate(zip(upsample_rates, upsample_kernel_sizes, strict=True)):
             ch = upsample_initial_channel // (2 ** (i + 1))
             channels.append(ch)
             self.ups.append(weight_norm(ConvTranspose1d(
@@ -344,7 +349,7 @@ class GeneratorNSF(nn.Module):
         self.resblocks = nn.ModuleList()
         for i in range(len(self.ups)):
             ch = channels[i + 1]
-            for k, d in zip(resblock_kernel_sizes, resblock_dilation_sizes):
+            for k, d in zip(resblock_kernel_sizes, resblock_dilation_sizes, strict=True):
                 self.resblocks.append(ResBlock1(ch, k, tuple(d)))
         self.conv_post = Conv1d(channels[-1], 1, 7, padding=3)
         if gin_channels:

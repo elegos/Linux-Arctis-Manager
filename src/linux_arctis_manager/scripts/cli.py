@@ -19,9 +19,8 @@ def main():
 
     args = parser.parse_args()
 
-    if args.command == 'tools':
-        if args.action == 'arctis-devices':
-            sys.exit(arctis_usb_info(args.vendor_id))
+    if args.command == 'tools' and args.action == 'arctis-devices':
+        sys.exit(arctis_usb_info(args.vendor_id))
 
 
 if __name__ == '__main__':

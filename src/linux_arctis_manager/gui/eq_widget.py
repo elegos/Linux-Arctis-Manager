@@ -1,24 +1,39 @@
 from __future__ import annotations
 
 import configparser
-import math
 import logging
+import math
 import os
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import (QColor, QFont, QLinearGradient, QPainter,
-                           QPainterPath, QPen)
-from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox,
-                               QFileDialog, QFormLayout, QFrame, QGroupBox,
-                               QHBoxLayout, QInputDialog, QLabel, QLineEdit,
-                               QListWidget, QMessageBox, QPushButton,
-                               QScrollArea, QSizePolicy, QSlider,
-                               QStackedWidget, QVBoxLayout, QWidget)
+from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from PySide6.QtWidgets import (
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QFormLayout,
+    QFrame,
+    QGroupBox,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QListWidget,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSlider,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
-from linux_arctis_manager.gui.qt_widgets.q_checkable_button_group import \
-    QCheckableButtonGroup
+from linux_arctis_manager.gui.qt_widgets.q_checkable_button_group import (
+    QCheckableButtonGroup,
+)
 from linux_arctis_manager.gui.qt_widgets.q_dual_state import QDualState
 from linux_arctis_manager.i18n import I18n
 
@@ -157,7 +172,7 @@ class QEQCurveWidget(QWidget):
         span = (w - 2 * self._PAD) / (math.log10(self._freqs[-1]) - lo)
         return [
             (self._PAD + (math.log10(f) - lo) * span, self._db_y(g))
-            for f, g in zip(self._freqs, self._gains)
+            for f, g in zip(self._freqs, self._gains, strict=True)
         ]
 
     # ------------------------------------------------------------------
@@ -172,12 +187,12 @@ class QEQCurveWidget(QWidget):
                 best_d, best_i = d, i
         return best_i
 
-    def mousePressEvent(self, event) -> None:  # noqa: N802
+    def mousePressEvent(self, event) -> None:
         if self._disabled or event.button() != Qt.MouseButton.LeftButton:
             return
         self._drag_idx = self._nearest_idx(event.position().x(), event.position().y())
 
-    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+    def mouseMoveEvent(self, event) -> None:
         if self._drag_idx is None:
             hover = not self._disabled and self._nearest_idx(
                 event.position().x(), event.position().y()) is not None
@@ -188,7 +203,7 @@ class QEQCurveWidget(QWidget):
         self.band_gain_changed.emit(self._drag_idx, db)
         self.update()
 
-    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
+    def mouseDoubleClickEvent(self, event) -> None:
         if self._disabled or event.button() != Qt.MouseButton.LeftButton:
             return
         idx = self._nearest_idx(event.position().x(), event.position().y())
@@ -197,14 +212,14 @@ class QEQCurveWidget(QWidget):
             self.band_gain_changed.emit(idx, 0.0)
             self.update()
 
-    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, event) -> None:
         self._drag_idx = None
 
     # ------------------------------------------------------------------
     # Paint
     # ------------------------------------------------------------------
 
-    def paintEvent(self, event) -> None:  # noqa: N802
+    def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
@@ -249,12 +264,12 @@ class QEQCurveWidget(QWidget):
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
             dash_pen = QPen(dash_col, 1, Qt.PenStyle.DashLine)
             painter.setPen(dash_pen)
-            for (px, _), _ in zip(pts, self._freqs):
+            for (px, _), _ in zip(pts, self._freqs, strict=True):
                 painter.drawLine(int(px), graph_top, int(px), graph_bottom)
 
             painter.setPen(lbl_col)
             fm = painter.fontMetrics()
-            for (px, _), f in zip(pts, self._freqs):
+            for (px, _), f in zip(pts, self._freqs, strict=True):
                 lbl = _fmt_freq(f) + 'Hz'
                 tw  = fm.horizontalAdvance(lbl)
                 tx  = max(0, min(int(px) - tw // 2, w - tw))
@@ -405,8 +420,8 @@ class QEQBandsView(QWidget):
         if 0 <= idx < len(self._columns):
             col = self._columns[idx]
             col._slider.blockSignals(True)
-            col._slider.setValue(int(round(gain_db * 10)))
-            col._val_label.setText(_fmt_gain(int(round(gain_db * 10))) + ' dB')
+            col._slider.setValue(round(gain_db * 10))
+            col._val_label.setText(_fmt_gain(round(gain_db * 10)) + ' dB')
             col._slider.blockSignals(False)
             self.band_changed.emit()
 
@@ -484,6 +499,7 @@ class QAddOverrideDialog(QDialog):
         self._exec_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self._exec_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         completer = self._exec_combo.completer()
+        assert completer is not None, 'setEditable(True) above always creates a default completer'
         completer.setFilterMode(Qt.MatchFlag.MatchContains)
         completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         for app_name, exec_base in _load_desktop_apps():
@@ -823,7 +839,11 @@ class QChannelSection(QGroupBox):
         self._autosave_timer.start()
 
     def _on_mode_changed(self, _: int) -> None:
-        from linux_arctis_manager.eq_preset import EQBand, elevate_bands, downsample_bands
+        from linux_arctis_manager.eq_preset import (
+            EQBand,
+            downsample_bands,
+            elevate_bands,
+        )
         selected_mode = self._current_mode()
         name = self._current_preset_name()
 
@@ -893,7 +913,10 @@ class QChannelSection(QGroupBox):
         if not ok or not name.strip():
             return
         name = name.strip()
-        from linux_arctis_manager.eq_preset import MBEQ_BAND_FREQUENCIES, SIMPLE_BAND_FREQUENCIES
+        from linux_arctis_manager.eq_preset import (
+            MBEQ_BAND_FREQUENCIES,
+            SIMPLE_BAND_FREQUENCIES,
+        )
         freqs = SIMPLE_BAND_FREQUENCIES if mode == 'simple' else MBEQ_BAND_FREQUENCIES
         flat_bands = [{'frequency': f, 'gain': 0.0} for f in freqs]
         self._pending_select_name = name   # auto-select after refresh
@@ -1095,7 +1118,7 @@ class QEQWidget(QWidget):
         self._apply_btn.clicked.connect(self._apply)
         outer.addWidget(self._apply_btn)
 
-    def showEvent(self, event) -> None:  # noqa: N802
+    def showEvent(self, event) -> None:
         super().showEvent(event)
         # On re-show, allow _on_eq_settings to re-sync the saved state.
         # _initial_load_done stays True so _on_presets won't reset combos.

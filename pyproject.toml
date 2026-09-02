@@ -26,19 +26,26 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "autoflake>=2.3.1",
     "basedpyright>=1.39.2",
-    "isort>=7.0.0",
     "pytest>=9.0.2",
     "pytest-cov>=7.1.0",
+    "ruff>=0.14.0",
 ]
 
 [tool.coverage.run]
 omit = [
     "src/linux_arctis_manager/gui/*",
-    "src/linux_arctis_manager/dbus_service.py",
-    "src/linux_arctis_manager/scripts/dbus_awake.py",
+    # Needs torch/numpy/onnxruntime, provisioned in a separate AI env this
+    # project's dev venv doesn't carry (see packaging/onnxruntime-install/).
+    "src/linux_arctis_manager/voice_changer/rvc/synth.py",
+    "src/linux_arctis_manager/voice_changer/rvc/synth_modules.py",
+    "src/linux_arctis_manager/voice_changer/rvc/export_onnx.py",
 ]
+
+[tool.coverage.report]
+# Floor set a few points below the measured baseline (43%) as a
+# regression guard, not a target — raise it as real coverage grows.
+fail_under = 40
 
 [tool.pyright]
 typeCheckingMode = "standard"
@@ -49,3 +56,31 @@ reportAny = "none"
 reportUnknownVariableType = "none"
 reportImplicitOverride = "none"
 extraPaths = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E4", "E7", "E9",  # pycodestyle (default subset: no line-length/whitespace nagging)
+    "F",               # pyflakes
+    "I",               # isort (replaces the isort dev dependency)
+    "UP",              # pyupgrade
+    "B",               # flake8-bugbear
+    "C4",              # flake8-comprehensions
+    "SIM",             # flake8-simplify
+    "PERF",            # perflint
+    "PL",              # pylint
+    "RUF",             # ruff-specific
+]
+ignore = [
+    "PLR2004",  # magic-value-comparison: too noisy for HID protocol/UI code full of literal constants
+    "PLR0911", "PLR0912", "PLR0913", "PLR0915", "PLR0917",  # complexity metrics: design opinion, not a bug signal
+    "PLC0415",  # import-outside-top-level: deliberate lazy-import pattern in this codebase (heavy/optional deps)
+    "RUF001", "RUF002", "RUF003",  # ambiguous-unicode-character: false positives on legitimate UI/i18n text
+]
+
+[tool.ruff.lint.per-file-ignores]
+# dbus_next's @method/@dbus_property/@signal decorators are annotated with
+# D-Bus type-signature strings ('s', 'a{sv}', ...), not real Python types.
+"src/linux_arctis_manager/gui/sni_item.py" = ["F821"]

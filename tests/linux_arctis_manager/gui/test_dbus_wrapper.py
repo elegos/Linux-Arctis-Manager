@@ -1,10 +1,13 @@
 """Tests for DbusWrapper reconnection and periodic-refresh behaviour."""
+# pyright: reportAttributeAccessIssue=false
+# _captured_status is a test-only spy attribute monkeypatched onto the
+# instance in _make_wrapper(), not a real DbusWrapper attribute.
+
 import asyncio
 import json
 import sys
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from PySide6.QtWidgets import QApplication
 
 # One QApplication for the whole module (required for QObject subclasses).
@@ -16,8 +19,8 @@ def _make_wrapper():
     from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
     wrapper = DbusWrapper()
     # Pre-populate signal spy lists (QSignalSpy-style manual capture)
-    wrapper._captured_status: list = []
-    wrapper.sig_status.connect(lambda s: wrapper._captured_status.append(s))
+    wrapper._captured_status = []
+    wrapper.sig_status.connect(wrapper._captured_status.append)
     return wrapper
 
 
@@ -151,7 +154,7 @@ def test_start_creates_periodic_refresh_timer():
     wrapper = _make_wrapper()
 
     # Patch out everything that would actually start threads / DBus.
-    with patch.object(wrapper, "request_status") as mock_req, \
+    with patch.object(wrapper, "request_status"), \
          patch.object(wrapper, "request_settings"), \
          patch("linux_arctis_manager.gui.dbus_wrapper.Thread"), \
          patch("linux_arctis_manager.gui.dbus_wrapper.asyncio"):

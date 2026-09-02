@@ -1,7 +1,7 @@
-from abc import ABC
+from collections.abc import Callable
 from enum import Enum
 from importlib.metadata import PackageNotFoundError, version
-from typing import Any, Callable, ClassVar, Generic, TypeVar
+from typing import Any, ClassVar, Generic, TypeVar
 
 
 def project_version() -> str:
@@ -43,7 +43,7 @@ def compare_versions(a: str, b: str) -> int:
         return 0
 
 
-class JsonSerializable(ABC):
+class JsonSerializable:
     _js_exclude_fields: ClassVar[list[str]] = []
 
     def to_dict(self) -> dict[str, Any]:
@@ -64,7 +64,7 @@ class JsonSerializable(ABC):
         cls = type(self)
         fields = getattr(cls, '__annotations__', {}).keys()
 
-        return { field: serialize(getattr(self, field)) for field in fields if type(getattr(self, field)) != callable and field not in [*self._js_exclude_fields, '_js_exclude_fields']}
+        return { field: serialize(getattr(self, field)) for field in fields if not callable(getattr(self, field)) and field not in [*self._js_exclude_fields, '_js_exclude_fields']}
 
 
 

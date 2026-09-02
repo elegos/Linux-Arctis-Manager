@@ -15,13 +15,23 @@ model's tuning.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import subprocess
 
 from PySide6.QtCore import QTimer, Signal
-from PySide6.QtWidgets import (QButtonGroup, QDialog, QHBoxLayout, QLabel,
-                               QMessageBox, QPushButton, QRadioButton,
-                               QStackedWidget, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (
+    QButtonGroup,
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QRadioButton,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
 from linux_arctis_manager.i18n import I18n
@@ -250,9 +260,10 @@ class QVCCalibrationWizard(QDialog):
             name = QLabel(hint_fn(result))
             name.setMinimumWidth(240)
             row.addWidget(name)
+            path = result.get('path', '')
             play = QPushButton('▶')
             play.setFixedWidth(44)
-            play.clicked.connect(lambda _=False, p=result.get('path', ''): self._play(p))
+            play.clicked.connect(lambda _=False, p=path: self._play(p))
             row.addWidget(play)
             row.addStretch()
             variants_lay.addWidget(row_widget)
@@ -404,10 +415,8 @@ class QVCCalibrationWizard(QDialog):
 
     def _stop_playback(self) -> None:
         if self._play_proc is not None and self._play_proc.poll() is None:
-            try:
+            with contextlib.suppress(Exception):
                 self._play_proc.terminate()
-            except Exception:
-                pass
         self._play_proc = None
 
     # ── Cleanup ───────────────────────────────────────────────────────

@@ -1,7 +1,9 @@
 import subprocess
 
-from linux_arctis_manager.constants import (SYSTEMD_HELPER_SERVICE_NAME,
-                                            SYSTEMD_SERVICE_NAME)
+from linux_arctis_manager.constants import (
+    SYSTEMD_HELPER_SERVICE_NAME,
+    SYSTEMD_SERVICE_NAME,
+)
 
 _UNITS = (SYSTEMD_HELPER_SERVICE_NAME, SYSTEMD_SERVICE_NAME)
 
@@ -26,7 +28,7 @@ def ensure_systemd_unit(enable: bool = False, restart: bool = False) -> None:
 
     subprocess.run(['systemctl', '--user', 'daemon-reload'], check=True)
 
-    is_active = subprocess.run(['systemctl', '--user', 'is-active', SYSTEMD_SERVICE_NAME], stdout=subprocess.DEVNULL).returncode == 0
+    is_active = subprocess.run(['systemctl', '--user', 'is-active', SYSTEMD_SERVICE_NAME], stdout=subprocess.DEVNULL, check=False).returncode == 0
 
     subprocess.run(['systemctl', '--user', 'enable', *_UNITS], check=True)
     if is_active and restart:
