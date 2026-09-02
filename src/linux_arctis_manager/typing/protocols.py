@@ -1,6 +1,13 @@
 from collections.abc import Iterator
 from typing import Protocol
 
+from usb.core import Device
+
+
+class TypedDevice(Device):
+    idVendor: int
+    idProduct: int
+
 
 class UsbEndpoint(Protocol):
     bEndpointAddress: int

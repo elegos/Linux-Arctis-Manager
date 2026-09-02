@@ -17,7 +17,6 @@ dependencies = [
 ]
 
 [project.scripts]
-lam-daemon = "linux_arctis_manager.scripts.daemon:main"
 lam-cli = "linux_arctis_manager.scripts.cli:main"
 lam-gui = "linux_arctis_manager.scripts.gui:main"
 
@@ -42,6 +41,7 @@ omit = [
 ]
 
 [tool.pyright]
+typeCheckingMode = "standard"
 reportUnknownMemberType = "none"
 reportMissingTypeStubs = "none"
 reportExplicitAny = "none"
