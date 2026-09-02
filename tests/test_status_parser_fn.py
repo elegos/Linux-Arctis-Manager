@@ -23,6 +23,11 @@ def test_percentage():
     assert fn(0, 100, 100) == 100
     assert fn(-123, 123, 123) == 100
 
+    # Reversed range (perc_max < perc_min): value counts down from perc_min.
+    assert fn(100, 0, 100) == 0
+    assert fn(100, 0, 75) == 25
+    assert fn(100, 0, 0) == 100
+
 def test_on_off():
     fn = on_off
     assert fn._status_type == 'on_off'

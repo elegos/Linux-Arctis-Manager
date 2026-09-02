@@ -16,6 +16,7 @@ from linux_arctis_manager.config import (
     PaddingPosition,
     SettingType,
     StatusParseType,
+    load_device_configurations,
     parsed_status,
 )
 
@@ -153,6 +154,18 @@ def test_config_setting_accepts_enum_type():
 def test_config_setting_raises_on_unknown_type():
     with pytest.raises(ValueError):
         ConfigSetting(name='vol', type='invalid_type', default_value=0)
+
+
+def test_config_setting_to_dict_merges_kwargs_and_base_fields():
+    s = ConfigSetting(name='vol', type='slider', default_value=5, min=0, max=10)
+    result = s.to_dict()
+    assert result['type'] == 'slider'
+    assert result['default_value'] == 5
+    assert result['min'] == 0
+    assert result['max'] == 10
+    # name/update_sequence are excluded by ConfigSetting._js_exclude_fields.
+    assert 'name' not in result
+    assert 'update_sequence' not in result
 
 
 def test_config_setting_get_kwargs_excludes_reserved_fields():
@@ -322,3 +335,12 @@ def test_parsed_status_calls_correct_parser():
     })
     config = DeviceConfiguration(raw)
     assert parsed_status({'battery': 5}, config) == {'battery': 50}
+
+
+# --- load_device_configurations ---
+
+def test_load_device_configurations_parses_packaged_device_yaml_files():
+    configs = load_device_configurations()
+    assert len(configs) > 0
+    assert any(c.name == 'SteelSeries Arctis Nova Pro Wireless' for c in configs)
+    assert all(isinstance(c, DeviceConfiguration) for c in configs)
