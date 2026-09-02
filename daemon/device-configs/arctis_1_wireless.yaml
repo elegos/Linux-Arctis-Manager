@@ -1,0 +1,42 @@
+extends: base_arctis_1_wireless
+
+# 4 SKUs, one protocol: base "1W", Xbox "1X" (own PID range but no protocol
+# difference found — unlike other Xbox SKUs in this project, this one keeps
+# every capability, no missing chatmix/sidetone), and the Cyberpunk 2077
+# cosmetic skin of each. All 4 raw spec files just `include` arctis-1w-tx's
+# own spec and override the PID.
+
+device:
+  name: "SteelSeries Arctis 1 Wireless"
+  vendor_id: 0x1038
+
+  # NOTE ON command_interface/sync_interface: same situation as Arctis 7 —
+  # the raw spec declares neither, and there is no v2 precedent for this
+  # family either. Left unconfirmed; wants confirming on real hardware.
+  variants:
+    - product_id: 0x12B3
+      name: "Arctis 1 Wireless"
+      bootloader_pid: 0x12B4
+    - product_id: 0x12B6
+      name: "Arctis 1 Wireless for Xbox"
+      bootloader_pid: 0x12B7
+    - product_id: 0x12D0
+      name: "Arctis 1 Wireless Cyberpunk 2077"
+      bootloader_pid: 0x12D1
+    - product_id: 0x12D2
+      name: "Arctis 1 Wireless for Xbox Cyberpunk 2077"
+      bootloader_pid: 0x12D3
+
+  hid:
+    usage_page: 0xff43
+    usage: 0x0202
+    command_interface:
+      interface: 3
+    sync_interface:
+      interface: 3
+
+  capabilities:
+    - battery
+    - custom_eq
+    - microphone
+    - wireless

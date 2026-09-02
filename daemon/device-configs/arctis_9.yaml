@@ -1,0 +1,29 @@
+extends: base_arctis_9
+
+device:
+  name: "SteelSeries Arctis 9"
+  vendor_id: 0x1038
+
+  # NOTE ON command_interface/sync_interface: the raw spec explicitly
+  # declares a sync interface (`0xFF00 0x0001 2`) — the first Tier 2 family
+  # with one at all. `command_interface` is still unconfirmed (the spec
+  # never declares one, same recurring situation as every prior port);
+  # wants confirming on real hardware.
+  variants:
+    - product_id: 0x12C2
+      name: "Arctis 9"
+      bootloader_pid: 0x12C3
+
+  hid:
+    usage_page: 0xFFC0
+    usage: 0x0001
+    command_interface:
+      interface: 2
+    sync_interface:
+      interface: 2
+
+  capabilities:
+    - bluetooth
+    - chatmix
+    - microphone
+    - wireless

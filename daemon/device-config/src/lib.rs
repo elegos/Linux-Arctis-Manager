@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 pub mod api_executor;
+pub mod biquad;
 pub mod builtins;
 pub mod codec;
 pub mod lifecycle_executor;
@@ -1119,6 +1120,136 @@ mod nova_yaml_tests {
              (NOT Nova 5's unsigned half-dB-offset encoding), q 1.414"
         );
         assert_eq!(bands_payload.len(), 65, "padded to chunk_size");
+    }
+
+    fn load_tier2_device(name: &str) -> Option<crate::DeviceConfig> {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("device-configs");
+        let path = dir.join(name);
+        if !path.exists() {
+            return None; // skip when not present (CI without device-configs)
+        }
+        Some(load(&path, &[dir.as_path()]).unwrap_or_else(|e| panic!("{name} must parse: {e}")))
+    }
+
+    #[test]
+    fn arctis_7_custom_eq_write_drives_av6x02_biquad() {
+        use crate::api_executor::{ApiExecutor, WriteAction};
+        use crate::biquad::av6x02_eq_gains_payload;
+        use crate::codec::FieldValue;
+
+        let Some(cfg) = load_tier2_device("arctis_7.yaml") else {
+            return;
+        };
+        let mut api = ApiExecutor::new(&cfg);
+        api.register_builtin("builtin:av6x02_eq_gains", av6x02_eq_gains_payload);
+
+        let mut values = HashMap::new();
+        for band in 1..=6u8 {
+            let gain = if band == 1 { 3.0 } else { 0.0 };
+            values.insert(format!("gain{band}"), FieldValue::F32(gain));
+        }
+        let op = api.prepare_write("custom_eq", &values).unwrap();
+        // band 1 non-flat -> 14 messages, bands 2-6 flat -> 2 each = 10.
+        assert_eq!(op.actions.len(), 14 + 10);
+        let WriteAction::Send { payload, .. } = &op.actions[0] else {
+            panic!("expected a Send action");
+        };
+        assert_eq!(&payload[0..2], [0x06, 0x28], "eq_filter report_id/command");
+        assert_eq!(payload.len(), 31, "padded to chunk_size");
+    }
+
+    #[test]
+    fn arctis_1_wireless_custom_eq_write_drives_av6x02_biquad() {
+        use crate::api_executor::{ApiExecutor, WriteAction};
+        use crate::biquad::av6x02_eq_gains_payload;
+        use crate::codec::FieldValue;
+
+        let Some(cfg) = load_tier2_device("arctis_1_wireless.yaml") else {
+            return;
+        };
+        let mut api = ApiExecutor::new(&cfg);
+        api.register_builtin("builtin:av6x02_eq_gains", av6x02_eq_gains_payload);
+
+        let mut values = HashMap::new();
+        for band in 1..=6u8 {
+            values.insert(format!("gain{band}"), FieldValue::F32(0.0));
+        }
+        let op = api.prepare_write("custom_eq", &values).unwrap();
+        // Every band flat -> 2 disable messages/band x 6 bands.
+        assert_eq!(op.actions.len(), 12);
+        let WriteAction::Send { payload, .. } = &op.actions[0] else {
+            panic!("expected a Send action");
+        };
+        assert_eq!(&payload[0..2], [0x06, 0x28]);
+    }
+
+    #[test]
+    fn arctis_5_custom_eq_write_drives_cx20892_biquad_then_commits() {
+        use crate::api_executor::{ApiExecutor, WriteAction};
+        use crate::biquad::{arctis5_commit_settings_payload, arctis5_eq_gains_payload};
+        use crate::codec::FieldValue;
+
+        let Some(cfg) = load_tier2_device("arctis_5.yaml") else {
+            return;
+        };
+        let mut api = ApiExecutor::new(&cfg);
+        api.register_builtin("builtin:arctis5_eq_gains", arctis5_eq_gains_payload);
+        api.register_builtin(
+            "builtin:arctis5_commit_settings",
+            arctis5_commit_settings_payload,
+        );
+
+        let mut values = HashMap::new();
+        for band in 1..=5u8 {
+            values.insert(format!("gain{band}"), FieldValue::F32(0.0));
+        }
+        let op = api.prepare_write("custom_eq", &values).unwrap();
+        // 5 band messages + 1 commit_settings message.
+        assert_eq!(op.actions.len(), 6);
+        let WriteAction::Send { payload, .. } = &op.actions[0] else {
+            panic!("expected a Send action");
+        };
+        assert_eq!(
+            &payload[0..5],
+            [0x04, 0x40, 0x0B, 0x10, 0x20],
+            "band 1 register write"
+        );
+        let WriteAction::Send {
+            payload: commit_payload,
+            ..
+        } = &op.actions[5]
+        else {
+            panic!("expected a Send action");
+        };
+        assert_eq!(
+            &commit_payload[0..6],
+            [0x04, 0x40, 0x01, 0x11, 0x54, 0x9B],
+            "commit_settings follows every EQ write"
+        );
+    }
+
+    #[test]
+    fn arctis_9_inactivity_timer_encodes_big_endian_with_no_special_handling() {
+        use crate::api_executor::{ApiExecutor, WriteAction};
+        use crate::codec::FieldValue;
+
+        let Some(cfg) = load_tier2_device("arctis_9.yaml") else {
+            return;
+        };
+        let api = ApiExecutor::new(&cfg);
+        let mut values = HashMap::new();
+        // 300s = 0x012C -> big-endian wire bytes [0x01, 0x2C], matching the
+        // raw spec's own manual byte-swap wrapper (see base_arctis_9.yaml's
+        // comment) — this project's codec already defaults to big-endian.
+        values.insert("time".to_string(), FieldValue::U16(300));
+        let op = api.prepare_write("inactivity_timer", &values).unwrap();
+        let WriteAction::Send { payload, .. } = &op.actions[0] else {
+            panic!("expected a Send action");
+        };
+        assert_eq!(&payload[0..5], [0x00, 0x04, 0x00, 0x01, 0x2C]);
     }
 
     /// Regression guard: every device file (anything not starting with

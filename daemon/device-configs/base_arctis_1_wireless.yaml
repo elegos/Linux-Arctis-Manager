@@ -1,0 +1,141 @@
+transforms:
+  # Same two-state wire encoding as Arctis 7's own connection field (3
+  # connected / 1 disconnected) — kept as its own copy rather than shared
+  # with base_arctis_7.yaml, matching this project's convention of
+  # redeclaring per-base-file transforms rather than a cross-family import.
+  arctis_1_wireless_connection_to_label:
+    type: case_int_to_str
+    default: UNKNOWN
+    values: {1: DISCONNECTED, 3: CONNECTED}
+
+structs:
+  # Confirmed protocol-identical across all 4 SKUs this family covers (base
+  # 1W, Xbox "1X", and the Cyberpunk 2077 cosmetic skin of each) — every
+  # variant's own raw spec file just `include`s this one and overrides the
+  # PID. report_id is 0x06 on every struct, same convention as Arctis 7 (a
+  # different chip-adjacent family than the Arctis 7+/Nova 7 gen1 families,
+  # which use 0x00).
+  reset:
+    - {name: report_id, type: uint8, constant: 0x06}
+    - {name: command,   type: uint8, constant: 0x01}
+
+  # Combined connection/battery/mic-mute status — simpler than Arctis 7,
+  # which splits these across 3 separate structs/commands.
+  headset_status:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x06}
+      - {name: command,   type: uint8, constant: 0x12}
+    incoming:
+      - {name: report_id, type: uint8, constant: 0x06}
+      - {name: command,   type: uint8, constant: 0x12}
+      - {name: connection_status, type: uint8, range: [1, 3]}
+      - {name: battery_status,    type: uint8, range: [0, 100]}
+      - {name: mic_mute_status,   type: uint8, range: [0, 1]} # 0 unmuted, 1 muted
+
+  mic_status:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x06}
+      - {name: command,   type: uint8, constant: 0x30}
+    incoming:
+      - {name: report_id, type: uint8, constant: 0x06}
+      - {name: command,   type: uint8, constant: 0x30}
+      - {name: mic_muted, type: uint8, range: [0, 1]}
+
+  mic_volume:
+    - {name: report_id, type: uint8, constant: 0x06}
+    - {name: command,   type: uint8, constant: 0x33}
+    - {name: val,       type: uint8, constant: 0x00}
+    - {name: mic_volume, type: uint8, range: [0, 100]}
+
+  sidetone:
+    - {name: report_id, type: uint8, constant: 0x06}
+    - {name: command,   type: uint8, constant: 0x35}
+    - {name: enabled,   type: uint8, range: [0, 1]}
+    - {name: val,       type: uint8, constant: 0x00}
+    - {name: amplitude, type: uint8, range: [0, 100]}
+
+  # Command byte 0x53 — different from Arctis 7's 0x51, same field shape.
+  inactivity_timer:
+    - {name: report_id, type: uint8, constant: 0x06}
+    - {name: command,   type: uint8, constant: 0x53}
+    - {name: inactivity_timer, type: uint8, range: [0, 255]}
+
+  fw_versions:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x06}
+      - {name: command,   type: uint8, constant: 0x10}
+    incoming:
+      - {name: report_id, type: uint8, constant: 0x06}
+      - {name: command,   type: uint8, constant: 0x10}
+      - {name: fw_minor,         type: uint8}
+      - {name: fw_major,         type: uint8}
+      - {name: fw_minor_headset, type: uint8}
+      - {name: fw_major_headset, type: uint8}
+
+  save_to_flash:
+    - {name: report_id, type: uint8, constant: 0x06}
+    - {name: command,   type: uint8, constant: 0x09}
+
+  # AV6X02 driver-computed biquad EQ — same struct/builtin as Arctis 7
+  # (base_arctis_7.yaml), zero new Rust: this family uses the identical
+  # chip. This is the real, adjustable EQ this device has; the README's
+  # older "fixed AVNERA curve" claim was wrong.
+  custom_eq:
+    - {name: report_id, type: uint8,  constant: 0x06}
+    - {name: command,   type: uint8,  constant: 0x28}
+    - {name: gain1,     type: float32, range: [-12.0, 12.0]}
+    - {name: gain2,     type: float32, range: [-12.0, 12.0]}
+    - {name: gain3,     type: float32, range: [-12.0, 12.0]}
+    - {name: gain4,     type: float32, range: [-12.0, 12.0]}
+    - {name: gain5,     type: float32, range: [-12.0, 12.0]}
+    - {name: gain6,     type: float32, range: [-12.0, 12.0]}
+
+  av6x02_init:
+    - {name: report_id, type: uint8, constant: 0x06}
+
+apis:
+  reset:
+    action: true
+    write: {transport: HID_IO, chunk_size: 31}
+  headset_status:
+    read: {transport: HID_IO, chunk_size: 31}
+  mic_status:
+    read: {transport: HID_IO, chunk_size: 31}
+  mic_volume:
+    write: {transport: HID_IO, chunk_size: 31}
+  sidetone:
+    write: {transport: HID_IO, chunk_size: 31}
+  inactivity_timer:
+    write: {transport: HID_IO, chunk_size: 31}
+  fw_versions:
+    read: {transport: HID_IO, chunk_size: 31}
+  save_to_flash:
+    write: {transport: HID_IO, chunk_size: 31}
+  custom_eq:
+    write:
+      transport: HID_IO
+      chunk_size: 31
+      payload_transform: "builtin:av6x02_eq_gains"
+  av6x02_init:
+    write:
+      transport: HID_IO
+      chunk_size: 31
+      payload_transform: "builtin:av6x02_init"
+
+sync_read:
+  - struct: headset_status
+    maps:
+      - {emit: connection_changed, field: connection_status, transform: arctis_1_wireless_connection_to_label}
+      - {emit: battery_changed,    field: battery_status,    display_type: percentage}
+      - {emit: mic_muted_changed,  field: mic_mute_status,   display_type: on_off}
+
+lifecycle:
+  # Mirrors the vendor spec's own `custom-init`: initialize the AV6X02
+  # filter bank/DRC once per connection. No Sonar/software-chatmix structs
+  # on this device — nothing to disable.
+  init:
+    - call: av6x02_init
+    - call: discord_certified_set_attributes
+      args: {echo_cancellation: true, noise_suppression: true}
+  shutdown:
+    - call: save_to_flash

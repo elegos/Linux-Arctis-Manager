@@ -1,0 +1,127 @@
+structs:
+  # Shared by all 4 SKUs this family covers (base, "2018", Dota 2 Edition,
+  # PUBG 2018 Edition) — confirmed protocol-identical, every variant's own
+  # raw spec file just `include`s "arctis_5" and overrides the PID.
+  #
+  # Every settings write here shares one memory-mapped-register header
+  # shape: `[report_id=0x04, write_command=0x40, length, addr_hi=0x10,
+  # addr_lo]` — a genuinely different wire convention than every other
+  # device this project has ported so far (all HID_IO command-byte writes,
+  # not addressed registers).
+  #
+  # NOT modeled, documented gaps rather than silent omissions:
+  # - unique_id / fw_version_conexant / connection_status: their raw
+  #   structs use an asymmetric outgoing(report_id=0x06)/incoming
+  #   (report_id=0x07) shape read via two *different* HID chunk types
+  #   (write-chunk HIDIO, then read-chunk HIDREADONLY) — this project's
+  #   `ApiOp`/`prepare_read` (daemon/device-config/src/api_executor.rs)
+  #   only supports one symmetric struct/one transport per read. A real DSL
+  #   gap, not something to route around by guessing. This also means no
+  #   connection-status/battery telemetry ships for this family — no
+  #   battery struct exists anywhere else in the raw spec either (confirmed
+  #   by direct grep, not an oversight on our part).
+  # - mic_volume: the raw spec declares its 2-byte register payload as two
+  #   *identically named* `gain int8` fields with no distinguishing
+  #   comment (every sibling struct in this file names each byte
+  #   distinctly, e.g. mic_noise_reduction's total_snr/subband_snr/
+  #   min_gain) — genuinely ambiguous what each byte means, so this is left
+  #   out rather than guessing and shipping a wrong write.
+  # - RGB lighting (`fancy_lighting_engine` include): no capability
+  #   vocabulary entry yet, same precedent as Nova 3 wired.
+  sidetone:
+    - {name: report_id,     type: uint8, constant: 0x04}
+    - {name: write_command, type: uint8, constant: 0x40}
+    - {name: length,        type: uint8, constant: 0x02}
+    - {name: addr_hi,       type: uint8, constant: 0x12}
+    - {name: addr_lo,       type: uint8, constant: 0xC6}
+    - {name: gain,          type: int16, range: [0, 0x7FFF]}
+
+  # total_snr/subband_snr are always the vendor's fixed defaults on every
+  # known write in the raw spec — only min_gain is a real user setting.
+  mic_noise_reduction:
+    - {name: report_id,     type: uint8, constant: 0x04}
+    - {name: write_command, type: uint8, constant: 0x40}
+    - {name: length,        type: uint8, constant: 0x06}
+    - {name: addr_hi,       type: uint8, constant: 0x10}
+    - {name: addr_lo,       type: uint8, constant: 0xF6}
+    - {name: total_snr,     type: uint16, constant: 0x0960}
+    - {name: subband_snr,   type: uint16, constant: 0x012C}
+    - {name: min_gain,      type: int16, range: [0, 0x7FFF]}
+
+  # Dynamic range compression. ratio/threshold are the only two fields the
+  # vendor spec allows a real range on; max_amplitude/attack_time/
+  # release_time/boost are always its own fixed defaults.
+  drc:
+    - {name: report_id,      type: uint8, constant: 0x04}
+    - {name: write_command,  type: uint8, constant: 0x40}
+    - {name: length,         type: uint8, constant: 0x0C}
+    - {name: addr_hi,        type: uint8, constant: 0x10}
+    - {name: addr_lo,        type: uint8, constant: 0xC7}
+    - {name: ratio,          type: uint16, range: [0x0100, 0x3C00]}
+    - {name: max_amplitude,  type: uint16, constant: 0x1200}
+    - {name: threshold,      type: int16, range: [-15360, 4608]}
+    - {name: attack_time,    type: uint16, constant: 0x0032}
+    - {name: release_time,   type: uint16, constant: 0x0800}
+    - {name: boost,          type: uint16, constant: 0x0000}
+
+  # CX20892 driver-computed biquad EQ — same shape of problem as Arctis
+  # 7/Arctis 1 Wireless's AV6X02, but this chip has its own fixed-point Q15
+  # conversion and a rounding-search stability check (see
+  # `builtin:arctis5_eq_gains` / daemon/device-config/src/biquad.rs) —
+  # genuinely different math, not the same flavour.
+  # report_id/command below are unused placeholders — the builtin fully
+  # regenerates the wire bytes per band (5 separate 16-byte register
+  # writes, one per band, see biquad.rs), it only reads the 5 gain fields.
+  custom_eq:
+    - {name: report_id, type: uint8,  constant: 0x00}
+    - {name: command,   type: uint8,  constant: 0x00}
+    - {name: gain1,     type: float32, range: [-12.0, 12.0]}
+    - {name: gain2,     type: float32, range: [-12.0, 12.0]}
+    - {name: gain3,     type: float32, range: [-12.0, 12.0]}
+    - {name: gain4,     type: float32, range: [-12.0, 12.0]}
+    - {name: gain5,     type: float32, range: [-12.0, 12.0]}
+
+  # "commit_settings needs to be called even during live deploy [...] for
+  # certain apis, change will not be active until it is enabled" — the raw
+  # spec's own comment is ambiguous about exactly which writes need this,
+  # so every settings write here calls it as a second step (see `apis:`
+  # below) rather than guessing which ones can skip it.
+  commit_settings:
+    - {name: report_id,     type: uint8, constant: 0x04}
+    - {name: write_command, type: uint8, constant: 0x40}
+    - {name: data_length,   type: uint8, constant: 0x01}
+    - {name: addr_hi,       type: uint8, constant: 0x11}
+    - {name: addr_lo,       type: uint8, constant: 0x54}
+    - {name: enable,        type: uint8, constant: 0x9B}
+
+  save_to_flash:
+    - {name: report_id, type: uint8, constant: 0x06}
+    - {name: command,   type: uint8, constant: 0x09}
+
+apis:
+  sidetone:
+    write:
+      steps:
+        - {transport: HID_IO, chunk_size: 39}
+        - {transport: HID_IO, chunk_size: 39, payload_transform: "builtin:arctis5_commit_settings"}
+  mic_noise_reduction:
+    write:
+      steps:
+        - {transport: HID_IO, chunk_size: 39}
+        - {transport: HID_IO, chunk_size: 39, payload_transform: "builtin:arctis5_commit_settings"}
+  drc:
+    write:
+      steps:
+        - {transport: HID_IO, chunk_size: 39}
+        - {transport: HID_IO, chunk_size: 39, payload_transform: "builtin:arctis5_commit_settings"}
+  custom_eq:
+    write:
+      steps:
+        - {transport: HID_IO, chunk_size: 39, payload_transform: "builtin:arctis5_eq_gains"}
+        - {transport: HID_IO, chunk_size: 39, payload_transform: "builtin:arctis5_commit_settings"}
+  save_to_flash:
+    write: {transport: HID_IO, chunk_size: 39}
+
+lifecycle:
+  shutdown:
+    - call: save_to_flash
