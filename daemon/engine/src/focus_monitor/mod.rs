@@ -22,7 +22,9 @@ use tracing::info;
 use device_config::codec::FieldValue;
 
 use crate::audio::AudioSetup;
-use crate::eq::settings::{load_eq_settings, AppMatcher, ChannelEqSettings, EqBackend, EqSettings};
+use crate::eq::settings::{
+    load_eq_settings, AppMatcher, Channel, ChannelEqSettings, EqBackend, EqSettings,
+};
 use crate::eq_manager::{self as eq_manager, EqRuntime};
 use crate::state::{AppState, DeviceCommand, SignalEvent};
 
@@ -95,6 +97,35 @@ struct StackEntry {
 enum RestoreAction {
     Apply(String),
     Default,
+}
+
+/// Borrows both per-channel focus stacks so event handlers can pick the right
+/// one for each channel without threading two separate `&mut` parameters
+/// through every call.
+struct ChannelStacks<'a> {
+    media: &'a mut ChannelStack,
+    chat: &'a mut ChannelStack,
+}
+
+impl<'a> ChannelStacks<'a> {
+    fn get(&mut self, channel: Channel) -> &mut ChannelStack {
+        match channel {
+            Channel::Media => self.media,
+            Channel::Chat => self.chat,
+        }
+    }
+}
+
+/// Writes a factory hardware EQ preset directly (bypasses the LADSPA/custom-slot path).
+async fn write_hw_preset(ctx: &eq_manager::HwEqContext, hw_idx: u8) {
+    let values = std::collections::HashMap::from([("eq_preset".to_string(), FieldValue::U8(hw_idx))]);
+    let _ = ctx
+        .cmd_tx
+        .send(DeviceCommand::WriteApi {
+            api_name: "selected_eq_preset".into(),
+            values,
+        })
+        .await;
 }
 
 impl ChannelStack {
@@ -238,19 +269,20 @@ pub async fn run(
             ev = ev_rx.recv() => {
                 let Some(ev) = ev else { break };
                 let hw_ctx = { let st = app_state.lock().await; eq_manager::build_hw_eq_context(&st) };
+                let stacks = ChannelStacks { media: &mut media_stack, chat: &mut chat_stack };
                 match ev {
                     FocusEvent::Focused { pid, class } => {
                         tracing::info!(
                             "focus monitor: focused pid={pid:?} class={class:?}"
                         );
                         on_focused(pid, class.as_deref(), &eq_settings,
-                            &mut media_stack, &mut chat_stack,
+                            stacks,
                             &settings_base_dir, &audio_shared, &eq_rt, hw_ctx.as_ref()).await;
                     }
                     FocusEvent::Closed { pid } => {
                         tracing::info!("focus monitor: closed pid={pid}");
                         on_closed(pid, &eq_settings,
-                            &mut media_stack, &mut chat_stack,
+                            stacks,
                             &settings_base_dir, &audio_shared, &eq_rt, hw_ctx.as_ref()).await;
                     }
                     FocusEvent::WaylandNativeFocused { xwayland_pids } => {
@@ -259,7 +291,7 @@ pub async fn run(
                             xwayland_pids.len()
                         );
                         on_wayland_native_focused(&xwayland_pids, &eq_settings,
-                            &mut media_stack, &mut chat_stack,
+                            stacks,
                             &settings_base_dir, &audio_shared, &eq_rt, hw_ctx.as_ref()).await;
                     }
                 }
@@ -288,37 +320,26 @@ async fn on_focused(
     pid: Option<u32>,
     class: Option<&str>,
     settings: &EqSettings,
-    media_stack: &mut ChannelStack,
-    chat_stack: &mut ChannelStack,
+    mut stacks: ChannelStacks<'_>,
     base_dir: &Path,
     audio: &Arc<Mutex<Option<AudioSetup>>>,
     eq_rt: &Arc<Mutex<EqRuntime>>,
     hw_ctx: Option<&eq_manager::HwEqContext>,
 ) {
-    process_channel_focus(
-        pid,
-        class,
-        &settings.media,
-        "media",
-        media_stack,
-        base_dir,
-        audio,
-        eq_rt,
-        hw_ctx,
-    )
-    .await;
-    process_channel_focus(
-        pid,
-        class,
-        &settings.chat,
-        "chat",
-        chat_stack,
-        base_dir,
-        audio,
-        eq_rt,
-        hw_ctx,
-    )
-    .await;
+    for channel in [Channel::Media, Channel::Chat] {
+        process_channel_focus(
+            pid,
+            class,
+            channel.settings(settings),
+            channel,
+            stacks.get(channel),
+            base_dir,
+            audio,
+            eq_rt,
+            hw_ctx,
+        )
+        .await;
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -326,7 +347,7 @@ async fn process_channel_focus(
     pid: Option<u32>,
     class: Option<&str>,
     ch: &ChannelEqSettings,
-    channel: &str,
+    channel: Channel,
     stack: &mut ChannelStack,
     base_dir: &Path,
     audio: &Arc<Mutex<Option<AudioSetup>>>,
@@ -346,17 +367,7 @@ async fn process_channel_focus(
     if let Some(hw_idx) = ov.hw_preset_idx {
         // Factory preset override: write selected_eq_preset directly.
         if let Some(ctx) = hw_ctx {
-            let values = std::collections::HashMap::from([(
-                "eq_preset".to_string(),
-                FieldValue::U8(hw_idx),
-            )]);
-            let _ = ctx
-                .cmd_tx
-                .send(DeviceCommand::WriteApi {
-                    api_name: "selected_eq_preset".into(),
-                    values,
-                })
-                .await;
+            write_hw_preset(ctx, hw_idx).await;
         }
         return;
     }
@@ -368,46 +379,35 @@ async fn process_channel_focus(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn on_closed(
     pid: u32,
     settings: &EqSettings,
-    media_stack: &mut ChannelStack,
-    chat_stack: &mut ChannelStack,
+    mut stacks: ChannelStacks<'_>,
     base_dir: &Path,
     audio: &Arc<Mutex<Option<AudioSetup>>>,
     eq_rt: &Arc<Mutex<EqRuntime>>,
     hw_ctx: Option<&eq_manager::HwEqContext>,
 ) {
-    process_channel_close(
-        pid,
-        &settings.media,
-        "media",
-        media_stack,
-        base_dir,
-        audio,
-        eq_rt,
-        hw_ctx,
-    )
-    .await;
-    process_channel_close(
-        pid,
-        &settings.chat,
-        "chat",
-        chat_stack,
-        base_dir,
-        audio,
-        eq_rt,
-        hw_ctx,
-    )
-    .await;
+    for channel in [Channel::Media, Channel::Chat] {
+        process_channel_close(
+            pid,
+            channel.settings(settings),
+            channel,
+            stacks.get(channel),
+            base_dir,
+            audio,
+            eq_rt,
+            hw_ctx,
+        )
+        .await;
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn process_channel_close(
     pid: u32,
     ch: &ChannelEqSettings,
-    channel: &str,
+    channel: Channel,
     stack: &mut ChannelStack,
     base_dir: &Path,
     audio: &Arc<Mutex<Option<AudioSetup>>>,
@@ -460,46 +460,35 @@ fn find_proc_by_exe(name: &str, excluded: &[u32]) -> Option<u32> {
     None
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn on_wayland_native_focused(
     xwayland_pids: &[u32],
     settings: &EqSettings,
-    media_stack: &mut ChannelStack,
-    chat_stack: &mut ChannelStack,
+    mut stacks: ChannelStacks<'_>,
     base_dir: &Path,
     audio: &Arc<Mutex<Option<AudioSetup>>>,
     eq_rt: &Arc<Mutex<EqRuntime>>,
     hw_ctx: Option<&eq_manager::HwEqContext>,
 ) {
-    process_channel_wayland_native(
-        xwayland_pids,
-        &settings.media,
-        "media",
-        media_stack,
-        base_dir,
-        audio,
-        eq_rt,
-        hw_ctx,
-    )
-    .await;
-    process_channel_wayland_native(
-        xwayland_pids,
-        &settings.chat,
-        "chat",
-        chat_stack,
-        base_dir,
-        audio,
-        eq_rt,
-        hw_ctx,
-    )
-    .await;
+    for channel in [Channel::Media, Channel::Chat] {
+        process_channel_wayland_native(
+            xwayland_pids,
+            channel.settings(settings),
+            channel,
+            stacks.get(channel),
+            base_dir,
+            audio,
+            eq_rt,
+            hw_ctx,
+        )
+        .await;
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn process_channel_wayland_native(
     xwayland_pids: &[u32],
     ch: &ChannelEqSettings,
-    channel: &str,
+    channel: Channel,
     stack: &mut ChannelStack,
     base_dir: &Path,
     audio: &Arc<Mutex<Option<AudioSetup>>>,
@@ -523,17 +512,7 @@ async fn process_channel_wayland_native(
         tracing::info!("focus/x11: Wayland-native match exe={base} pid={pid}");
         if let Some(hw_idx) = ov.hw_preset_idx {
             if let Some(ctx) = hw_ctx {
-                let values = std::collections::HashMap::from([(
-                    "eq_preset".to_string(),
-                    FieldValue::U8(hw_idx),
-                )]);
-                let _ = ctx
-                    .cmd_tx
-                    .send(DeviceCommand::WriteApi {
-                        api_name: "selected_eq_preset".into(),
-                        values,
-                    })
-                    .await;
+                write_hw_preset(ctx, hw_idx).await;
             }
             return;
         }
