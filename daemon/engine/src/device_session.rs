@@ -413,7 +413,8 @@ fn make_api_executor(config: &DeviceConfig) -> ApiExecutor<'_> {
     };
     use device_config::builtins::{
         arctis_pro_wireless_eq_bands_payload, arctis_pro_wireless_eq_preset_payload,
-        dim_timer_write_payload, graphic_eq_gains_payload, high_gain_write_payload,
+        dim_timer_write_payload, gamebuds_eq_bands_payload_args, gamebuds_sidetone_write_payload,
+        gamebuds_transparency_write_payload, graphic_eq_gains_payload, high_gain_write_payload,
         muted_mic_brightness_write_payload, named_slot_signed_gains_payload_args,
         nova_pro_omni_mic_noise_reduction_write_payload, parametric_eq_bands_payload_args,
         parametric_eq_commit_payload_args, parametric_eq_name_payload_args,
@@ -454,6 +455,16 @@ fn make_api_executor(config: &DeviceConfig) -> ApiExecutor<'_> {
         "builtin:parametric_eq_commit",
         parametric_eq_commit_payload_args,
     );
+    // GameBuds: reuses `builtin:parametric_eq_name` (its name message matches
+    // the generic shape exactly) but needs its own band-data builtin — its
+    // band message has no `connection_type` byte, unlike the generic one.
+    exec.register_builtin("builtin:gamebuds_eq_bands", gamebuds_eq_bands_payload_args);
+    exec.register_builtin("builtin:gamebuds_sidetone_write", |b, _args| {
+        gamebuds_sidetone_write_payload(b)
+    });
+    exec.register_builtin("builtin:gamebuds_transparency_write", |b, _args| {
+        gamebuds_transparency_write_payload(b)
+    });
     exec.register_builtin(
         "builtin:parametric_eq_named_slot",
         parametric_eq_named_slot_payload_args,

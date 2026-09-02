@@ -1,0 +1,111 @@
+# SteelSeries Arctis GameBuds / GameBuds X — charging case. A genuinely
+# separate USB device (own PID, own sync interface) from the dongle in
+# base_arctis_gamebuds_dongle.yaml, same as GameDAC being separate from its
+# headset — not an RX-style firmware-bookkeeping duplicate. Ported straight
+# from `base_arctis_gamebuds_case.device`; PR #57 (the open, AI-written v2
+# attempt discussed alongside this port) didn't model the case at all.
+#
+# Deliberately out of scope, same treatment as every other device port in
+# this project:
+# - Firmware update (`fw_update`, SSE transport) and FW-version reads
+#   (`fw_versions`/`anc_version`) — same exclusion as the dongle file.
+# - `headset_status` here means "is each earbud seated in the case", not
+#   RF/BT connection (that's the dongle's `headset_settings` struct) — kept
+#   under the vendor spec's own name to avoid inventing a different one.
+
+transforms:
+  case_charging_status_to_label:
+    type: case_int_to_str
+    default: UNKNOWN
+    values: {0: DISCHARGING, 1: PLUGGED_IN_CHARGING, 2: PLUGGED_IN_NOT_CHARGING}
+
+structs:
+  # Get Buds in Case Status (0xB8). 0x00 disconnected, 0x01 connected (seated).
+  headset_status:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: command,   type: uint8, constant: 0xB8}
+    incoming:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: command,   type: uint8, constant: 0xB8}
+      - {name: left_headset_status, type: uint8, range: [0, 1]}
+      - {name: right_headset_status, type: uint8, range: [0, 1]}
+
+  battery_status:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: command,   type: uint8, constant: 0xB7}
+    incoming:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: command,   type: uint8, constant: 0xB7}
+      - {name: left_battery_percent, type: uint8, range: [0, 100]}
+      - {name: right_battery_percent, type: uint8, range: [0, 100]}
+      - {name: case_battery_percent, type: uint8, range: [0, 100]}
+      - {name: left_charging_status, type: uint8, range: [0, 2]}
+      - {name: right_charging_status, type: uint8, range: [0, 2]}
+      - {name: case_charging_status, type: uint8, range: [0, 2]}
+
+  case_lid_status:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: command,   type: uint8, constant: 0xBC}
+    incoming:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: command,   type: uint8, constant: 0xBC}
+      # 0x00 open  0x01 closed
+      - {name: lid_status, type: uint8, range: [0, 1]}
+
+apis:
+  headset_status:
+    read: {transport: HID_IO, chunk_size: 65}
+
+  battery_status:
+    read: {transport: HID_IO, chunk_size: 65}
+
+  case_lid_status:
+    read: {transport: HID_IO, chunk_size: 65}
+
+sync_events:
+  0xB7:
+    emit: case_battery_changed
+    fields:
+      - {name: left_battery_percent, byte: 2, display_type: percentage}
+      - {name: right_battery_percent, byte: 3, display_type: percentage}
+      - {name: case_battery_percent, byte: 4, display_type: percentage}
+      - {name: left_charging_status, byte: 5, transform: case_charging_status_to_label}
+      - {name: right_charging_status, byte: 6, transform: case_charging_status_to_label}
+      - {name: case_charging_status, byte: 7, transform: case_charging_status_to_label}
+
+  0xB8:
+    emit: headset_in_case_changed
+    fields:
+      - {name: left_headset_status, byte: 2}
+      - {name: right_headset_status, byte: 3}
+
+  0xBC:
+    emit: case_lid_changed
+    fields:
+      - {name: lid_status, byte: 2}
+
+sync_read:
+  - struct: battery_status
+    maps:
+      - emit: case_battery_changed
+        fields: [left_battery_percent, right_battery_percent, case_battery_percent]
+        display_type: percentage
+      - emit: case_battery_changed
+        fields: [left_charging_status, right_charging_status, case_charging_status]
+        transform: case_charging_status_to_label
+
+  - struct: headset_status
+    maps:
+      - emit: headset_in_case_changed
+        fields: [left_headset_status, right_headset_status]
+
+  - struct: case_lid_status
+    maps:
+      - {emit: case_lid_changed, field: lid_status}
+
+lifecycle:
+  init:
+    - call: sync_all

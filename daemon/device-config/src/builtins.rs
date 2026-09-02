@@ -241,6 +241,88 @@ pub fn parametric_eq_commit_payload(bytes: &[u8], commit_byte_offset: usize) -> 
     vec![vec![bytes[0], bytes[commit_byte_offset]]]
 }
 
+/// GameBuds' band-data message — `[report_id, eqband_command, band_count ×
+/// (frequency:u16 BE, filter_type:u8, gain, q_factor:u16 LE)]`. Unlike
+/// [`parametric_eq_bands_payload`], the raw spec's `parametric_eq`/
+/// `parametric_eq_bt` band-data `api-write` (`arctis_gamebuds_dongle`'s
+/// base file, `create_parametric_eq_payload`) only ever extracts byte 0
+/// (report_id) and byte 4 (eqband_command) ahead of the band data — no
+/// `connection_type` byte, unlike the header this device's own *name*
+/// message carries (`builtin:parametric_eq_name` is reused unchanged for
+/// that half, since its `[report_id, eq_name_command, connection_type,
+/// preset_type, name]` shape matches exactly).
+pub fn gamebuds_eq_bands_payload(
+    bytes: &[u8],
+    bands_offset: usize,
+    band_count: usize,
+) -> Vec<Vec<u8>> {
+    let name_offset = bands_offset + band_count * PARAMETRIC_EQ_BAND_SRC_SIZE;
+    if bytes.len() < name_offset {
+        return vec![bytes.to_vec()];
+    }
+    let mut out = Vec::with_capacity(2 + band_count * 6);
+    out.push(bytes[0]);
+    out.push(bytes[4]);
+    for band in 0..band_count {
+        let base = bands_offset + band * PARAMETRIC_EQ_BAND_SRC_SIZE;
+        out.extend_from_slice(&bytes[base..base + 2]);
+        out.push(bytes[base + 2]);
+        let gain_db = f32::from_be_bytes(bytes[base + 3..base + 7].try_into().unwrap());
+        out.push(GainEncoding::SignedTenthsDb.encode(gain_db));
+        let q = f32::from_be_bytes(bytes[base + 7..base + 11].try_into().unwrap());
+        let q_u16 = (q * 1000.0).round().clamp(0.0, u16::MAX as f32) as u16;
+        out.extend_from_slice(&q_u16.to_le_bytes());
+    }
+    vec![out]
+}
+
+/// The band-data message, generic over `payload_transform_args'`
+/// `header_len`/`band_count`. Missing/unparsable args pass `bytes` through
+/// unchanged. See [`gamebuds_eq_bands_payload`].
+pub fn gamebuds_eq_bands_payload_args(bytes: &[u8], args: &BuiltinArgs) -> Vec<Vec<u8>> {
+    let (Some(header_len), Some(band_count)) =
+        (arg_usize(args, "header_len"), arg_usize(args, "band_count"))
+    else {
+        return vec![bytes.to_vec()];
+    };
+    gamebuds_eq_bands_payload(bytes, header_len, band_count)
+}
+
+/// Full-payload transform for GameBuds' `sidetone` write. Converts a
+/// user-facing level (0–3) to the firmware's quantized byte (0, 3, 6, 10)
+/// — `transform_sidetone_ui_to_fw` in the raw spec. Unknown levels map to 0
+/// (off), matching the firmware's own `else` branch on the read-back path.
+pub fn gamebuds_sidetone_write_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
+    let mut out = bytes.to_vec();
+    if out.len() >= 3 {
+        out[2] = match out[2] {
+            0 => 0,
+            1 => 3,
+            2 => 6,
+            3 => 10,
+            _ => 0,
+        };
+    }
+    vec![out]
+}
+
+/// Full-payload transform for GameBuds' `transparency` write. Converts a
+/// user-facing level (1–3) to the firmware's quantized byte (3, 6, 10) —
+/// `transform_transparency_ui_to_fw` in the raw spec. Unknown levels map to
+/// 10 (max), matching the firmware's own `else` branch.
+pub fn gamebuds_transparency_write_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
+    let mut out = bytes.to_vec();
+    if out.len() >= 3 {
+        out[2] = match out[2] {
+            1 => 3,
+            2 => 6,
+            3 => 10,
+            _ => 10,
+        };
+    }
+    vec![out]
+}
+
 /// Selects a [`GainEncoding`] from `payload_transform_args`' `gain_flavour`
 /// key. Named by what the math does — `signed_tenths_db` alone spans Nova 7
 /// Gen2, Nova Elite/Nova Pro Omni, and Nova 3/3X Wireless — not by device,

@@ -1,0 +1,31 @@
+extends: base_arctis_gamebuds_case
+
+device:
+  name: "SteelSeries Arctis GameBuds Case"
+  vendor_id: 0x1038
+
+  # Same command_interface/sync_interface situation as the dongle file
+  # (see arctis_gamebuds_dongle.yaml's note) — sync_interface is taken as
+  # declared by the raw spec (`(sync-interface 0xffc1 0x0001 2)`, confirmed
+  # identical for both PID pairs below); command_interface has no source to
+  # confirm it from and is left at 3 as an unverified guess.
+  variants:
+    - product_id: 0x230C
+      name: "Arctis GameBuds Case"
+      bootloader_pid: 0x230D
+    - product_id: 0x231A
+      name: "Arctis GameBuds X Case"
+      bootloader_pid: 0x231B
+
+  hid:
+    usage_page: 0xFFC0
+    usage: 0x0001
+    command_interface:
+      interface: 3
+    sync_interface:
+      interface: 2
+      usage_page: 0xFFC1
+      usage: 0x0001
+
+  capabilities:
+    - battery
