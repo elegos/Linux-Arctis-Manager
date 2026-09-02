@@ -43,9 +43,9 @@ omit = [
 ]
 
 [tool.coverage.report]
-# Floor set a few points below the measured baseline (43%) as a
+# Floor set a few points below the measured baseline (91%) as a
 # regression guard, not a target — raise it as real coverage grows.
-fail_under = 40
+fail_under = 88
 
 [tool.pyright]
 typeCheckingMode = "standard"
