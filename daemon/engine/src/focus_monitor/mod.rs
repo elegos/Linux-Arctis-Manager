@@ -30,6 +30,11 @@ use crate::state::{AppState, DeviceCommand, SignalEvent};
 
 pub use event::FocusEvent;
 
+/// Delay before retrying a failed IPC connection attempt (sway/hyprland).
+const RECONNECT_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
+/// Delay before restarting a backend's event loop after the connection was lost.
+const DISCONNECT_PAUSE: std::time::Duration = std::time::Duration::from_secs(2);
+
 // ── Backend ───────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
