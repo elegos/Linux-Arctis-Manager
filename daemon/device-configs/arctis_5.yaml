@@ -1,0 +1,37 @@
+extends: base_arctis_5
+
+# 4 SKUs, one protocol: base, "2018", Dota 2 Edition, PUBG 2018 Edition —
+# confirmed `include "arctis_5"`, PID-only diffs, protocol-identical.
+
+device:
+  name: "SteelSeries Arctis 5"
+  vendor_id: 0x1038
+
+  # NOTE ON usage_page: the raw spec declares the Consumer page (0x000C),
+  # unusual versus every other family this project has ported (all vendor
+  # page 0xFFxx) — that's what the spec says, not a transcription error.
+  # NOTE ON command_interface/sync_interface: neither declared in the raw
+  # spec, and there is no v2 precedent for this family. Unconfirmed; wants
+  # confirming on real hardware.
+  variants:
+    - product_id: 0x1250
+      name: "Arctis 5"
+    - product_id: 0x12AA
+      name: "Arctis 5 (2018)"
+    - product_id: 0x1251
+      name: "Arctis 5 Dota 2 Edition"
+    - product_id: 0x12A8
+      name: "Arctis 5 PUBG 2018 Edition"
+
+  hid:
+    usage_page: 0x000C
+    usage: 0x0001
+    command_interface:
+      interface: 3
+    sync_interface:
+      interface: 3
+
+  capabilities:
+    - custom_eq
+    - microphone
+    - wireless

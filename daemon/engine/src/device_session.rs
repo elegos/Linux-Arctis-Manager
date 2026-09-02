@@ -294,6 +294,10 @@ impl DeviceSession {
                     .await?;
                 Ok(vec![])
             }
+            "av6x02_init" => {
+                self.send_api_write("av6x02_init", &HashMap::new()).await?;
+                Ok(vec![])
+            }
             "discord_certified_set_attributes" => {
                 let fields = yaml_to_field_map(args);
                 self.send_api_write("discord_certified_attributes", &fields)
@@ -403,6 +407,10 @@ impl DeviceSession {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn make_api_executor(config: &DeviceConfig) -> ApiExecutor<'_> {
+    use device_config::biquad::{
+        arctis5_commit_settings_payload, arctis5_eq_gains_payload, av6x02_eq_gains_payload,
+        av6x02_init_payload,
+    };
     use device_config::builtins::{
         dim_timer_write_payload, graphic_eq_gains_payload, high_gain_write_payload,
         muted_mic_brightness_write_payload, named_slot_signed_gains_payload_args,
@@ -452,6 +460,17 @@ fn make_api_executor(config: &DeviceConfig) -> ApiExecutor<'_> {
     exec.register_builtin(
         "builtin:named_slot_signed_gains",
         named_slot_signed_gains_payload_args,
+    );
+
+    // Driver-computed biquad EQ (real DSP, chip-flavoured, no per-device
+    // args needed — see biquad.rs). Shared verbatim by Arctis 7 and Arctis 1
+    // Wireless (AV6X02); Arctis 5 (CX20892) is its own flavour so far.
+    exec.register_builtin("builtin:av6x02_eq_gains", av6x02_eq_gains_payload);
+    exec.register_builtin("builtin:av6x02_init", av6x02_init_payload);
+    exec.register_builtin("builtin:arctis5_eq_gains", arctis5_eq_gains_payload);
+    exec.register_builtin(
+        "builtin:arctis5_commit_settings",
+        arctis5_commit_settings_payload,
     );
     exec
 }

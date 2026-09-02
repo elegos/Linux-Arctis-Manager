@@ -1,0 +1,39 @@
+extends: base_arctis_7
+
+# Two hardware revisions, one protocol: the 2018 original and the "2019
+# refresh" (raw spec file names it confusingly as "arctis-7-2018", but the
+# README and every other reference to this device call it the 2019
+# refresh — it `include`s the 2018 dongle's own spec file and only
+# overrides the PID/firmware filename, confirmed protocol-identical).
+
+device:
+  name: "SteelSeries Arctis 7"
+  vendor_id: 0x1038
+
+  # NOTE ON command_interface/sync_interface: the raw spec declares neither
+  # for this family (unlike Arctis 7+, where v2 at least gave a number to
+  # fall back on) — this is a brand new family to this project, with no v2
+  # precedent either. Left unconfirmed, same disclosed-unverified treatment
+  # as every prior port; wants confirming on real hardware.
+  variants:
+    - product_id: 0x1260
+      name: "Arctis 7 (2018)"
+      bootloader_pid: 0x1261
+    - product_id: 0x12AD
+      name: "Arctis 7 (2019 refresh)"
+      bootloader_pid: 0x12AE
+
+  hid:
+    usage_page: 0xff43
+    usage: 0x0202
+    command_interface:
+      interface: 3
+    sync_interface:
+      interface: 3
+
+  capabilities:
+    - battery
+    - chatmix
+    - custom_eq
+    - microphone
+    - wireless

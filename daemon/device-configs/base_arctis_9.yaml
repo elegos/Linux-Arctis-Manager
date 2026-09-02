@@ -1,0 +1,163 @@
+transforms:
+  # rf_status: comment in the raw spec only confirms 1 = "headset just
+  # connected" (it triggers a firmware-version re-cache); 0 assumed
+  # disconnected, no other value is documented.
+  arctis_9_connection_to_label:
+    type: case_int_to_str
+    default: UNKNOWN
+    values: {0: DISCONNECTED, 1: CONNECTED}
+
+structs:
+  # Single PID, no separate hardware revisions. The headset RX side
+  # (0x12C0/bootloader 0x12C1) is excluded per this project's standing
+  # RX-isn't-a-device rule — note this one uniquely also carries
+  # `get_mac`/`get_chat_mixer`/`enter_pair_mode` in its own raw spec file,
+  # functionality lost by exclusion (this dongle/TX file has its own
+  # `enter_pair_mode`, kept below; the RX-side `get_mac`/`get_chat_mixer`
+  # are not).
+  #
+  # NOT modeled, documented gaps rather than silent omissions:
+  # - custom_eq / get_eq (CX20833 codec): zero conversion formula anywhere
+  #   in the raw spec archive, and no public reference implementation
+  #   exists either (checked against a comparable open-source project with
+  #   real Arctis 9 support — it also has no EQ handling). `select_eq_preset`
+  #   below is independently portable (a plain enum write, no format
+  #   ambiguity) and ships despite this gap.
+  # - "battery" capability / percentage: `info_table`'s `bat_voltage_hi`/
+  #   `bat_voltage_lo` are raw ADC bytes with no volt-to-percent formula
+  #   anywhere in the archive — kept in the struct for future work, but not
+  #   wired to any emit event rather than fabricating a conversion.
+  # - surround_source: the raw spec auto-selects on-board vs. USB-host
+  #   routing via Windows-only DTS-detection registry logic this project
+  #   has no equivalent for — ships with whatever the firmware defaults to,
+  #   no manual override.
+  reset:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x01}
+    - {name: reserved,  type: uint8, constant: 0x00}
+    - {name: mode,      type: uint8, constant: 0x00}
+
+  select_eq_preset:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x0B}
+    - {name: selector,  type: uint8, constant: 0x00}
+    - {name: preset,    type: uint8, range: [0, 4]}
+
+  sidetone_gain:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x06}
+    - {name: selector,  type: uint8, constant: 0x00}
+    - {name: gain,      type: uint8, range: [0, 255]}
+
+  surround_sound:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x07}
+    - {name: selector,  type: uint8, constant: 0x00}
+    - {name: state,     type: uint8, range: [0, 1]}
+
+  microphone_gain:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x05}
+    - {name: selector,  type: uint8, constant: 0x00}
+    - {name: gain,      type: uint8, range: [0, 255]}
+
+  # Wire format is big-endian, confirmed by the raw spec's own comment
+  # ("firmware expects the time value to be big-endian") and a manual
+  # byte-swap wrapper it needs because *its* default multi-byte encoding is
+  # little-endian. This project's codec already encodes uint16 big-endian
+  # by default (codec.rs), so the plain field type already produces exactly
+  # what the firmware wants — no special handling needed here, unlike the
+  # vendor spec.
+  inactivity_timer:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x04}
+    - {name: selector,  type: uint8, constant: 0x00}
+    - {name: time,      type: uint16, range: [0, 65535]} # seconds, 0 = disabled
+
+  bt_call_muting:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x2C}
+    - {name: selector,  type: uint8, constant: 0x00}
+    - name: mode
+      type: uint8
+      range: [0, 2]
+      values_mapping: {"0": "default", "1": "mute", "2": "lower_12db"}
+
+  bt_startup_mode:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x2B}
+    - {name: selector,  type: uint8, constant: 0x00}
+    - {name: mode,      type: uint8, range: [0, 1]}
+
+  # One-shot RF pairing trigger — an action, not a persisted setting, same
+  # treatment as Arctis 7+'s `pairing_mode`.
+  enter_pair_mode:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x2A}
+
+  save_to_flash:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x09}
+    - {name: selector,  type: uint8, constant: 0x00}
+
+  # Combined status/telemetry read, used both at connect (sync_read) and by
+  # the vendor's own polling loop — this project models it poll-only (no
+  # unsolicited push mechanism attempted), same convention as Arctis 7.
+  info_table:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: command,   type: uint8, constant: 0x20}
+      - {name: selector,  type: uint8, constant: 0x00}
+    incoming:
+      - {name: report_id,       type: uint8, constant: 0x00}
+      - {name: ready,           type: uint8}
+      - {name: rf_status,       type: uint8, range: [0, 1]}
+      - {name: bat_voltage_hi,  type: uint8}
+      - {name: bat_voltage_lo,  type: uint8}
+      - {name: bat_status,      type: uint8}
+      - {name: mic_mute,        type: uint8, range: [0, 1]}
+      - {name: mic_gain,        type: uint8}
+      - {name: sidetone_enabled, type: uint8}
+      - {name: sidetone_gain,   type: uint8}
+      - {name: chat_gain,       type: uint8}
+      - {name: game_gain,       type: uint8}
+      - {name: mode,            type: uint8}
+      - {name: unused,          type: bytearray, size: 52}
+
+apis:
+  reset:
+    action: true
+    write: {transport: HID_IO, chunk_size: 65}
+  select_eq_preset:
+    write: {transport: HID_IO, chunk_size: 65}
+  sidetone_gain:
+    write: {transport: HID_IO, chunk_size: 65}
+  surround_sound:
+    write: {transport: HID_IO, chunk_size: 65}
+  microphone_gain:
+    write: {transport: HID_IO, chunk_size: 65}
+  inactivity_timer:
+    write: {transport: HID_IO, chunk_size: 65}
+  bt_call_muting:
+    write: {transport: HID_IO, chunk_size: 65}
+  bt_startup_mode:
+    write: {transport: HID_IO, chunk_size: 65}
+  enter_pair_mode:
+    action: true
+    write: {transport: HID_IO, chunk_size: 65}
+  save_to_flash:
+    write: {transport: HID_IO, chunk_size: 65}
+  info_table:
+    read: {transport: HID_IO, chunk_size: 65}
+
+sync_read:
+  - struct: info_table
+    maps:
+      - {emit: connection_changed, field: rf_status,  transform: arctis_9_connection_to_label}
+      - {emit: mic_muted_changed,  field: mic_mute,   display_type: on_off}
+      - emit: chatmix_changed
+        fields: [game_gain, chat_gain]
+
+lifecycle:
+  shutdown:
+    - call: save_to_flash

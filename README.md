@@ -22,13 +22,14 @@ Cross-checked against SteelSeries' own device specs, not just the previous v2 li
 
 | Device | Supported | Notes |
 |---|:---:|---|
-| Arctis 1 Wireless (+ Xbox, + Cyberpunk 2077 Edition) | ❌ | Hardware EQ is a fixed AVNERA DSP curve, not software-adjustable. |
-| Arctis 5 (+ 2018, Dota 2 Edition, PUBG 2018 Edition) | ❌ | — |
-| Arctis 7 (+ 2019 refresh) | ❌ | 2018 original has no hardware EQ; 2019 refresh has a fixed AVNERA curve, not software-adjustable. |
+| Arctis 1 Wireless (+ Xbox, + Cyberpunk 2077 Edition) | ✅ | Hardware EQ is adjustable, just not firmware-computed — the daemon calculates the filter curve itself and streams it to the AV6X02 DSP chip. |
+| Arctis 5 (+ 2018, Dota 2 Edition, PUBG 2018 Edition) | ✅ | No connection-status or battery readout — the raw protocol reads those over a two-step exchange this project's HID layer doesn't support yet. Mic volume is also not exposed: the vendor spec's own description of that setting is ambiguous. |
+| Arctis 7 (+ 2019 refresh) | ✅ | Hardware EQ is adjustable on both revisions, just not firmware-computed — same AV6X02 chip/mechanism as Arctis 1 Wireless. |
 | Arctis 7+ / Destiny 2 Edition | ✅ | — |
 | Arctis 7X+ (Xbox) | ✅ | — |
 | Arctis 7P+ (PlayStation) | ✅ | — |
-| Arctis 9 / 9X | ❌ | — |
+| Arctis 9 | ✅ | Hardware EQ isn't adjustable — its register format is entirely undocumented, unlike Arctis 7/1 Wireless/5. Software EQ via PipeWire is the substitute. |
+| Arctis 9X | ❌ | Uses a transport (AVNERA/LIGHTXIO) this project's engine doesn't implement yet. |
 | Arctis Pro (wired) + Pro GameDAC | ❌ | — |
 | Arctis Pro Wireless | ❌ | — |
 | Arctis Nova 3 (wired) | ✅ | — |
