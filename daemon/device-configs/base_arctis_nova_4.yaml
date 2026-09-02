@@ -1,0 +1,174 @@
+# Wireless dongle family (Nova 4/4X — both PIDs protocol-identical per the
+# raw spec, only firmware-target-version constants differ), no Bluetooth
+# (unlike most other Nova-series wireless devices — confirmed: no BT
+# structs, no `audio_mode` toggle, no BT-domain EQ variant anywhere in the
+# raw spec). Same discrete 0-4 battery scale and no-readback-API-for-most-
+# settings shape as the Arctis Nova 7 gen1 family — reuses that family's
+# `battery_level_to_percent`/`connection_status_to_label`/
+# `charging_status_to_label` transform convention.
+
+transforms:
+  connection_status_to_label:
+    type: case_int_to_str
+    default: UNKNOWN
+    values: {0: NOT_PAIRED_NOT_SEARCHING, 1: NOT_PAIRED_SEARCHING, 2: PAIRED_NOT_CONNECTED, 3: PAIRED_CONNECTED}
+
+  charging_status_to_label:
+    type: case_int_to_str
+    default: UNKNOWN
+    values: {0: UNKNOWN_OR_HEADSET_NOT_CONNECTED, 1: PLUGGED_IN_CHARGING, 2: PLUGGED_IN_NOT_CHARGING, 3: DISCHARGING}
+
+  # Firmware only defines cases 0-4 (25% steps).
+  battery_level_to_percent:
+    type: case_int_to_int
+    default: 0
+    values: {0: 0, 1: 25, 2: 50, 3: 75, 4: 100}
+
+structs:
+  fw_versions:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: command,   type: uint8, constant: 0x10}
+    incoming:
+      - {name: report_id,   type: uint8, constant: 0x00}
+      - {name: command,     type: uint8, constant: 0x10}
+      - {name: mcu_ver,     type: bytearray, size: 12}
+      - {name: xbox_ver,    type: bytearray, size: 12}
+      - {name: headset_ver, type: bytearray, size: 12}
+
+  save_to_flash:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x09}
+
+  headset_status:
+    outgoing:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: command,   type: uint8, constant: 0xB0}
+    incoming:
+      - {name: report_id,          type: uint8, constant: 0x00}
+      - {name: command,            type: uint8, constant: 0xB0}
+      - {name: connection_status,  type: uint8, range: [0, 3]}
+      - {name: battery_status,     type: uint8, range: [0, 4]}
+      - {name: charging_status,    type: uint8, range: [0, 3]}
+      - {name: game_chatmix_level, type: uint8, range: [0, 100]}
+      - {name: chat_chatmix_level, type: uint8, range: [0, 100]}
+
+  mic_volume:
+    - {name: report_id,     type: uint8, constant: 0x00}
+    - {name: write_command, type: uint8, constant: 0x37}
+    - {name: level,         type: uint8, range: [0, 7]}
+
+  sidetone:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0x39}
+    - name: level
+      type: uint8
+      range: [0, 3]
+      values_mapping: {"0": "off", "1": "low", "2": "medium", "3": "high"}
+
+  # 10-band graphic EQ (fixed frequencies, gain only). Firmware byte =
+  # round(2 x (12 + gain_dB)) — the same ±12dB/0-48 formula as the Arctis
+  # 7+ family — reuses builtin:graphic_eq_gains as-is, no new Rust code.
+  eq:
+    - {name: report_id, type: uint8,   constant: 0x00}
+    - {name: command,   type: uint8,   constant: 0x33}
+    - {name: gain1,     type: float32, range: [-12.0, 12.0]}
+    - {name: gain2,     type: float32, range: [-12.0, 12.0]}
+    - {name: gain3,     type: float32, range: [-12.0, 12.0]}
+    - {name: gain4,     type: float32, range: [-12.0, 12.0]}
+    - {name: gain5,     type: float32, range: [-12.0, 12.0]}
+    - {name: gain6,     type: float32, range: [-12.0, 12.0]}
+    - {name: gain7,     type: float32, range: [-12.0, 12.0]}
+    - {name: gain8,     type: float32, range: [-12.0, 12.0]}
+    - {name: gain9,     type: float32, range: [-12.0, 12.0]}
+    - {name: gain10,    type: float32, range: [-12.0, 12.0]}
+
+  power_inactivity_timer:
+    - {name: report_id,             type: uint8, constant: 0x00}
+    - {name: command,               type: uint8, constant: 0xA3}
+    - {name: power_inactivity_timer, type: uint8, range: [0, 255]}
+
+  # `unused1`/`unused2` have real vendor-documented meaning (dongle
+  # connect-LED on/off, dongle disconnect-LED brightness) but the raw spec
+  # itself never exposes them as user settings — just constants the
+  # firmware expects present on every write. Not modeled as settings here,
+  # matching the spec's own treatment.
+  muted_mic_brightness:
+    - {name: report_id, type: uint8, constant: 0x00}
+    - {name: command,   type: uint8, constant: 0xAE}
+    - {name: level,     type: uint8, range: [0, 3]}
+    - {name: unused1,   type: uint8, constant: 0x01}
+    - {name: unused2,   type: uint8, constant: 0x14}
+
+  volume_limiter:
+    - {name: report_id,      type: uint8, constant: 0x00}
+    - {name: command,        type: uint8, constant: 0x3A}
+    - {name: volume_limiter, type: uint8, range: [0, 1]}
+
+apis:
+  fw_versions:
+    read: {transport: HID_IO, chunk_size: 65}
+
+  save_to_flash:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  headset_status:
+    read: {transport: HID_IO, chunk_size: 65}
+
+  mic_volume:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  sidetone:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  eq:
+    write:
+      transport: HID_IO
+      chunk_size: 65
+      payload_transform: "builtin:graphic_eq_gains"
+      payload_transform_args: {offset_db: 12.0, clamp_max: 48}
+
+  power_inactivity_timer:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  muted_mic_brightness:
+    write: {transport: HID_IO, chunk_size: 65}
+
+  volume_limiter:
+    write: {transport: HID_IO, chunk_size: 65}
+
+sync_events:
+  0x45:
+    emit: chatmix_changed
+    fields:
+      - {name: game_chatmix_level, byte: 2}
+      - {name: chat_chatmix_level, byte: 3}
+
+  0xB7:
+    emit: battery_changed
+    fields:
+      - {name: battery_status, byte: 2, transform: battery_level_to_percent, display_type: percentage}
+
+  0xB9:
+    emit: connection_changed
+    fields:
+      - {name: connection_status, byte: 2, transform: connection_status_to_label}
+
+  0xBB:
+    emit: charging_changed
+    fields:
+      - {name: charging_status, byte: 2, transform: charging_status_to_label}
+
+sync_read:
+  - struct: headset_status
+    maps:
+      - {emit: connection_changed, field: connection_status, transform: connection_status_to_label}
+      - {emit: battery_changed,    field: battery_status,    transform: battery_level_to_percent, display_type: percentage}
+      - {emit: charging_changed,   field: charging_status,   transform: charging_status_to_label}
+      - emit: chatmix_changed
+        fields: [game_chatmix_level, chat_chatmix_level]
+
+lifecycle:
+  init:
+    - call: discord_certified_set_attributes
+      args: {echo_cancellation: true, noise_suppression: true}

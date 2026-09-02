@@ -404,39 +404,54 @@ impl DeviceSession {
 
 fn make_api_executor(config: &DeviceConfig) -> ApiExecutor<'_> {
     use device_config::builtins::{
-        custom_eq_gains_payload, dim_timer_write_payload, eq_gains_7plus_payload,
-        high_gain_write_payload, muted_mic_brightness_write_payload, nova5_eq_bands_payload,
-        nova5_eq_name_payload, nova7gen2_eq_bands_payload, nova7gen2_eq_commit_payload,
-        nova7gen2_eq_name_payload, nova_elite_parametric_eq_payload,
-        nova_elite_ten_band_eq_payload, nova_pro_omni_mic_noise_reduction_write_payload,
-        power_timer_write_payload,
+        dim_timer_write_payload, graphic_eq_gains_payload, high_gain_write_payload,
+        muted_mic_brightness_write_payload, named_slot_signed_gains_payload_args,
+        nova_pro_omni_mic_noise_reduction_write_payload, parametric_eq_bands_payload_args,
+        parametric_eq_commit_payload_args, parametric_eq_name_payload_args,
+        parametric_eq_named_slot_payload_args, power_timer_write_payload,
     };
     let mut exec = ApiExecutor::new(config);
-    exec.register_builtin("builtin:custom_eq_gains", custom_eq_gains_payload);
-    exec.register_builtin("builtin:high_gain_write", high_gain_write_payload);
-    exec.register_builtin("builtin:dim_timer_write", dim_timer_write_payload);
-    exec.register_builtin("builtin:power_timer_write", power_timer_write_payload);
-    exec.register_builtin(
-        "builtin:muted_mic_brightness_write",
-        muted_mic_brightness_write_payload,
-    );
-    exec.register_builtin("builtin:eq_gains_7plus", eq_gains_7plus_payload);
-    exec.register_builtin("builtin:nova7gen2_eq_name", nova7gen2_eq_name_payload);
-    exec.register_builtin("builtin:nova7gen2_eq_bands", nova7gen2_eq_bands_payload);
-    exec.register_builtin("builtin:nova7gen2_eq_commit", nova7gen2_eq_commit_payload);
-    exec.register_builtin("builtin:nova5_eq_name", nova5_eq_name_payload);
-    exec.register_builtin("builtin:nova5_eq_bands", nova5_eq_bands_payload);
+    // Non-EQ builtins: genuinely device-specific logic, not data-parameterizable
+    // the same way — they ignore `payload_transform_args`.
+    exec.register_builtin("builtin:high_gain_write", |b, _args| {
+        high_gain_write_payload(b)
+    });
+    exec.register_builtin("builtin:dim_timer_write", |b, _args| {
+        dim_timer_write_payload(b)
+    });
+    exec.register_builtin("builtin:power_timer_write", |b, _args| {
+        power_timer_write_payload(b)
+    });
+    exec.register_builtin("builtin:muted_mic_brightness_write", |b, _args| {
+        muted_mic_brightness_write_payload(b)
+    });
     exec.register_builtin(
         "builtin:nova_pro_omni_mic_noise_reduction_write",
-        nova_pro_omni_mic_noise_reduction_write_payload,
+        |b, _args| nova_pro_omni_mic_noise_reduction_write_payload(b),
+    );
+
+    // Generic EQ builtins: one function per shape, parameterised entirely by
+    // `payload_transform_args` in each device's own YAML — see builtins.rs.
+    exec.register_builtin("builtin:graphic_eq_gains", graphic_eq_gains_payload);
+    exec.register_builtin(
+        "builtin:parametric_eq_name",
+        parametric_eq_name_payload_args,
     );
     exec.register_builtin(
-        "builtin:nova_elite_parametric_eq",
-        nova_elite_parametric_eq_payload,
+        "builtin:parametric_eq_bands",
+        parametric_eq_bands_payload_args,
     );
     exec.register_builtin(
-        "builtin:nova_elite_ten_band_eq",
-        nova_elite_ten_band_eq_payload,
+        "builtin:parametric_eq_commit",
+        parametric_eq_commit_payload_args,
+    );
+    exec.register_builtin(
+        "builtin:parametric_eq_named_slot",
+        parametric_eq_named_slot_payload_args,
+    );
+    exec.register_builtin(
+        "builtin:named_slot_signed_gains",
+        named_slot_signed_gains_payload_args,
     );
     exec
 }
@@ -868,7 +883,8 @@ apis:
     write:
       transport: HID_IO
       chunk_size: 64
-      payload_transform: "builtin:custom_eq_gains"
+      payload_transform: "builtin:graphic_eq_gains"
+      payload_transform_args: {offset_db: 10.0, clamp_max: 255}
 "#);
         let mut values = HashMap::new();
         for i in 1..=10u8 {
@@ -926,7 +942,8 @@ apis:
     write:
       transport: HID_IO
       chunk_size: 64
-      payload_transform: "builtin:custom_eq_gains"
+      payload_transform: "builtin:graphic_eq_gains"
+      payload_transform_args: {offset_db: 10.0, clamp_max: 255}
 "#);
         let mut values = HashMap::new();
         // -10 dB -> 0, +10 dB -> 40, -5 dB -> 10, +5 dB -> 30, rest flat (20).
@@ -1017,9 +1034,9 @@ apis:
   parametric_eq:
     write:
       steps:
-        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:nova7gen2_eq_name"}
-        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:nova7gen2_eq_bands"}
-        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:nova7gen2_eq_commit"}
+        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:parametric_eq_name", payload_transform_args: {header_len: 6, band_count: 10}}
+        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:parametric_eq_bands", payload_transform_args: {header_len: 6, band_count: 10, gain_flavour: signed_tenths_db}}
+        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:parametric_eq_commit", payload_transform_args: {commit_byte_offset: 5}}
 "#);
         let mut values = HashMap::new();
         values.insert("preset_type".to_string(), FieldValue::U8(1));
@@ -1078,8 +1095,9 @@ apis:
 
     // ── E7-S8: Nova 5 parametric EQ multi-step write ──────────────────────────
 
-    /// Nova 5's own parametric EQ write, using the *generalized* builtins
-    /// (`builtin:nova5_eq_name`/`builtin:nova5_eq_bands`) — proves the
+    /// Nova 5's own parametric EQ write, using the *generic*
+    /// `builtin:parametric_eq_name`/`builtin:parametric_eq_bands` (with
+    /// Nova 5's own `payload_transform_args`) — proves the
     /// [`parametric_eq_name_payload`]/[`parametric_eq_bands_payload`] core
     /// shared with Nova 7 Gen2 handles a real second device shape correctly:
     /// only 2 messages (no commit step — Nova 5's struct has no
@@ -1144,9 +1162,9 @@ apis:
   parametric_eq:
     write:
       steps:
-        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:nova5_eq_name"}
+        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:parametric_eq_name", payload_transform_args: {header_len: 5, band_count: 10}}
         - {sleep_ms: 600}
-        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:nova5_eq_bands"}
+        - {transport: HID_IO, chunk_size: 65, payload_transform: "builtin:parametric_eq_bands", payload_transform_args: {header_len: 5, band_count: 10, gain_flavour: unsigned_half_db_offset, offset_db: 10.0, clamp_max: 40}}
 "#);
         let mut values = HashMap::new();
         values.insert("preset_type".to_string(), FieldValue::U8(1));

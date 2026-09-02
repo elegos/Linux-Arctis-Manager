@@ -156,6 +156,13 @@ pub struct ApiOp {
     pub chunk_size: u32,
     #[serde(default)]
     pub payload_transform: Option<String>,
+    /// Parameters passed to the named `payload_transform` builtin (e.g.
+    /// `{header_len: 5, band_count: 10, gain_flavour: signed_tenths_db}`),
+    /// so a single generic Rust function can serve every device sharing its
+    /// logic — the per-device numbers live in YAML, not in a dedicated
+    /// per-device Rust wrapper.
+    #[serde(default)]
+    pub payload_transform_args: Option<HashMap<String, serde_yaml::Value>>,
 }
 
 /// One step of a multi-message write (`WriteApi::Sequence`): either a
@@ -172,6 +179,8 @@ pub enum WriteStep {
         chunk_size: u32,
         #[serde(default)]
         payload_transform: Option<String>,
+        #[serde(default)]
+        payload_transform_args: Option<HashMap<String, serde_yaml::Value>>,
     },
     Sleep {
         sleep_ms: u64,
@@ -948,7 +957,7 @@ mod nova_yaml_tests {
     #[test]
     fn nova_elite_parametric_eq_write_encodes_real_yaml() {
         use crate::api_executor::{ApiExecutor, WriteAction};
-        use crate::builtins::nova_elite_parametric_eq_payload;
+        use crate::builtins::parametric_eq_named_slot_payload_args;
         use crate::codec::FieldValue;
 
         let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -962,8 +971,8 @@ mod nova_yaml_tests {
         let cfg = load(&nova, &[dir.as_path()]).expect("nova_elite.yaml must parse");
         let mut api = ApiExecutor::new(&cfg);
         api.register_builtin(
-            "builtin:nova_elite_parametric_eq",
-            nova_elite_parametric_eq_payload,
+            "builtin:parametric_eq_named_slot",
+            parametric_eq_named_slot_payload_args,
         );
 
         let mut values = HashMap::new();
@@ -1014,6 +1023,102 @@ mod nova_yaml_tests {
             vec![0u8; 906].as_slice(),
             "chunk padding"
         );
+    }
+
+    /// End-to-end proof that Nova 3 Wireless's parametric EQ write — same
+    /// struct shape as Nova 5's (2-message write, `header_len: 5`, no
+    /// commit step) but a *different* gain flavour (signed-tenths-dB, like
+    /// Gen2/Nova Elite, not Nova 5's unsigned half-dB-offset one) — goes
+    /// through the real YAML's `payload_transform_args` correctly, not just
+    /// a hand-built struct in builtins.rs's own unit tests.
+    #[test]
+    fn nova3_wireless_parametric_eq_write_encodes_real_yaml() {
+        use crate::api_executor::{ApiExecutor, WriteAction};
+        use crate::builtins::{parametric_eq_bands_payload_args, parametric_eq_name_payload_args};
+        use crate::codec::FieldValue;
+        use std::time::Duration;
+
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("device-configs");
+        let nova = dir.join("arctis_nova_3_wireless.yaml");
+        if !nova.exists() {
+            return; // skip when not present (CI without device-configs)
+        }
+        let cfg = load(&nova, &[dir.as_path()]).expect("arctis_nova_3_wireless.yaml must parse");
+        let mut api = ApiExecutor::new(&cfg);
+        api.register_builtin(
+            "builtin:parametric_eq_name",
+            parametric_eq_name_payload_args,
+        );
+        api.register_builtin(
+            "builtin:parametric_eq_bands",
+            parametric_eq_bands_payload_args,
+        );
+
+        let mut values = HashMap::new();
+        values.insert("preset_type".to_string(), FieldValue::U8(1));
+        values.insert(
+            "name".to_string(),
+            FieldValue::Str("Bass Boost".to_string()),
+        );
+        for band in 1..=10u8 {
+            let (freq, filter_type, gain, q) = if band == 1 {
+                (1000u16, 1u8, -1.2f32, 1.414f32)
+            } else {
+                (20u16, 1u8, 0.0f32, 0.2f32)
+            };
+            values.insert(format!("band{band}_frequency"), FieldValue::U16(freq));
+            values.insert(
+                format!("band{band}_filter_type"),
+                FieldValue::U8(filter_type),
+            );
+            values.insert(format!("band{band}_gain"), FieldValue::F32(gain));
+            values.insert(format!("band{band}_q_factor"), FieldValue::F32(q));
+        }
+
+        let op = api.prepare_write("parametric_eq", &values).unwrap();
+        assert_eq!(op.actions.len(), 3, "name message, sleep, band message");
+        assert_eq!(
+            op.actions[1],
+            WriteAction::Sleep(Duration::from_millis(600))
+        );
+
+        let WriteAction::Send {
+            payload: name_payload,
+            ..
+        } = &op.actions[0]
+        else {
+            panic!("expected a Send action");
+        };
+        assert_eq!(
+            &name_payload[0..4],
+            [0x00, 0xA5, 0x00, 0x01],
+            "report_id, eq_name_command, connection_type, preset_type"
+        );
+        assert!(name_payload.starts_with(b"\x00\xA5\x00\x01Bass Boost"));
+        assert_eq!(name_payload.len(), 65, "padded to chunk_size");
+
+        let WriteAction::Send {
+            payload: bands_payload,
+            ..
+        } = &op.actions[2]
+        else {
+            panic!("expected a Send action");
+        };
+        assert_eq!(
+            &bands_payload[0..3],
+            [0x00, 0x33, 0x00],
+            "report_id, eqband_command, connection_type"
+        );
+        assert_eq!(
+            &bands_payload[3..9],
+            [0x03, 0xE8, 0x01, 0xF4, 0x86, 0x05],
+            "band 1: freq 1000, filter 1, gain -1.2dB -> signed-tenths-dB 0xF4 \
+             (NOT Nova 5's unsigned half-dB-offset encoding), q 1.414"
+        );
+        assert_eq!(bands_payload.len(), 65, "padded to chunk_size");
     }
 
     /// Regression guard: every device file (anything not starting with

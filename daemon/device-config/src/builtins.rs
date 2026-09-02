@@ -1,3 +1,21 @@
+use crate::api_executor::BuiltinArgs;
+
+fn arg_f32(args: &BuiltinArgs, key: &str) -> Option<f32> {
+    args.get(key).and_then(|v| v.as_f64()).map(|f| f as f32)
+}
+
+fn arg_u64(args: &BuiltinArgs, key: &str) -> Option<u64> {
+    args.get(key).and_then(|v| v.as_u64())
+}
+
+fn arg_usize(args: &BuiltinArgs, key: &str) -> Option<usize> {
+    arg_u64(args, key).map(|v| v as usize)
+}
+
+fn arg_str<'a>(args: &'a BuiltinArgs, key: &str) -> Option<&'a str> {
+    args.get(key).and_then(|v| v.as_str())
+}
+
 /// Converts N IEEE 754 big-endian float32 gain values (in dB) into N uint8
 /// firmware values: `firmware_val = clamp(round(2 × (offset_db + gain_dB)), 0,
 /// clamp_max) as u8`. Shared by every "fixed-frequency graphic EQ" device
@@ -18,29 +36,30 @@ pub fn graphic_eq_gains(bytes: &[u8], offset_db: f32, clamp_max: u8) -> Vec<u8> 
         .collect()
 }
 
-/// Converts 10 IEEE 754 big-endian float32 gain values (in dB) into 10 uint8
-/// firmware values: `firmware_val = clamp(round(2 × (10 + gain_dB)), 0, 255) as u8`.
+/// Full-payload transform for a "fixed-frequency graphic EQ" write: passes
+/// `report_id` and `command` through unchanged, then converts the float32
+/// gains (bytes 2..) to uint8 firmware values via [`graphic_eq_gains`].
+/// `offset_db`/`clamp_max` come from `payload_transform_args` — every
+/// graphic-EQ device (Nova Pro family, Arctis 7+, Nova 4/4x, Nova 3 wired)
+/// shares this one function, only the two constants differ per device.
 ///
-/// Input: 40 bytes (10 × f32 BE). Output: 10 bytes, one per EQ band.
-pub fn gains_to_firmware_values(bytes: &[u8]) -> Vec<u8> {
-    graphic_eq_gains(bytes, 10.0, 255)
-}
-
-/// Full-payload transform for `custom_eq` write: passes `report_id` and `command`
-/// through unchanged, then converts 10 × float32 gains (bytes 2–41) to 10 × uint8
-/// firmware values using [`graphic_eq_gains`] (Nova Pro family: offset 10 dB,
-/// clamp 0-255).
-///
-/// Input:  `[report_id, command, gain1_bytes[4], …, gain10_bytes[4], …]` (42+ bytes).
-/// Output: one packet `[report_id, command, fw_val1, …, fw_val10]`.
-pub fn custom_eq_gains_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
+/// Input:  `[report_id, command, gain1_bytes[4], …, gainN_bytes[4]]`.
+/// Output: one packet `[report_id, command, fw_val1, …, fw_valN]`.
+/// Missing/unparsable `offset_db`/`clamp_max` args, or fewer than 2 input
+/// bytes, pass the input through unchanged.
+pub fn graphic_eq_gains_payload(bytes: &[u8], args: &BuiltinArgs) -> Vec<Vec<u8>> {
+    let (Some(offset_db), Some(clamp_max)) =
+        (arg_f32(args, "offset_db"), arg_u64(args, "clamp_max"))
+    else {
+        return vec![bytes.to_vec()];
+    };
     if bytes.len() < 2 {
         return vec![bytes.to_vec()];
     }
-    let mut out = Vec::with_capacity(12);
+    let mut out = Vec::with_capacity(bytes.len() / 4 + 2);
     out.push(bytes[0]);
     out.push(bytes[1]);
-    out.extend_from_slice(&graphic_eq_gains(&bytes[2..], 10.0, 255));
+    out.extend_from_slice(&graphic_eq_gains(&bytes[2..], offset_db, clamp_max as u8));
     vec![out]
 }
 
@@ -73,33 +92,6 @@ pub fn dim_timer_write_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
 /// Uses the same minute → enum mapping as [`dim_timer_write_payload`].
 pub fn power_timer_write_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
     dim_timer_write_payload(bytes)
-}
-
-/// Converts 10 IEEE 754 big-endian float32 gain values (in dB) into 10 uint8
-/// firmware values for the Arctis 7+ family: `firmware_val = clamp(round(2 ×
-/// (12 + gain_dB)), 0, 48) as u8` (±12 dB range in 0.5 dB steps, vs. the Nova
-/// Pro family's ±10 dB — see [`graphic_eq_gains`]).
-///
-/// Input: 40 bytes (10 × f32 BE — see [`graphic_eq_gains`]). Output:
-/// 10 bytes, one per EQ band.
-pub fn gains_to_firmware_values_7plus(bytes: &[u8]) -> Vec<u8> {
-    graphic_eq_gains(bytes, 12.0, 48)
-}
-
-/// Full-payload transform for the Arctis 7+ `eq` write: passes `report_id`
-/// and `command` through unchanged, then converts 10 × float32 gains
-/// (bytes 2–41) to 10 × uint8 firmware values using [`graphic_eq_gains`]
-/// (offset 12 dB, clamp 0-48). Also reused as-is by the Arctis Nova 4/4x
-/// family, which shares this exact formula/range.
-pub fn eq_gains_7plus_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
-    if bytes.len() < 2 {
-        return vec![bytes.to_vec()];
-    }
-    let mut out = Vec::with_capacity(12);
-    out.push(bytes[0]);
-    out.push(bytes[1]);
-    out.extend_from_slice(&graphic_eq_gains(&bytes[2..], 12.0, 48));
-    vec![out]
 }
 
 /// Full-payload transform for `muted_mic_brightness` write (Arctis Nova 5 family).
@@ -249,52 +241,70 @@ pub fn parametric_eq_commit_payload(bytes: &[u8], commit_byte_offset: usize) -> 
     vec![vec![bytes[0], bytes[commit_byte_offset]]]
 }
 
-/// Nova 7 Gen2 family: `header_len=6` (report_id, eq_name_command,
-/// connection_type, preset_type, eqband_command, update_complete),
-/// `commit_byte_offset=5`, 10 bands, signed-tenths-dB gain.
-pub fn nova7gen2_eq_name_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
-    parametric_eq_name_payload(bytes, 6, 10)
+/// Selects a [`GainEncoding`] from `payload_transform_args`' `gain_flavour`
+/// key. Named by what the math does — `signed_tenths_db` alone spans Nova 7
+/// Gen2, Nova Elite/Nova Pro Omni, and Nova 3/3X Wireless — not by device,
+/// since the whole point is one flavour serving every device that shares
+/// it. `unsigned_half_db_offset` additionally needs `offset_db`/`clamp_max`
+/// args (its formula has two free constants; `signed_tenths_db` has none).
+fn gain_encoding_from_args(args: &BuiltinArgs) -> Option<GainEncoding> {
+    match arg_str(args, "gain_flavour")? {
+        "signed_tenths_db" => Some(GainEncoding::SignedTenthsDb),
+        "unsigned_half_db_offset" => Some(GainEncoding::UnsignedHalfDbOffset {
+            offset_db: arg_f32(args, "offset_db")?,
+            clamp_max: arg_u64(args, "clamp_max")? as u8,
+        }),
+        _ => None,
+    }
 }
 
-pub fn nova7gen2_eq_bands_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
-    parametric_eq_bands_payload(bytes, 6, 10, GainEncoding::SignedTenthsDb)
+/// The name-announcement message, generic over `payload_transform_args'`
+/// `header_len`/`band_count`. Missing/unparsable args pass `bytes` through
+/// unchanged.
+pub fn parametric_eq_name_payload_args(bytes: &[u8], args: &BuiltinArgs) -> Vec<Vec<u8>> {
+    let (Some(header_len), Some(band_count)) =
+        (arg_usize(args, "header_len"), arg_usize(args, "band_count"))
+    else {
+        return vec![bytes.to_vec()];
+    };
+    parametric_eq_name_payload(bytes, header_len, band_count)
 }
 
-pub fn nova7gen2_eq_commit_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
-    parametric_eq_commit_payload(bytes, 5)
+/// The band-data message, generic over `payload_transform_args'`
+/// `header_len`/`band_count`/`gain_flavour` (+ the flavour's own args, see
+/// [`gain_encoding_from_args`]). Missing/unparsable args pass `bytes`
+/// through unchanged.
+pub fn parametric_eq_bands_payload_args(bytes: &[u8], args: &BuiltinArgs) -> Vec<Vec<u8>> {
+    let (Some(header_len), Some(band_count), Some(gain_encoding)) = (
+        arg_usize(args, "header_len"),
+        arg_usize(args, "band_count"),
+        gain_encoding_from_args(args),
+    ) else {
+        return vec![bytes.to_vec()];
+    };
+    parametric_eq_bands_payload(bytes, header_len, band_count, gain_encoding)
 }
 
-/// Nova 5 family: `header_len=5` (no commit byte — report_id,
-/// eq_name_command, connection_type, preset_type, eqband_command), 10
-/// bands, unsigned half-dB-offset gain (`round(2 × (10 + dB))` clamped
-/// `[0,40]`), no commit step (2-message write, not 3).
-pub fn nova5_eq_name_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
-    parametric_eq_name_payload(bytes, 5, 10)
-}
-
-pub fn nova5_eq_bands_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
-    parametric_eq_bands_payload(
-        bytes,
-        5,
-        10,
-        GainEncoding::UnsignedHalfDbOffset {
-            offset_db: 10.0,
-            clamp_max: 40,
-        },
-    )
+/// The commit message, generic over `payload_transform_args'`
+/// `commit_byte_offset`. Missing/unparsable arg passes `bytes` through
+/// unchanged.
+pub fn parametric_eq_commit_payload_args(bytes: &[u8], args: &BuiltinArgs) -> Vec<Vec<u8>> {
+    let Some(commit_byte_offset) = arg_usize(args, "commit_byte_offset") else {
+        return vec![bytes.to_vec()];
+    };
+    parametric_eq_commit_payload(bytes, commit_byte_offset)
 }
 
 /// Nova Elite/Nova Pro Omni's "named-slot" EQ preset writes are a single
 /// HID_FEATURE message — unlike Gen2/Nova 5's multi-step parametric EQ,
 /// there's no separate name-announce message: `[report_id, command,
 /// onboard_preset_index, alias_name(6, zero-padded), name(61, zero-padded),
-/// band/gain data…]` all travel in one write. `header_len` is the fixed
-/// byte offset where band/gain data starts (70 for every known device in
-/// this family — see per-device registrations in `device_session.rs`); the
-/// header itself (`bytes[0..header_len]`) needs no re-encoding, since
-/// `codec::encode_field` now zero-pads a sized `varstring` on write.
-const NAMED_SLOT_EQ_HEADER_LEN: usize = 70;
-
+/// band/gain data…]` all travel in one write. `header_len` (70 for every
+/// known device in this family, passed via `payload_transform_args`) is the
+/// byte offset where band/gain data starts; the header itself
+/// (`bytes[0..header_len]`) needs no re-encoding, since `codec::encode_field`
+/// zero-pads a sized `varstring` on write.
+///
 /// The parametric variant (per-band frequency/filter-type/gain/Q-factor) —
 /// re-encodes each band exactly like [`parametric_eq_bands_payload`], but
 /// keeps the whole header (through `name`) verbatim instead of rebuilding a
@@ -343,19 +353,27 @@ pub fn named_slot_signed_gains_payload(bytes: &[u8], header_len: usize) -> Vec<V
     vec![out]
 }
 
-/// Nova Elite/Nova Pro Omni's `parametric_eq` (wireless domain) write.
-pub fn nova_elite_parametric_eq_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
-    parametric_eq_named_slot_payload(
-        bytes,
-        NAMED_SLOT_EQ_HEADER_LEN,
-        10,
-        GainEncoding::SignedTenthsDb,
-    )
+/// Generic over `payload_transform_args'` `header_len`/`band_count`/
+/// `gain_flavour` (+ the flavour's own args). Missing/unparsable args pass
+/// `bytes` through unchanged.
+pub fn parametric_eq_named_slot_payload_args(bytes: &[u8], args: &BuiltinArgs) -> Vec<Vec<u8>> {
+    let (Some(header_len), Some(band_count), Some(gain_encoding)) = (
+        arg_usize(args, "header_len"),
+        arg_usize(args, "band_count"),
+        gain_encoding_from_args(args),
+    ) else {
+        return vec![bytes.to_vec()];
+    };
+    parametric_eq_named_slot_payload(bytes, header_len, band_count, gain_encoding)
 }
 
-/// Nova Elite/Nova Pro Omni's `ten_band_eq_mic`/`ten_band_eq_bt` writes.
-pub fn nova_elite_ten_band_eq_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
-    named_slot_signed_gains_payload(bytes, NAMED_SLOT_EQ_HEADER_LEN)
+/// Generic over `payload_transform_args'` `header_len`. Missing/unparsable
+/// arg passes `bytes` through unchanged.
+pub fn named_slot_signed_gains_payload_args(bytes: &[u8], args: &BuiltinArgs) -> Vec<Vec<u8>> {
+    let Some(header_len) = arg_usize(args, "header_len") else {
+        return vec![bytes.to_vec()];
+    };
+    named_slot_signed_gains_payload(bytes, header_len)
 }
 
 fn minutes_to_timer_enum(minutes: u8) -> u8 {
@@ -448,45 +466,122 @@ pub fn bitmap_sub_payload(bytes: &[u8]) -> Vec<Vec<u8>> {
 mod tests {
     use super::*;
 
-    // ── gains_to_firmware_values ──────────────────────────────────────────────
-
-    #[test]
-    fn gains_to_firmware_values_known_values() {
-        // 0 dB → 20, -10 dB → 0, +10 dB → 40, -5 dB → 10, +5 dB → 30
-        let db: [f32; 10] = [0.0, -10.0, 10.0, -5.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        let mut input = Vec::with_capacity(40);
-        for &v in &db {
-            input.extend_from_slice(&v.to_be_bytes());
-        }
-        assert_eq!(
-            gains_to_firmware_values(&input),
-            vec![20, 0, 40, 10, 30, 20, 20, 20, 20, 20]
-        );
+    /// Builds a `BuiltinArgs` map from `(key, value)` pairs for testing the
+    /// `_args`-taking generic builtins, e.g.
+    /// `args(&[("header_len", 5.into()), ("gain_flavour", "nova5".into())])`.
+    fn args(pairs: &[(&str, serde_yaml::Value)]) -> BuiltinArgs {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect()
     }
 
+    // ── graphic_eq_gains (generic, offset/clamp as plain params) ────────────
+
     #[test]
-    fn gains_to_firmware_values_clamps_negative() {
+    fn graphic_eq_gains_clamps_negative() {
         // -100 dB → 2*(10-100) = -180 → clamped to 0
         let db: [f32; 10] = [-100.0; 10];
         let mut input = Vec::with_capacity(40);
         for &v in &db {
             input.extend_from_slice(&v.to_be_bytes());
         }
-        assert!(gains_to_firmware_values(&input).iter().all(|&b| b == 0));
+        assert!(graphic_eq_gains(&input, 10.0, 255).iter().all(|&b| b == 0));
     }
 
     #[test]
-    fn gains_to_firmware_values_rounding() {
+    fn graphic_eq_gains_rounding() {
         // -5.5 dB → 2*(10 - 5.5) = 9.0 → 9
-        // -4.75 dB → 2*(10 - 4.75) = 10.5 → 11 (rounds to nearest even? .round() rounds away from 0)
-        let db: [f32; 10] = [-5.5, -4.75, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        let mut input = Vec::with_capacity(40);
+        // -4.75 dB → 2*(10 - 4.75) = 10.5 → 11 (.round() rounds away from 0)
+        let db: [f32; 2] = [-5.5, -4.75];
+        let mut input = Vec::new();
         for &v in &db {
             input.extend_from_slice(&v.to_be_bytes());
         }
-        let out = gains_to_firmware_values(&input);
-        assert_eq!(out[0], 9); // round(9.0) = 9
-        assert_eq!(out[1], 11); // round(10.5) = 11
+        let out = graphic_eq_gains(&input, 10.0, 255);
+        assert_eq!(out[0], 9);
+        assert_eq!(out[1], 11);
+    }
+
+    #[test]
+    fn graphic_eq_gains_7plus_offset_and_clamp() {
+        // 0 dB → 24, -12 dB → 0, +12 dB → 48 (Arctis 7+/Nova 4 constants)
+        let db: [f32; 3] = [0.0, -12.0, 12.0];
+        let mut input = Vec::new();
+        for &v in &db {
+            input.extend_from_slice(&v.to_be_bytes());
+        }
+        assert_eq!(graphic_eq_gains(&input, 12.0, 48), vec![24, 0, 48]);
+    }
+
+    #[test]
+    fn graphic_eq_gains_7plus_clamps_out_of_range() {
+        let db: [f32; 2] = [-100.0, 100.0];
+        let mut input = Vec::new();
+        for &v in &db {
+            input.extend_from_slice(&v.to_be_bytes());
+        }
+        assert_eq!(graphic_eq_gains(&input, 12.0, 48), vec![0, 48]);
+    }
+
+    // ── graphic_eq_gains_payload (args-driven) ───────────────────────────────
+
+    #[test]
+    fn graphic_eq_gains_payload_preserves_header_and_converts_gains() {
+        let db = [0.0_f32; 10];
+        let mut input = vec![0x06u8, 0x33];
+        for &v in &db {
+            input.extend_from_slice(&v.to_be_bytes());
+        }
+        let a = args(&[("offset_db", 10.0.into()), ("clamp_max", 255.into())]);
+        let result = graphic_eq_gains_payload(&input, &a);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0][0], 0x06);
+        assert_eq!(result[0][1], 0x33);
+        assert_eq!(&result[0][2..], &[20u8; 10]);
+    }
+
+    #[test]
+    fn graphic_eq_gains_payload_converts_known_mix() {
+        let db: [f32; 10] = [-10.0, 10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let mut input = vec![0x06u8, 0x33];
+        for &v in &db {
+            input.extend_from_slice(&v.to_be_bytes());
+        }
+        let a = args(&[("offset_db", 10.0.into()), ("clamp_max", 255.into())]);
+        let result = graphic_eq_gains_payload(&input, &a);
+        assert_eq!(result[0][2], 0); // -10 dB
+        assert_eq!(result[0][3], 40); // +10 dB
+        assert_eq!(&result[0][4..12], &[20u8; 8]); // 0 dB × 8
+    }
+
+    #[test]
+    fn graphic_eq_gains_payload_7plus_flavour_preserves_header() {
+        let db = [0.0_f32; 10];
+        let mut input = vec![0x00u8, 0x33];
+        for &v in &db {
+            input.extend_from_slice(&v.to_be_bytes());
+        }
+        let a = args(&[("offset_db", 12.0.into()), ("clamp_max", 48.into())]);
+        let result = graphic_eq_gains_payload(&input, &a);
+        assert_eq!(result[0][0], 0x00);
+        assert_eq!(result[0][1], 0x33);
+        assert_eq!(&result[0][2..], &[24u8; 10]);
+    }
+
+    #[test]
+    fn graphic_eq_gains_payload_too_short_passthrough() {
+        let input = vec![0x06u8];
+        let a = args(&[("offset_db", 10.0.into()), ("clamp_max", 255.into())]);
+        let result = graphic_eq_gains_payload(&input, &a);
+        assert_eq!(result, vec![vec![0x06u8]]);
+    }
+
+    #[test]
+    fn graphic_eq_gains_payload_missing_args_passthrough() {
+        let input = vec![0x06u8, 0x33, 0, 0, 0, 0];
+        let result = graphic_eq_gains_payload(&input, &BuiltinArgs::new());
+        assert_eq!(result, vec![input]);
     }
 
     // ── image_to_column_packed ────────────────────────────────────────────────
@@ -591,45 +686,6 @@ mod tests {
         assert_eq!(result[0][5], 32); // hp unchanged (32 is already multiple of 8)
     }
 
-    // ── custom_eq_gains_payload ───────────────────────────────────────────────
-
-    #[test]
-    fn custom_eq_gains_payload_preserves_header_and_converts_gains() {
-        // header: report_id=0x06, command=0x33
-        // gains: 0 dB × 10 → firmware 20 each
-        let db = [0.0_f32; 10];
-        let mut input = vec![0x06u8, 0x33];
-        for &v in &db {
-            input.extend_from_slice(&v.to_be_bytes());
-        }
-        let result = custom_eq_gains_payload(&input);
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0][0], 0x06);
-        assert_eq!(result[0][1], 0x33);
-        assert_eq!(&result[0][2..], &[20u8; 10]);
-    }
-
-    #[test]
-    fn custom_eq_gains_payload_converts_known_mix() {
-        // -10 dB → 0, +10 dB → 40
-        let db: [f32; 10] = [-10.0, 10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        let mut input = vec![0x06u8, 0x33];
-        for &v in &db {
-            input.extend_from_slice(&v.to_be_bytes());
-        }
-        let result = custom_eq_gains_payload(&input);
-        assert_eq!(result[0][2], 0); // -10 dB
-        assert_eq!(result[0][3], 40); // +10 dB
-        assert_eq!(&result[0][4..12], &[20u8; 8]); // 0 dB × 8
-    }
-
-    #[test]
-    fn custom_eq_gains_payload_too_short_passthrough() {
-        let input = vec![0x06u8];
-        let result = custom_eq_gains_payload(&input);
-        assert_eq!(result, vec![vec![0x06u8]]);
-    }
-
     // ── high_gain_write_payload ───────────────────────────────────────────────
 
     #[test]
@@ -685,47 +741,6 @@ mod tests {
             let result = power_timer_write_payload(&input);
             assert_eq!(result[0][2], expected_enum);
         }
-    }
-
-    // ── gains_to_firmware_values_7plus / eq_gains_7plus_payload ─────────────────
-
-    #[test]
-    fn gains_to_firmware_values_7plus_known_values() {
-        // 0 dB → 24, -12 dB → 0, +12 dB → 48
-        let db: [f32; 10] = [0.0, -12.0, 12.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        let mut input = Vec::with_capacity(40);
-        for &v in &db {
-            input.extend_from_slice(&v.to_be_bytes());
-        }
-        let out = gains_to_firmware_values_7plus(&input);
-        assert_eq!(out[0], 24);
-        assert_eq!(out[1], 0);
-        assert_eq!(out[2], 48);
-    }
-
-    #[test]
-    fn gains_to_firmware_values_7plus_clamps_out_of_range() {
-        let db: [f32; 10] = [-100.0, 100.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        let mut input = Vec::with_capacity(40);
-        for &v in &db {
-            input.extend_from_slice(&v.to_be_bytes());
-        }
-        let out = gains_to_firmware_values_7plus(&input);
-        assert_eq!(out[0], 0);
-        assert_eq!(out[1], 48);
-    }
-
-    #[test]
-    fn eq_gains_7plus_payload_preserves_header_and_converts_gains() {
-        let db = [0.0_f32; 10];
-        let mut input = vec![0x00u8, 0x33];
-        for &v in &db {
-            input.extend_from_slice(&v.to_be_bytes());
-        }
-        let result = eq_gains_7plus_payload(&input);
-        assert_eq!(result[0][0], 0x00);
-        assert_eq!(result[0][1], 0x33);
-        assert_eq!(&result[0][2..], &[24u8; 10]);
     }
 
     // ── muted_mic_brightness_write_payload ─────────────────────────────────────
@@ -800,11 +815,22 @@ mod tests {
 
     const FLAT_BAND: (u16, u8, f32, f32) = (0, 0, 0.0, 0.0);
 
+    fn gen2_name_args() -> BuiltinArgs {
+        args(&[("header_len", 6.into()), ("band_count", 10.into())])
+    }
+    fn gen2_bands_args() -> BuiltinArgs {
+        args(&[
+            ("header_len", 6.into()),
+            ("band_count", 10.into()),
+            ("gain_flavour", "signed_tenths_db".into()),
+        ])
+    }
+
     #[test]
     fn nova7gen2_eq_name_payload_includes_header_and_name() {
         let bands = [FLAT_BAND; 10];
         let input = eq_input(0x01, 1, &bands, "EQ1");
-        let result = nova7gen2_eq_name_payload(&input);
+        let result = parametric_eq_name_payload_args(&input, &gen2_name_args());
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], [0x00, 0xA7, 0x01, 0x01, b'E', b'Q', b'1']);
     }
@@ -813,7 +839,7 @@ mod tests {
     fn nova7gen2_eq_name_payload_empty_name() {
         let bands = [FLAT_BAND; 10];
         let input = eq_input(0x00, 0, &bands, "");
-        let result = nova7gen2_eq_name_payload(&input);
+        let result = parametric_eq_name_payload_args(&input, &gen2_name_args());
         assert_eq!(result[0], [0x00, 0xA7, 0x00, 0x00]);
     }
 
@@ -825,7 +851,7 @@ mod tests {
         // +12.0 dB, 10.0 Q -> gain byte 120 (0x78), q 10000 LE [0x10, 0x27]
         bands[1] = (20000, 6, 12.0, 10.0);
         let input = eq_input(0x02, 1, &bands, "");
-        let result = nova7gen2_eq_bands_payload(&input);
+        let result = parametric_eq_bands_payload_args(&input, &gen2_bands_args());
         assert_eq!(result.len(), 1);
         let p = &result[0];
         assert_eq!(
@@ -847,7 +873,7 @@ mod tests {
         let mut bands = [FLAT_BAND; 10];
         bands[0] = (100, 1, 100.0, 0.2); // way past ±12dB — must not panic or wrap silently
         let input = eq_input(0x00, 0, &bands, "");
-        let result = nova7gen2_eq_bands_payload(&input);
+        let result = parametric_eq_bands_payload_args(&input, &gen2_bands_args());
         assert_eq!(result[0][6], 127, "gain byte clamped to i8::MAX");
     }
 
@@ -855,8 +881,19 @@ mod tests {
     fn nova7gen2_eq_commit_payload_is_report_id_and_update_complete() {
         let bands = [FLAT_BAND; 10];
         let input = eq_input(0x00, 0, &bands, "ignored");
-        let result = nova7gen2_eq_commit_payload(&input);
+        let a = args(&[("commit_byte_offset", 5.into())]);
+        let result = parametric_eq_commit_payload_args(&input, &a);
         assert_eq!(result, vec![vec![0x00, 0x27]]);
+    }
+
+    #[test]
+    fn parametric_eq_bands_payload_args_missing_flavour_passthrough() {
+        let input = vec![0x00u8, 0x33, 0x02];
+        let a = args(&[("header_len", 6.into()), ("band_count", 10.into())]);
+        assert_eq!(
+            parametric_eq_bands_payload_args(&input, &a),
+            vec![input.clone()]
+        );
     }
 
     // ── graphic_eq_gains (generic) ───────────────────────────────────────────
@@ -908,11 +945,24 @@ mod tests {
         b
     }
 
+    fn nova5_name_args() -> BuiltinArgs {
+        args(&[("header_len", 5.into()), ("band_count", 10.into())])
+    }
+    fn nova5_bands_args() -> BuiltinArgs {
+        args(&[
+            ("header_len", 5.into()),
+            ("band_count", 10.into()),
+            ("gain_flavour", "unsigned_half_db_offset".into()),
+            ("offset_db", 10.0.into()),
+            ("clamp_max", 40.into()),
+        ])
+    }
+
     #[test]
     fn nova5_eq_name_payload_includes_header_and_name() {
         let bands = [FLAT_BAND; 10];
         let input = nova5_eq_input(0x01, 1, &bands, "EQ1");
-        let result = nova5_eq_name_payload(&input);
+        let result = parametric_eq_name_payload_args(&input, &nova5_name_args());
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], [0x00, 0xA5, 0x01, 0x01, b'E', b'Q', b'1']);
     }
@@ -925,7 +975,7 @@ mod tests {
         // 12.0 dB -> round(2*(10+12)) = 44, clamped to 40 (0x28); 10.0 Q -> 10000 LE
         bands[1] = (20000, 5, 12.0, 10.0);
         let input = nova5_eq_input(0x02, 1, &bands, "");
-        let result = nova5_eq_bands_payload(&input);
+        let result = parametric_eq_bands_payload_args(&input, &nova5_bands_args());
         assert_eq!(result.len(), 1);
         let p = &result[0];
         assert_eq!(
@@ -943,7 +993,7 @@ mod tests {
         let mut bands = [FLAT_BAND; 10];
         bands[0] = (100, 1, -100.0, 0.2); // way below -10dB — must clamp, not wrap
         let input = nova5_eq_input(0x00, 0, &bands, "");
-        let result = nova5_eq_bands_payload(&input);
+        let result = parametric_eq_bands_payload_args(&input, &nova5_bands_args());
         assert_eq!(result[0][6], 0, "gain byte clamped to 0");
     }
 
@@ -951,13 +1001,22 @@ mod tests {
 
     /// Builds a fake Nova Elite named-slot codec serialisation: `[report_id,
     /// command, onboard_preset_index, alias_name(6, zero-padded),
-    /// name(61, zero-padded)]` (70 bytes, matching `NAMED_SLOT_EQ_HEADER_LEN`)
-    /// followed by 10 raw band/gain groups.
+    /// name(61, zero-padded)]` (70 bytes, the `header_len` every device in
+    /// this family passes via `payload_transform_args`) followed by 10 raw
+    /// band/gain groups.
     fn nova_elite_header(command: u8, onboard_preset_index: u8) -> Vec<u8> {
         let mut b = vec![0x01u8, command, onboard_preset_index];
         b.extend(std::iter::repeat_n(0u8, 6)); // alias_name, already zero-padded by the codec
         b.extend(std::iter::repeat_n(0u8, 61)); // name, already zero-padded by the codec
         b
+    }
+
+    fn nova_elite_named_slot_args() -> BuiltinArgs {
+        args(&[
+            ("header_len", 70.into()),
+            ("band_count", 10.into()),
+            ("gain_flavour", "signed_tenths_db".into()),
+        ])
     }
 
     #[test]
@@ -972,7 +1031,7 @@ mod tests {
             input.extend_from_slice(&gain.to_be_bytes());
             input.extend_from_slice(&q.to_be_bytes());
         }
-        let result = nova_elite_parametric_eq_payload(&input);
+        let result = parametric_eq_named_slot_payload_args(&input, &nova_elite_named_slot_args());
         assert_eq!(result.len(), 1);
         let p = &result[0];
         assert_eq!(&p[0..70], &input[0..70], "header (through name) unchanged");
@@ -988,7 +1047,8 @@ mod tests {
         for g in gains {
             input.extend_from_slice(&g.to_be_bytes());
         }
-        let result = nova_elite_ten_band_eq_payload(&input);
+        let a = args(&[("header_len", 70.into())]);
+        let result = named_slot_signed_gains_payload_args(&input, &a);
         assert_eq!(result.len(), 1);
         let p = &result[0];
         assert_eq!(&p[0..70], &input[0..70], "header (through name) unchanged");

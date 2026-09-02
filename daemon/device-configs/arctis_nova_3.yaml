@@ -1,0 +1,26 @@
+extends: base_arctis_nova_3
+
+device:
+  name: "SteelSeries Arctis Nova 3"
+  vendor_id: 0x1038
+
+  # NOTE ON command_interface: the raw spec declares only `usage-page`/
+  # `usage` at the device level (0xFFC0/0x0001), never an interface number
+  # (no `sync-interface` declaration exists here at all, unlike every other
+  # Nova-family device — this one has no live push data whatsoever).
+  # Interface 3 follows the same precedent used for every other unconfirmed
+  # device in this family; wants confirming on real hardware.
+  variants:
+    - product_id: 0x12EC
+      name: "Arctis Nova 3"
+      bootloader_pid: 0x12ED
+
+  hid:
+    usage_page: 0xFFC0
+    usage: 0x0001
+    command_interface:
+      interface: 3
+
+  capabilities:
+    - custom_eq
+    - microphone

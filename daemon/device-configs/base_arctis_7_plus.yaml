@@ -79,7 +79,8 @@ apis:
     write:
       transport: HID_IO
       chunk_size: 65
-      payload_transform: "builtin:eq_gains_7plus"
+      payload_transform: "builtin:graphic_eq_gains"
+      payload_transform_args: {offset_db: 12.0, clamp_max: 48}
 
   muted_mic_brightness:
     write: {transport: HID_IO, chunk_size: 65}
