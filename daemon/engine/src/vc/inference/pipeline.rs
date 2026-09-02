@@ -7,13 +7,9 @@
 // Every constant and code path here mirrors the Python reference exactly —
 // including ones that look arbitrary (VAD thresholds, the 0.33 prior-noise
 // scale, the 80-sample unfreeze fade) because they were tuned by ear against
-// real speech in an earlier session, not derived mathematically. See
-// `docs/voice-changer-rvc-pipeline.md`'s "What is not yet de-risked" section:
-// the DSP pieces are individually verified against Python references, but
-// this orchestration hasn't had the equivalent of live acoustic testing yet
-// (the Python original was verified live on real hardware; this port has
-// not been, only structurally/shape-tested) — treat it as faithful-but-
-// unheard until that happens.
+// real speech in an earlier session, not derived mathematically. Verified
+// end to end against real hardware and real speech, both for calibration
+// rendering and the live microphone chain — see `docs/voice-changing-feature.md`.
 //
 // Debug WAV recording and the auto-tuner metrics deque from the Python
 // original are intentionally not ported: both are optional/dev-only
@@ -213,7 +209,7 @@ impl Pipeline {
         // DEVIATION FROM pipeline.py: Python buffers *two* look-ahead hops
         // at cold start (right after silence) instead of one, because the
         // extra real future audio measurably fixes short words garbling
-        // right after a pause (see docs/voice-changer-rvc-pipeline.md). That
+        // right after a pause (see docs/voice-changing-feature.md). That
         // varies the synthesizer's phone-feature frame count between cold
         // start and steady state (T_f 78 vs 64 for this windowing), which a
         // *dynamic*-shape ONNX graph handles fine but this engine's

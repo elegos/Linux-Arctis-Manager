@@ -54,7 +54,7 @@ Cross-checked against SteelSeries' own device specs, not just the previous v2 li
 | Symbol | Description |
 | :---: | --- |
 | ✅ | Supported by the v3 (Rust) daemon today |
-| ❌ | Not ported yet — [How to add support for a new device](docs/device_support.md) if you want to help |
+| ❌ | Not ported yet |
 
 ## ⌨️ Components
 
@@ -189,7 +189,8 @@ rm -rf ~/.config/arctis_manager
 - [Device DSL reference](docs/DEVICE_DSL.md) — the YAML format used to describe a device
 - [D-Bus interface reference](docs/dbus.md)
 - [Device compatibility matrix](docs/device_compatibility.md) — auto-generated from the v3 device configs; the table above is the human-curated summary, this is the exhaustive per-capability one
-- [How to add support for a new device](docs/device_support.md)
+- [Equalizer](docs/eq.md) — band modes, backends, presets, per-app overrides
+- [Voice Changer](docs/voice-changing-feature.md) — usage and architecture
 - [Wireshark tutorial](https://www.youtube.com/watch?v=zWbdnHwTr3M)
 - [Migrating from v2 to v3](docs/migration-v2-to-v3.md)
 
@@ -210,7 +211,7 @@ Join us on:
 
 ### Missing a Device?
 
-If your headset isn't listed in the support table, we likely just need your hardware IDs to get started. See our [Hardware Support Guide](docs/device_support.md) for instructions on how to find and submit your Product ID (PID).
+If your headset isn't listed in the support table, we likely just need your hardware IDs to get started. Run `lam-cli tools arctis-devices` and share the output on [Discord](https://discord.gg/FXfvUXWXt4) or [Fluxer](https://fluxer.gg/beALFGJK).
 
 ---
 

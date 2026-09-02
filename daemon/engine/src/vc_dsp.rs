@@ -4,7 +4,7 @@
 // Direct, function-by-function port of the pure-numpy parts of
 // `voice_changer/rvc/pipeline.py`. Every function here is pure (no model
 // calls, no streaming state) and is verified against the real Python
-// reference's output on fixed test vectors — see docs/voice-changer-rvc-pipeline.md
+// reference's output on fixed test vectors — see docs/voice-changing-feature.md
 // for the wider verification strategy.
 //
 // Not yet wired into anything — this is the first piece of [E10-S6a]'s Rust

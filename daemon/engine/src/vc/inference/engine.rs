@@ -295,7 +295,7 @@ impl SynthSession {
     /// `torch.randn_like`/`torch.rand` draws, which is *why* two calls with
     /// identical (phone, pitch, pitchf) inputs produce audibly-similar but
     /// not identical output (by VITS design, not a bug — see
-    /// `docs/voice-changer-rvc-pipeline.md`). Returns the waveform at the
+    /// `docs/voice-changing-feature.md`). Returns the waveform at the
     /// model's native sample rate, length [`Self::t_audio`].
     pub fn infer(
         &mut self,

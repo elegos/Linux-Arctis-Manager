@@ -15,10 +15,23 @@ migration.
    systemctl --user disable --now arctis-manager
    ```
 
-2. **Install v3** using whichever method matches your distro — see
+2. **Uninstall the v2 package**, using whichever matches how you installed it:
+
+   ```bash
+   # AUR
+   sudo pacman -Rns linux-arctis-manager
+
+   # pipx
+   pipx uninstall linux_arctis_manager
+
+   # pip
+   pip uninstall linux_arctis_manager
+   ```
+
+3. **Install v3** using whichever method matches your distro — see
    [README.md](../README.md#-install--setup).
 
-3. **Enable the new units.**
+4. **Enable the new units.**
 
    ```bash
    systemctl --user daemon-reload
@@ -27,7 +40,7 @@ migration.
 
    (The AUR and RPM packages run this for you as part of install/upgrade.)
 
-4. **Remove the udev rule**, if you installed it manually or via a v2
+5. **Remove the udev rule**, if you installed it manually or via a v2
    package. v3 doesn't need it: `lam-hidraw-helper` opens `/dev/hidraw*`
    directly via `CAP_DAC_OVERRIDE`, so device-node group ownership is no
    longer part of the permission model.
@@ -37,7 +50,7 @@ migration.
    sudo rm -f /usr/lib/udev/rules.d/91-steelseries-arctis.rules
    ```
 
-5. **Remove old device YAML overrides**, if any. Device configuration files
+6. **Remove old device YAML overrides**, if any. Device configuration files
    in `~/.config/arctis_manager/devices/` used the v2 DSL and are not
    compatible with v3's config format (see
    [DEVICE_DSL.md](DEVICE_DSL.md)). The bundled v3 device files supersede
