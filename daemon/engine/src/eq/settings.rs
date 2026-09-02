@@ -56,6 +56,57 @@ pub struct AppOverride {
     pub backend: Option<EqBackend>,
 }
 
+// ── Channel ────────────────────────────────────────────────────────────────────
+
+/// The two independent EQ channels: game/media audio and chat/voice audio.
+///
+/// Replaces the `"media"` / `"chat"` string convention used across the D-Bus
+/// API and the EQ runtime, so channel selection is a compiler-checked match
+/// instead of a string comparison repeated at every call site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Channel {
+    Media,
+    Chat,
+}
+
+impl Channel {
+    /// Parse the D-Bus wire representation (`"media"` or `"chat"`).
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "media" => Some(Self::Media),
+            "chat" => Some(Self::Chat),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Media => "media",
+            Self::Chat => "chat",
+        }
+    }
+
+    pub fn settings(self, s: &EqSettings) -> &ChannelEqSettings {
+        match self {
+            Self::Media => &s.media,
+            Self::Chat => &s.chat,
+        }
+    }
+
+    pub fn settings_mut(self, s: &mut EqSettings) -> &mut ChannelEqSettings {
+        match self {
+            Self::Media => &mut s.media,
+            Self::Chat => &mut s.chat,
+        }
+    }
+}
+
+impl std::fmt::Display for Channel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 // ── Per-channel settings ──────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -124,6 +175,28 @@ pub fn load_eq_settings(base_dir: &Path) -> EqSettings {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    // ── Channel ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn channel_parse_roundtrips_as_str() {
+        assert_eq!(Channel::parse("media"), Some(Channel::Media));
+        assert_eq!(Channel::parse("chat"), Some(Channel::Chat));
+        assert_eq!(Channel::parse("bogus"), None);
+        assert_eq!(Channel::Media.as_str(), "media");
+        assert_eq!(Channel::Chat.as_str(), "chat");
+    }
+
+    #[test]
+    fn channel_settings_accessors_pick_the_right_field() {
+        let mut s = EqSettings::default();
+        s.media.preset = "MediaPreset".into();
+        s.chat.preset = "ChatPreset".into();
+        assert_eq!(Channel::Media.settings(&s).preset, "MediaPreset");
+        assert_eq!(Channel::Chat.settings(&s).preset, "ChatPreset");
+        Channel::Media.settings_mut(&mut s).preset = "Changed".into();
+        assert_eq!(s.media.preset, "Changed");
+    }
 
     // ── Defaults ──────────────────────────────────────────────────────────────
 

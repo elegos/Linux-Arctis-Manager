@@ -17,7 +17,7 @@ use zbus::{connection, interface};
 use crate::audio::AudioSetup;
 use crate::device_persistence;
 use crate::eq::preset::{list_presets, load_preset, preset_path, save_preset, EqPreset};
-use crate::eq::settings::{load_eq_settings, save_eq_settings};
+use crate::eq::settings::{load_eq_settings, save_eq_settings, Channel};
 use crate::eq_manager::{self as eq_manager, EqRuntime};
 use crate::general_settings::GeneralSettings;
 use crate::state::{AppState, DeviceCommand, SignalEvent};
@@ -458,57 +458,30 @@ impl EqInterface {
     /// `key`: `"enabled"`, `"backend"`, `"band_mode"`, or `"preset"`.
     /// `value`: JSON-encoded value.
     async fn set_eq_setting(&self, channel: &str, key: &str, value: &str) -> bool {
-        if channel != "media" && channel != "chat" {
+        let Some(channel) = Channel::parse(channel) else {
             return false;
-        }
-        let mut settings = load_eq_settings(&self.settings_base_dir);
-        let ch = if channel == "media" {
-            &mut settings.media
-        } else {
-            &mut settings.chat
         };
+        let mut settings = load_eq_settings(&self.settings_base_dir);
+        let ch = channel.settings_mut(&mut settings);
 
         let ok = match key {
-            "enabled" => {
-                if let Ok(b) = serde_json::from_str::<bool>(value) {
-                    ch.enabled = b;
-                    true
-                } else {
-                    false
-                }
-            }
-            "backend" => {
-                if let Ok(b) = serde_json::from_str(value) {
-                    ch.backend = b;
-                    true
-                } else {
-                    false
-                }
-            }
-            "band_mode" => {
-                if let Ok(m) = serde_json::from_str(value) {
-                    ch.band_mode = m;
-                    true
-                } else {
-                    false
-                }
-            }
-            "preset" => {
-                if let Ok(name) = serde_json::from_str::<String>(value) {
-                    ch.preset = name;
-                    true
-                } else {
-                    false
-                }
-            }
+            "enabled" => serde_json::from_str(value).map(|v| ch.enabled = v).is_ok(),
+            "backend" => serde_json::from_str(value).map(|v| ch.backend = v).is_ok(),
+            "band_mode" => serde_json::from_str(value)
+                .map(|v| ch.band_mode = v)
+                .is_ok(),
+            "preset" => serde_json::from_str(value).map(|v| ch.preset = v).is_ok(),
             "app_overrides" => {
                 use crate::eq::settings::AppOverride;
-                if let Ok(overrides) = serde_json::from_str::<Vec<AppOverride>>(value) {
-                    ch.app_overrides = overrides;
-                    true
-                } else {
-                    warn!("SetEQSetting: invalid app_overrides JSON");
-                    false
+                match serde_json::from_str::<Vec<AppOverride>>(value) {
+                    Ok(overrides) => {
+                        ch.app_overrides = overrides;
+                        true
+                    }
+                    Err(_) => {
+                        warn!("SetEQSetting: invalid app_overrides JSON");
+                        false
+                    }
                 }
             }
             _ => false,
@@ -522,39 +495,7 @@ impl EqInterface {
             warn!("SetEQSetting: failed to persist: {e}");
         }
 
-        // Apply or disable EQ pipeline.
-        let ch_settings = if channel == "media" {
-            &settings.media
-        } else {
-            &settings.chat
-        }
-        .clone();
-        let hw_ctx = {
-            let st = self.state.lock().await;
-            eq_manager::build_hw_eq_context(&st)
-        };
-        if ch_settings.enabled {
-            let outcome = eq_manager::apply_channel_eq(
-                &ch_settings,
-                channel,
-                &self.settings_base_dir,
-                &self.audio_shared,
-                &self.eq_runtime,
-                hw_ctx.as_ref(),
-            )
-            .await;
-            if let eq_manager::EqApplyOutcome::HwSlot(slot) = outcome {
-                self.persist_eq_preset_slot(slot).await;
-            }
-        } else {
-            eq_manager::disable_channel_eq(
-                channel,
-                &self.audio_shared,
-                &self.eq_runtime,
-                hw_ctx.as_ref(),
-            )
-            .await;
-        }
+        self.apply_or_disable_channel(channel, &settings).await;
 
         let json = serde_json::to_string(&settings).unwrap_or_default();
         let _ = self.signal_tx.send(SignalEvent::EQChanged { json });
@@ -566,9 +507,9 @@ impl EqInterface {
     /// `channel`: `"media"` or `"chat"`.
     /// `json`: full `ChannelEqSettings` object (enabled, backend, band_mode, preset, app_overrides).
     async fn set_eq_channel_settings(&self, channel: &str, json: &str) -> bool {
-        if channel != "media" && channel != "chat" {
+        let Some(channel) = Channel::parse(channel) else {
             return false;
-        }
+        };
         let ch_settings: crate::eq::settings::ChannelEqSettings = match serde_json::from_str(json) {
             Ok(s) => s,
             Err(e) => {
@@ -578,42 +519,13 @@ impl EqInterface {
         };
 
         let mut settings = load_eq_settings(&self.settings_base_dir);
-        if channel == "media" {
-            settings.media = ch_settings.clone();
-        } else {
-            settings.chat = ch_settings.clone();
-        }
+        *channel.settings_mut(&mut settings) = ch_settings;
 
         if let Err(e) = save_eq_settings(&self.settings_base_dir, &settings) {
             warn!("SetEqChannelSettings: failed to persist: {e}");
         }
 
-        let hw_ctx = {
-            let st = self.state.lock().await;
-            eq_manager::build_hw_eq_context(&st)
-        };
-        if ch_settings.enabled {
-            let outcome = eq_manager::apply_channel_eq(
-                &ch_settings,
-                channel,
-                &self.settings_base_dir,
-                &self.audio_shared,
-                &self.eq_runtime,
-                hw_ctx.as_ref(),
-            )
-            .await;
-            if let eq_manager::EqApplyOutcome::HwSlot(slot) = outcome {
-                self.persist_eq_preset_slot(slot).await;
-            }
-        } else {
-            eq_manager::disable_channel_eq(
-                channel,
-                &self.audio_shared,
-                &self.eq_runtime,
-                hw_ctx.as_ref(),
-            )
-            .await;
-        }
+        self.apply_or_disable_channel(channel, &settings).await;
 
         let json = serde_json::to_string(&settings).unwrap_or_default();
         let _ = self.signal_tx.send(SignalEvent::EQChanged { json });
@@ -690,6 +602,48 @@ impl EqInterface {
 }
 
 // ── EQ helpers ────────────────────────────────────────────────────────────────
+
+impl EqInterface {
+    /// Applies `channel`'s current settings (or tears the EQ pipeline down when
+    /// disabled), persisting the hardware preset slot on a successful HW apply.
+    ///
+    /// Not part of the `#[interface]` block above: `zbus`'s macro turns every
+    /// method there into a D-Bus method and requires `zvariant::Type` on all
+    /// parameters, which the internal `Channel` enum does not implement.
+    async fn apply_or_disable_channel(
+        &self,
+        channel: Channel,
+        settings: &crate::eq::settings::EqSettings,
+    ) {
+        let ch_settings = channel.settings(settings).clone();
+        let hw_ctx = {
+            let st = self.state.lock().await;
+            eq_manager::build_hw_eq_context(&st)
+        };
+        if ch_settings.enabled {
+            let outcome = eq_manager::apply_channel_eq(
+                &ch_settings,
+                channel,
+                &self.settings_base_dir,
+                &self.audio_shared,
+                &self.eq_runtime,
+                hw_ctx.as_ref(),
+            )
+            .await;
+            if let eq_manager::EqApplyOutcome::HwSlot(slot) = outcome {
+                self.persist_eq_preset_slot(slot).await;
+            }
+        } else {
+            eq_manager::disable_channel_eq(
+                channel,
+                &self.audio_shared,
+                &self.eq_runtime,
+                hw_ctx.as_ref(),
+            )
+            .await;
+        }
+    }
+}
 
 fn is_system_stream(name: &str) -> bool {
     name.starts_with("pipewire")
