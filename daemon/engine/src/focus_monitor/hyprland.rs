@@ -28,7 +28,7 @@ pub async fn run(tx: mpsc::Sender<FocusEvent>) {
             Ok(s) => s,
             Err(e) => {
                 warn!("focus/hyprland: socket {socket_path}: {e}");
-                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                tokio::time::sleep(super::RECONNECT_DELAY).await;
                 continue;
             }
         };
@@ -86,7 +86,7 @@ pub async fn run(tx: mpsc::Sender<FocusEvent>) {
                 _ => {}
             }
         }
-        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        tokio::time::sleep(super::DISCONNECT_PAUSE).await;
     }
 }
 

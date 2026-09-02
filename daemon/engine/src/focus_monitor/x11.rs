@@ -91,7 +91,7 @@ pub async fn run(tx: mpsc::Sender<FocusEvent>) {
         }
 
         let _ = child.kill().await;
-        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        tokio::time::sleep(super::DISCONNECT_PAUSE).await;
     }
 }
 
