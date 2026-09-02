@@ -48,7 +48,7 @@ flowchart TB
 ```
 
 > [!NOTE]
-> The voice changer module is omitted here — it is under active development. See [`voice-changing-feature.md`](voice-changing-feature.md).
+> The voice changer module is omitted here for brevity — see [`voice-changing-feature.md`](voice-changing-feature.md) for its own architecture.
 
 ## Privilege Model
 

@@ -10,7 +10,7 @@
 // is a plain Rust `Arc::new`), so it needs no `onnxruntime` shared library
 // loaded to run, unlike `ExecutionProvider::is_available()`/`register()`.
 //
-// See docs/voice-changer-rvc-pipeline.md's "Rust component architecture"
+// See docs/voice-changing-feature.md's "Rust component architecture"
 // section for how this fits into the wider engine.
 
 use ort::ep::{ExecutionProviderDispatch, OpenVINO, ROCm, CPU, CUDA};
@@ -37,7 +37,7 @@ impl GpuBackend {
 }
 
 /// Fixed priority order: GPU backends are tried before falling back to CPU.
-/// Matches the architecture decided in `docs/voice-changer-rvc-pipeline.md`.
+/// Matches the architecture decided in `docs/voice-changing-feature.md`.
 pub const PRIORITY_ORDER: [GpuBackend; 4] = [
     GpuBackend::Cuda,
     GpuBackend::Rocm,

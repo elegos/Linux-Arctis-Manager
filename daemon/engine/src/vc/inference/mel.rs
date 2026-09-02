@@ -1,7 +1,7 @@
 // Native mel-spectrogram front end for RMVPE ([E10-S6a]) — port of
 // `rmvpe.py::_MelSpectrogram`, which itself wraps `torch.stft` and
 // `torchaudio.functional.melscale_fbanks`. RMVPE's ONNX export does *not*
-// include this front end (see docs/voice-changer-rvc-pipeline.md), so it has
+// include this front end (see docs/voice-changing-feature.md), so it has
 // to be reproduced natively rather than run through `ort`.
 //
 // Every formula here (`_hz_to_mel`/`_mel_to_hz`/`_create_triangular_filterbank`/
