@@ -1,0 +1,158 @@
+name: Build package (reusable)
+
+on:
+  workflow_call:
+    outputs:
+      matrix:
+        description: Resolved distro build matrix (see resolve_distro_matrix.py)
+        value: ${{ jobs.resolve-matrix.outputs.matrix }}
+
+jobs:
+  resolve-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.resolve.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - id: resolve
+        run: python3 .github/scripts/resolve_distro_matrix.py >> "$GITHUB_OUTPUT"
+
+  # Builds the real package (PKGBUILD / .spec / debian/control) on each
+  # target distro/version. Build-time deps come straight from the packaging
+  # recipe itself (makepkg reads depends=/makedepends=; the rpm/deb steps
+  # below parse BuildRequires:/Build-Depends: from the recipe files), not a
+  # hand-picked list in this workflow — so a wrong/missing declaration here
+  # fails the build, same as it would for a real packager.
+  build-pkg:
+    needs: resolve-matrix
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.resolve-matrix.outputs.matrix) }}
+
+    container:
+      image: ${{ matrix.image }}
+      options: --user root
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build package
+        run: |
+          set -e
+          VERSION_RAW=$(cat VERSION)
+
+          case "${{ matrix.family }}" in
+            arch)
+              pacman -Syu --noconfirm
+              pacman -S --noconfirm --needed base-devel git sudo
+              # CachyOS's own makepkg.conf defaults CFLAGS to -march=native,
+              # correct for a real user (same machine builds and runs it),
+              # wrong here: build-pkg and install-test land on different
+              # runner VMs, so a package built with the *builder's* exact
+              # CPU features can hit SIGILL on the *installer's* CPU. Force
+              # a portable baseline for this CI verification build only —
+              # not something to change in the PKGBUILD itself, which
+              # correctly defers to the ambient system's own makepkg.conf.
+              sed -i 's/-march=native/-march=x86-64/' /etc/makepkg.conf
+              useradd -m builder
+              echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
+
+              mkdir -p /home/builder/source /home/builder/pkgbuild
+              cp -r . /home/builder/source
+              cp packaging/containers/arch.local.PKGBUILD /home/builder/pkgbuild/PKGBUILD
+              cp packaging/arch/lam.install /home/builder/pkgbuild/lam.install
+              # Arch pkgver can't contain '-'
+              PKGVER=$(echo "$VERSION_RAW" | sed 's/-//g')
+              # Arch Linux and CachyOS share this exact PKGBUILD (same
+              # pkgname/pkgver/pkgrel), so their built filenames would
+              # otherwise collide byte-for-byte — harmless for install-test
+              # (separate artifacts per slug already) but fatal for a
+              # release, which needs every asset filename unique. Tag the
+              # CachyOS build's pkgver instead of touching pkgname (would
+              # ripple into provides=/conflicts=) — '_' is a legal pkgver
+              # character, '-' is not.
+              if [ "${{ matrix.slug }}" = "cachyos" ]; then
+                PKGVER="${PKGVER}_cachyos"
+              fi
+              sed -i "s/^pkgver=.*/pkgver=${PKGVER}/" /home/builder/pkgbuild/PKGBUILD
+              chown -R builder:builder /home/builder
+
+              cd /home/builder/pkgbuild
+              su builder -c 'makepkg -s --noconfirm --skippgpcheck'
+              mkdir -p /out
+              cp ./*.pkg.tar.zst /out/
+              ;;
+
+            rpm)
+              dnf install -y rpm-build rpmdevtools tar gzip
+              rpmdev-setuptree
+              PKGNAME=linux-arctis-manager
+              VERSION=$(echo "$VERSION_RAW" | sed 's/-/~/g')
+              tar czf "$HOME/rpmbuild/SOURCES/${PKGNAME}-${VERSION}.tar.gz" \
+                  --transform "s,^\./,${PKGNAME}-${VERSION}/," \
+                  --exclude='./.git' --exclude='./.venv' --exclude='./dist' --exclude='./daemon/target' \
+                  .
+              sed "s/^Version:.*/Version:        ${VERSION}/" \
+                  packaging/fedora/linux-arctis-manager.spec \
+                  > "$HOME/rpmbuild/SPECS/${PKGNAME}.spec"
+
+              # Build deps come straight from the spec's own BuildRequires:,
+              # not a list maintained separately in this workflow.
+              BUILD_DEPS=$(grep -E '^BuildRequires:' "$HOME/rpmbuild/SPECS/${PKGNAME}.spec" | awk '{print $2}')
+              dnf install -y $BUILD_DEPS
+
+              rpmbuild -ba "$HOME/rpmbuild/SPECS/${PKGNAME}.spec"
+              mkdir -p /out
+              # %{?dist} in the spec's Release already makes the built
+              # filename version-unique per Fedora release (.fc41/.fc42/...),
+              # so no extra tagging needed here unlike arch/deb.
+              find "$HOME/rpmbuild/RPMS" -name "${PKGNAME}-[0-9]*.rpm" \
+                  ! -name '*debuginfo*' ! -name '*debugsource*' -exec cp {} /out/ \;
+              ;;
+
+            deb)
+              apt-get update
+              DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+                devscripts debhelper equivs dpkg-dev
+              PKGNAME=linux-arctis-manager
+              VERSION=$(echo "$VERSION_RAW" | sed 's/-/~/g')
+              mkdir -p /tmp/build
+              cp -r . "/tmp/build/${PKGNAME}-${VERSION}"
+              cd "/tmp/build/${PKGNAME}-${VERSION}"
+              ln -s packaging/debian debian
+
+              # debian/changelog's version is static, so every deb-family
+              # distro in the matrix (Debian stable/oldstable, Ubuntu x2,
+              # Mint) would otherwise build the exact same filename —
+              # harmless for install-test (separate artifacts per slug
+              # already) but fatal for a release, which needs every asset
+              # filename unique. Tag the upstream version with the distro
+              # slug via '+' (local/downstream-modification marker per
+              # Debian versioning convention); the debian_revision after
+              # the last '-' is untouched, so this stays a valid version.
+              sed -i "0,/^linux-arctis-manager (.*) /s//linux-arctis-manager (${VERSION}+${{ matrix.slug }}-1) /" debian/changelog
+
+              # Build deps come straight from debian/control's own
+              # Build-Depends:, not a list maintained separately here.
+              # Building + installing as two explicit steps (rather than
+              # mk-build-deps --install's own orchestration) sidesteps an
+              # apt quirk where its "correcting dependencies" pass drops the
+              # just-unpacked meta-package after pulling in the real deps,
+              # reporting a false failure even though everything installed.
+              mk-build-deps --tool 'apt-get -y --no-install-recommends' debian/control
+              apt-get -y --no-install-recommends install ./linux-arctis-manager-build-deps_*.deb
+
+              dpkg-buildpackage -us -uc -b
+              mkdir -p /out
+              cp /tmp/build/*.deb /out/
+              ;;
+          esac
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: pkg-${{ matrix.slug }}
+          path: /out/*

@@ -1,0 +1,49 @@
+name: Release (draft)
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  # Reuses install-test.yaml's build job: same real PKGBUILD/.spec/debian
+  # build across the full distro matrix, so a tag ships exactly what CI
+  # already verified installs cleanly, not a separately-built copy.
+  build-pkg:
+    uses: ./.github/workflows/build-pkg.yaml
+
+  release:
+    needs: build-pkg
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # Body = CHANGELOG.md's top-most "## [...]" section (normally
+      # [Unreleased], already renamed to the version if the maintainer
+      # bumped it before tagging) instead of GitHub's auto-generated
+      # commit-list notes, which say nothing about *what* changed.
+      - name: Extract changelog section for release notes
+        run: python3 .github/scripts/changelog_section.py > /tmp/release-notes.md
+
+      # No name: filter — pulls every pkg-<slug> artifact from this run,
+      # each into its own subdirectory (artifact name), so same-family
+      # packages never collide on disk even before the filename-uniqueness
+      # fix in build-pkg.yaml.
+      - uses: actions/download-artifact@v8
+        with:
+          path: pkg
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          gh release create "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --title "${{ github.ref_name }}" \
+            --draft \
+            --notes-file /tmp/release-notes.md \
+            pkg/*/*
