@@ -8,6 +8,11 @@ jobs:
   python-ci:
     runs-on: ubuntu-latest
 
+    env:
+      # No real display on the runner; Qt's offscreen platform plugin needs
+      # no X server/Wayland compositor, just the shared libs installed below.
+      QT_QPA_PLATFORM: offscreen
+
     steps:
       - uses: actions/checkout@v5
 
@@ -15,6 +20,18 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
+
+      # PySide6 dlopens these at import time regardless of platform plugin
+      # (libEGL in particular, even though offscreen doesn't render via EGL).
+      - name: Install Qt runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libegl1 libgl1 libopengl0 libglib2.0-0 \
+            libxkbcommon0 libxkbcommon-x11-0 \
+            libdbus-1-3 libfontconfig1 \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0
 
       - name: Install dependencies
         run: uv sync --group dev
