@@ -263,32 +263,14 @@ impl DeviceSession {
         name: &str,
         args: Option<&Yaml>,
     ) -> Result<Vec<EmitEvent>, EngineError> {
+        if let Some(&(_, api_name, field, value)) =
+            SIMPLE_U8_WRITES.iter().find(|(call, ..)| *call == name)
+        {
+            self.send_api_write(api_name, &u8_fields(&[(field, value)]))
+                .await?;
+            return Ok(vec![]);
+        }
         match name {
-            "enable_sonar" => {
-                self.send_api_write("set_sonar_present", &u8_fields(&[("is_present", 1)]))
-                    .await?;
-                Ok(vec![])
-            }
-            "disable_sonar" => {
-                self.send_api_write("set_sonar_present", &u8_fields(&[("is_present", 0)]))
-                    .await?;
-                Ok(vec![])
-            }
-            "reset_eq_preset" => {
-                self.send_api_write("selected_eq_preset", &u8_fields(&[("eq_preset", 0)]))
-                    .await?;
-                Ok(vec![])
-            }
-            "enable_chatmix" => {
-                self.send_api_write("software_chatmix_status", &u8_fields(&[("status", 1)]))
-                    .await?;
-                Ok(vec![])
-            }
-            "disable_chatmix" => {
-                self.send_api_write("software_chatmix_status", &u8_fields(&[("status", 0)]))
-                    .await?;
-                Ok(vec![])
-            }
             "save_to_flash" => {
                 self.send_api_write("save_to_flash", &HashMap::new())
                     .await?;
@@ -516,6 +498,18 @@ fn lifecycle_calls<'a>(
         _ => Err(EngineError::UnknownLifecycleHook(hook.to_string())),
     }
 }
+
+/// Lifecycle call name -> (api_name, field_name, value) for calls that just
+/// write a single fixed `u8` field and emit nothing. Looked up by
+/// `dispatch_call_by_name` before falling back to the calls that need
+/// bespoke handling (dynamic args, empty payload, or a different return type).
+const SIMPLE_U8_WRITES: &[(&str, &str, &str, u8)] = &[
+    ("enable_sonar", "set_sonar_present", "is_present", 1),
+    ("disable_sonar", "set_sonar_present", "is_present", 0),
+    ("reset_eq_preset", "selected_eq_preset", "eq_preset", 0),
+    ("enable_chatmix", "software_chatmix_status", "status", 1),
+    ("disable_chatmix", "software_chatmix_status", "status", 0),
+];
 
 fn u8_fields(pairs: &[(&str, u8)]) -> HashMap<String, FieldValue> {
     pairs
