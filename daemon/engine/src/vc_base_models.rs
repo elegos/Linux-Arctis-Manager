@@ -101,7 +101,7 @@ struct GhRelease {
 fn github_client() -> reqwest::Client {
     // GitHub's API rejects requests with no User-Agent.
     reqwest::Client::builder()
-        .user_agent(concat!("linux-arctis-manager/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("linux-arctis-manager/", env!("LAM_VERSION")))
         .build()
         .expect("reqwest client builder should not fail with default settings")
 }

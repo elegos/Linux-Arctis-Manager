@@ -20,7 +20,7 @@ async fn main() {
 
     info!(
         "lam-hidraw-helper {} listening on {}",
-        env!("CARGO_PKG_VERSION"),
+        env!("LAM_VERSION"),
         path.display()
     );
 

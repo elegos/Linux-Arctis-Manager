@@ -45,7 +45,7 @@ GUI_WRAPPER_OUT := packaging/scripts/lam-gui
 
 DEVICE_YAMLS := $(wildcard daemon/device-configs/*.yaml)
 
-.PHONY: build build-python generate-services generate-gui-wrapper \
+.PHONY: build build-python sync-version generate-services generate-gui-wrapper \
         install install-python uninstall enable disable \
         container-build-rpm container-build-deb container-build-pkg container-build-all \
         container-refresh-fedora container-refresh-debian container-refresh-arch container-refresh-all \
@@ -116,6 +116,14 @@ $(GUI_WRAPPER_OUT): $(GUI_WRAPPER_IN) Makefile
 	sed -e 's|@VENVDIR@|$(VENVDIR)|g' $< > $@
 	chmod +x $@
 
+# uv_build (pyproject.toml's build backend) requires a static `version =`
+# field — it has no dynamic/file-sourced version support (unlike the Rust
+# side's build.rs reading VERSION directly) — so keep pyproject.toml in sync
+# by patching it from the same VERSION file right before it's built, instead
+# of relying on someone remembering to bump both.
+sync-version:
+	sed -i 's/^version = .*/version = "$(shell cat VERSION)"/' pyproject.toml
+
 # ── Install Python venv + GUI wrapper ─────────────────────────────────────────
 # Plain stdlib venv + pip, not uv: uv itself isn't packaged (or isn't
 # packaged under that name) on every distro, which turns "is uv on this
@@ -124,7 +132,7 @@ $(GUI_WRAPPER_OUT): $(GUI_WRAPPER_IN) Makefile
 # and pip are universal. pyproject.toml's build-system backend is still
 # uv_build, but that's fetched by pip's own build isolation on demand, not a
 # system-wide `uv` binary — unaffected by this.
-install-python: generate-gui-wrapper
+install-python: generate-gui-wrapper sync-version
 	install -dm755 $(DESTDIR)$(dir $(VENVDIR))
 	python3 -m venv --clear $(DESTDIR)$(VENVDIR)
 	# activate/activate.{csh,fish,nu,bat} bake in an absolute VIRTUAL_ENV path
