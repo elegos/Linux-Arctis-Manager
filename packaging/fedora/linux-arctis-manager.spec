@@ -46,6 +46,7 @@ BuildRequires:  libcap
 
 Requires:       python3
 Requires:       libcap
+Requires:       hicolor-icon-theme
 
 # Only needed for the AI voice changer's one-shot .pth -> ONNX voice-model
 # conversion tool (E10-S6a/S7) — a soft dependency since the rest of the
@@ -118,6 +119,8 @@ fi
 %{_libexecdir}/lam-hidraw-helper
 %{_datadir}/linux-arctis-manager/devices/
 %{_datadir}/applications/*.desktop
+%{_datadir}/icons/hicolor/scalable/apps/arctis-manager.svg
+%{_datadir}/icons/hicolor/scalable/apps/arctis-manager-symbolic.svg
 %{_userunitdir}/lam-daemon.service
 %{_userunitdir}/lam-hidraw-helper.service
 %{_libdir}/linux-arctis-manager/

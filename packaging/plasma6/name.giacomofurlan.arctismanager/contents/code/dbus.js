@@ -24,7 +24,11 @@ function _signature(argCount) {
 }
 
 function _call(dbus, path, iface, member, args) {
-    return dbus.SessionBus.asyncCall({
+    // `dbus` here is already the bus connection object callers pass in as
+    // `DBus.SessionBus` — not the `DBus` module namespace — so it's called
+    // directly, not through a nested `.SessionBus`. Confirmed against the
+    // same asyncCall() usage in Plasma's shipped taskmanager applet.
+    return dbus.asyncCall({
         service: BUS_NAME,
         path: path,
         iface: iface,

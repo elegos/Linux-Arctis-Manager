@@ -18,7 +18,7 @@ build() {
 
 package_linux-arctis-manager() {
     pkgdesc="SteelSeries Arctis manager for Linux — replaces SteelSeries GG with a native daemon and Qt6 GUI"
-    depends=('python' 'libcap' 'openssl' 'systemd-libs')
+    depends=('python' 'libcap' 'openssl' 'systemd-libs' 'hicolor-icon-theme')
     # python-pytorch: only for the AI voice changer's one-shot .pth -> ONNX
     # conversion tool (E10-S6a/S7); optdepends is informational only on Arch
     # (pacman never auto-installs it), so runtime detection with a

@@ -23,7 +23,7 @@ build() {
 
 package_linux-arctis-manager-git() {
     pkgdesc="SteelSeries Arctis manager for Linux — git build from main"
-    depends=('python' 'libcap')
+    depends=('python' 'libcap' 'hicolor-icon-theme')
     provides=('linux-arctis-manager')
     conflicts=('linux-arctis-manager')
     install=lam.install

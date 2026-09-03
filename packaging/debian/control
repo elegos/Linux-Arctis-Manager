@@ -19,7 +19,8 @@ Architecture: amd64
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          python3,
-         libcap2-bin
+         libcap2-bin,
+         hicolor-icon-theme
 Suggests: python3-torch
 Description: SteelSeries Arctis manager for Linux
  Replaces the SteelSeries GG software to manage SteelSeries Arctis headsets
