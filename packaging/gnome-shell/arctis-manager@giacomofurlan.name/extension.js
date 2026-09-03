@@ -17,6 +17,7 @@
 
 import St from 'gi://St';
 import GLib from 'gi://GLib';
+import Gio from 'gi://Gio';
 
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -54,6 +55,11 @@ export default class ArctisManagerExtension extends Extension {
 
         this._statusSection = new PopupMenu.PopupMenuSection();
         this._settingsSection = new PopupMenu.PopupMenuSection();
+
+        this._openAppItem = new PopupMenu.PopupMenuItem(I18n.translate('ui', 'open_app'));
+        this._openAppItem.connect('activate', () => this._openMainApp());
+        this._indicator.menu.addMenuItem(this._openAppItem);
+        this._indicator.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         this._indicator.menu.addMenuItem(this._statusSection);
         this._indicator.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
@@ -102,6 +108,14 @@ export default class ArctisManagerExtension extends Extension {
         }
         this._renderStatus();
         this._renderSettings();
+    }
+
+    _openMainApp() {
+        try {
+            Gio.Subprocess.new(['lam-gui'], Gio.SubprocessFlags.NONE);
+        } catch (e) {
+            logError(e, 'arctis-manager: failed to launch lam-gui');
+        }
     }
 
     // ── Status section ──────────────────────────────────────────────────────
@@ -346,6 +360,7 @@ export default class ArctisManagerExtension extends Extension {
         this._indicator?.destroy();
         this._indicator = null;
 
+        this._openAppItem = null;
         this._statusSection = null;
         this._settingsSection = null;
         this._settings = null;
