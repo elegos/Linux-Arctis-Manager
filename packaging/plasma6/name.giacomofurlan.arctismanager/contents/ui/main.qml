@@ -13,6 +13,14 @@ PlasmoidItem {
     property var status: ({})
     property var settingsPayload: ({})
     property var ncSettings: ({})
+    // I18n.translate() reads a plain JS module variable, not a notifiable
+    // QML property — a binding that calls it (Plasmoid.title below) gets
+    // exactly one evaluation, at construction, which happens *before*
+    // Component.onCompleted below ever runs I18n.init(). Reading this
+    // property from that binding forces a re-evaluation once translations
+    // have actually loaded; without it the title is permanently stuck on
+    // whatever translate() returned pre-init (the raw "app_name" key).
+    property bool i18nReady: false
 
     readonly property var settingsConfig: root.settingsPayload.settings_config || ({})
     readonly property var currentValues: {
@@ -37,11 +45,12 @@ PlasmoidItem {
     // "arctis-manager" name is a fixed-color icon meant for the app
     // launcher/window, not the tray.
     Plasmoid.icon: "arctis-manager-symbolic"
-    Plasmoid.title: I18n.translate("ui", "app_name")
+    Plasmoid.title: root.i18nReady ? I18n.translate("ui", "app_name") : ""
 
     Component.onCompleted: {
         var lang = (Qt.locale().name || "en_US").split("_")[0]
         I18n.init(lang)
+        root.i18nReady = true
         refresh()
     }
 
@@ -52,11 +61,10 @@ PlasmoidItem {
     }
 
     Timer {
-        // Polling, not DBus.SignalWatcher — see the plan's note on why:
-        // the daemon does emit StatusChanged/SettingsChanged/NCChanged, but
-        // SignalWatcher's onReceivedSignal binding couldn't be verified in
-        // the dev sandbox this was written in. Switch to signal-driven
-        // updates once confirmed working live, keep this as a safe fallback.
+        // Signal-driven updates below make this a fallback, not the primary
+        // path — but still needed: it's what refreshes on open
+        // (triggeredOnStart) and covers anything a missed/dropped D-Bus
+        // signal would otherwise leave stale.
         interval: Plasmoid.configuration.refreshIntervalMs
         running: root.expanded
         repeat: true
@@ -64,8 +72,63 @@ PlasmoidItem {
         onTriggered: root.refresh()
     }
 
+    // DBus.SignalWatcher's onReceivedSignal is a plain invokable method, not
+    // an actual Signal (confirmed with qmllint: "no matching signal found
+    // for handler" on a direct `onReceivedSignal:` binding — that's what the
+    // previous polling-only version's comment here meant by "couldn't be
+    // verified"). Connections' function-based override works: Connections
+    // can bind to an invokable method the same way it binds to a signal.
+    DBus.SignalWatcher {
+        id: statusWatcher
+        service: Dbus.BUS_NAME
+        path: Dbus.STATUS_PATH
+        iface: Dbus.STATUS_IFACE
+    }
+    Connections {
+        target: statusWatcher
+        function onReceivedSignal(message) {
+            if (message.member === "StatusChanged") {
+                Dbus.getStatus(DBus.SessionBus, function (s) { root.status = s || {} })
+            }
+        }
+    }
+
+    DBus.SignalWatcher {
+        id: settingsWatcher
+        service: Dbus.BUS_NAME
+        path: Dbus.SETTINGS_PATH
+        iface: Dbus.SETTINGS_IFACE
+    }
+    Connections {
+        target: settingsWatcher
+        function onReceivedSignal(message) {
+            if (message.member === "SettingsChanged") {
+                Dbus.getSettings(DBus.SessionBus, function (s) { root.settingsPayload = s || {} })
+            }
+        }
+    }
+
+    DBus.SignalWatcher {
+        id: ncWatcher
+        service: Dbus.BUS_NAME
+        path: Dbus.NC_PATH
+        iface: Dbus.NC_IFACE
+    }
+    Connections {
+        target: ncWatcher
+        function onReceivedSignal(message) {
+            if (message.member === "NCChanged") {
+                Dbus.getNcSettings(DBus.SessionBus, function (s) { root.ncSettings = s || {} })
+            }
+        }
+    }
+
     compactRepresentation: Kirigami.Icon {
         source: "arctis-manager-symbolic"
+        // Explicit, not relying on the "-symbolic" name-suffix heuristic:
+        // makes the icon render as a mask tinted with the theme's text
+        // color, so it follows the panel's light/dark color scheme.
+        isMask: true
         active: mouseArea.containsMouse
 
         MouseArea {

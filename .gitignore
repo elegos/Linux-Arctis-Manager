@@ -24,6 +24,9 @@ packaging/scripts/lam-gui
 packaging/systemd/user/lam-hidraw-helper.service
 packaging/systemd/user/lam-daemon.service
 
+# Plasma widget's bundled translation modules (produced by make generate-plasmoid-lang)
+packaging/plasma6/name.giacomofurlan.arctismanager/contents/code/lang/
+
 # Container base image sentinels (produced by make container-build-*)
 .container-base-fedora
 .container-base-debian
