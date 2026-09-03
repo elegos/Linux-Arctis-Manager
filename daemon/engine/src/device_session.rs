@@ -12,7 +12,6 @@ use device_config::sync_dispatcher::{DispatchResult, EmitEvent, SyncDispatcher};
 use device_config::sync_reader::SyncReader;
 use device_config::{DeviceConfig, LifecycleCall, SyncReadEntry, Transport};
 use hid_transport::{HidTransport, ReadError};
-use serde_yaml::Value as Yaml;
 use tokio::sync::mpsc;
 use tracing::warn;
 
@@ -161,7 +160,7 @@ impl DeviceSession {
                     }
                 }
                 for effect in dr.side_effects {
-                    if let Err(e) = self.dispatch_call_by_name(&effect.call, None).await {
+                    if let Err(e) = self.dispatch_call_by_name(&effect.call).await {
                         warn!("side effect '{}' failed: {e}", effect.call);
                     }
                 }
@@ -209,7 +208,7 @@ impl DeviceSession {
                             }
                         }
                         for effect in dr.side_effects {
-                            match self.dispatch_call_by_name(&effect.call, None).await {
+                            match self.dispatch_call_by_name(&effect.call).await {
                                 Ok(side_events) => {
                                     for ev in side_events {
                                         if tx.send(ev).await.is_err() {
@@ -254,15 +253,10 @@ impl DeviceSession {
         &mut self,
         call: &LifecycleCall,
     ) -> Result<Vec<EmitEvent>, EngineError> {
-        self.dispatch_call_by_name(&call.call, call.args.as_ref())
-            .await
+        self.dispatch_call_by_name(&call.call).await
     }
 
-    async fn dispatch_call_by_name(
-        &mut self,
-        name: &str,
-        args: Option<&Yaml>,
-    ) -> Result<Vec<EmitEvent>, EngineError> {
+    async fn dispatch_call_by_name(&mut self, name: &str) -> Result<Vec<EmitEvent>, EngineError> {
         if let Some(&(_, api_name, field, value)) =
             SIMPLE_U8_WRITES.iter().find(|(call, ..)| *call == name)
         {
@@ -280,12 +274,11 @@ impl DeviceSession {
                 self.send_api_write("av6x02_init", &HashMap::new()).await?;
                 Ok(vec![])
             }
-            "discord_certified_set_attributes" => {
-                let fields = yaml_to_field_map(args);
-                self.send_api_write("discord_certified_attributes", &fields)
-                    .await?;
-                Ok(vec![])
-            }
+            // LAM does not implement Discord's microphone-certification
+            // attribute exchange (no `apis:` entry backs this call in any
+            // device config, on any device); accepted and ignored so the
+            // init sequence that calls it doesn't fail.
+            "discord_certified_set_attributes" => Ok(vec![]),
             "sync_all" | "send_init_wireless_connection_battery_status" => {
                 self.run_sync_read().await
             }
@@ -516,40 +509,6 @@ fn u8_fields(pairs: &[(&str, u8)]) -> HashMap<String, FieldValue> {
         .iter()
         .map(|(k, v)| (k.to_string(), FieldValue::U8(*v)))
         .collect()
-}
-
-fn yaml_to_field_map(yaml: Option<&Yaml>) -> HashMap<String, FieldValue> {
-    let mut map = HashMap::new();
-    if let Some(Yaml::Mapping(m)) = yaml {
-        for (k, v) in m {
-            if let Yaml::String(key) = k {
-                if let Some(fv) = yaml_to_field_value(v) {
-                    map.insert(key.clone(), fv);
-                }
-            }
-        }
-    }
-    map
-}
-
-fn yaml_to_field_value(val: &Yaml) -> Option<FieldValue> {
-    match val {
-        Yaml::Bool(b) => Some(FieldValue::U8(if *b { 1 } else { 0 })),
-        Yaml::Number(n) => {
-            if let Some(u) = n.as_u64() {
-                Some(if u <= 0xFF {
-                    FieldValue::U8(u as u8)
-                } else if u <= 0xFFFF {
-                    FieldValue::U16(u as u16)
-                } else {
-                    FieldValue::U32(u as u32)
-                })
-            } else {
-                n.as_f64().map(|f| FieldValue::F32(f as f32))
-            }
-        }
-        _ => None,
-    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

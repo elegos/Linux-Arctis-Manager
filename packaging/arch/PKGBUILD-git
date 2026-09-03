@@ -1,12 +1,12 @@
 # Maintainer: Giacomo Furlan <g.furlan@accenture.com>
 pkgbase=linux-arctis-manager-git
-pkgname=(linux-arctis-manager-git linux-arctis-manager-plasma-widget-git)
+pkgname=(linux-arctis-manager-git linux-arctis-manager-lang-git linux-arctis-manager-plasma-widget-git linux-arctis-manager-gnome-extension-git)
 pkgver=0  # populated by pkgver() below
 pkgrel=1
 arch=('x86_64')
 url="https://github.com/elegos/Linux-Arctis-Manager"
 license=('MIT')
-makedepends=('rust' 'cargo' 'uv' 'python' 'git')
+makedepends=('rust' 'cargo' 'uv' 'python' 'git' 'glib2')
 source=("$pkgbase::git+https://github.com/elegos/Linux-Arctis-Manager.git#branch=main")
 sha256sums=('SKIP')
 
@@ -32,14 +32,37 @@ package_linux-arctis-manager-git() {
     make install-core PREFIX=/usr DESTDIR="$pkgdir"
 }
 
+package_linux-arctis-manager-lang-git() {
+    pkgdesc="Standalone translation files for linux-arctis-manager — git build from main"
+    # No compiled code in this one — same package for every arch.
+    arch=('any')
+    provides=('linux-arctis-manager-lang')
+    conflicts=('linux-arctis-manager-lang')
+
+    cd "$pkgbase"
+    make install-lang PREFIX=/usr DESTDIR="$pkgdir"
+}
+
 package_linux-arctis-manager-plasma-widget-git() {
     pkgdesc="KDE Plasma widget for linux-arctis-manager — git build from main"
     # No compiled code in this one — same package for every arch.
     arch=('any')
     provides=('linux-arctis-manager-plasma-widget')
     conflicts=('linux-arctis-manager-plasma-widget')
-    depends=('linux-arctis-manager-git' 'plasma-workspace')
+    depends=('linux-arctis-manager-git' 'linux-arctis-manager-lang-git' 'plasma-workspace')
 
     cd "$pkgbase"
     make install-plasmoid PREFIX=/usr DESTDIR="$pkgdir"
+}
+
+package_linux-arctis-manager-gnome-extension-git() {
+    pkgdesc="GNOME Shell extension for linux-arctis-manager — git build from main"
+    # No compiled code in this one — same package for every arch.
+    arch=('any')
+    provides=('linux-arctis-manager-gnome-extension')
+    conflicts=('linux-arctis-manager-gnome-extension')
+    depends=('linux-arctis-manager-git' 'linux-arctis-manager-lang-git' 'gnome-shell')
+
+    cd "$pkgbase"
+    make install-gnome-extension PREFIX=/usr DESTDIR="$pkgdir"
 }

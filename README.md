@@ -148,6 +148,11 @@ and `packaging/fedora/linux-arctis-manager.spec` for reference.
 > separate tray process needed. Add it to a panel like any other widget
 > ("Add Widgets..." → "Arctis Manager"); right-click it for its Configure
 > dialog to pick which status fields and quick settings it shows.
+>
+> On GNOME Shell 45+, `make install` also installs an equivalent GNOME
+> Shell extension (`packaging/gnome-shell/`). Enable it with the Extensions
+> app (or `gnome-extensions enable arctis-manager@giacomofurlan.name`); its
+> Preferences page picks which status fields and quick settings it shows.
 
 ## 🧹 Uninstall / Cleanup
 

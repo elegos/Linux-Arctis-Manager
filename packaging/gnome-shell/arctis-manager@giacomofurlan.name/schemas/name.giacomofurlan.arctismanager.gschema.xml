@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="name.giacomofurlan.arctismanager" path="/name/giacomofurlan/arctismanager/">
+    <!-- Empty (default) means "show every status field the daemon reports". -->
+    <key name="enabled-status-fields" type="as">
+      <default>[]</default>
+      <summary>Status fields shown in the popup</summary>
+    </key>
+    <!-- Empty (default) means "no quick settings pinned". -->
+    <key name="pinned-settings" type="as">
+      <default>[]</default>
+      <summary>Settings pinned as quick-access controls</summary>
+    </key>
+  </schema>
+</schemalist>
