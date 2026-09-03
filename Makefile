@@ -27,12 +27,19 @@ LANG_DIR            := $(LAM_DATADIR)/lang
 LANG_FILES          := $(wildcard src/linux_arctis_manager/lang/*.ini)
 
 # KDE Plasma 6 widget (plasmoid). Installed on every distro (harmless on a
-# non-Plasma system, same as shipping a .desktop file); Fedora splits it into
-# its own subpackage (see packaging/fedora/linux-arctis-manager.spec),
-# Debian/Arch don't split it yet (follow-up).
+# non-Plasma system, same as shipping a .desktop file); ships as its own
+# package on all three distros (Fedora subpackage, Debian binary package,
+# Arch split package — see packaging/fedora/linux-arctis-manager.spec,
+# packaging/debian/control, packaging/arch/PKGBUILD).
 PLASMOID_ID         := name.giacomofurlan.arctismanager
 PLASMOID_SRC_DIR    := packaging/plasma6/$(PLASMOID_ID)
 PLASMOID_DEST_DIR   := $(DATADIR)/plasma/plasmoids/$(PLASMOID_ID)
+
+# GNOME Shell extension. Same "own package on all three distros" shape as
+# the Plasma widget above.
+GNOME_EXT_ID        := arctis-manager@giacomofurlan.name
+GNOME_EXT_SRC_DIR   := packaging/gnome-shell/$(GNOME_EXT_ID)
+GNOME_EXT_DEST_DIR  := $(DATADIR)/gnome-shell/extensions/$(GNOME_EXT_ID)
 
 # ── Build tools ────────────────────────────────────────────────────────────────
 CARGO            ?= cargo
@@ -67,7 +74,7 @@ GUI_WRAPPER_OUT := packaging/scripts/lam-gui
 DEVICE_YAMLS := $(wildcard daemon/device-configs/*.yaml)
 
 .PHONY: build build-python sync-version generate-services generate-gui-wrapper \
-        install install-core install-plasmoid install-python uninstall enable disable \
+        install install-core install-lang install-plasmoid install-gnome-extension install-python uninstall enable disable \
         container-build-rpm container-build-deb container-build-pkg container-build-all \
         container-refresh-fedora container-refresh-debian container-refresh-arch container-refresh-all \
         help
@@ -79,7 +86,9 @@ help:
 	@echo "  build-python       Alias: checks uv lockfile is up to date"
 	@echo "  install            Build + install everything (requires sudo for setcap)"
 	@echo "  install-core       Daemon, helper, GUI, services, desktop entries (no Plasma widget)"
-	@echo "  install-plasmoid   Just the KDE Plasma widget + its translation files"
+	@echo "  install-lang       Just the standalone translation files (for install-plasmoid/install-gnome-extension)"
+	@echo "  install-plasmoid   Just the KDE Plasma widget"
+	@echo "  install-gnome-extension  Just the GNOME Shell extension"
 	@echo "  install-python     Install Python venv + lam-gui wrapper (called by install-core)"
 	@echo "  uninstall          Remove installed files"
 	@echo "  enable             Enable and start user services (no sudo needed)"
@@ -180,19 +189,34 @@ endif
 	install -Dm755 $(GUI_WRAPPER_OUT) $(DESTDIR)$(BINDIR)/lam-gui
 
 # ── Install ────────────────────────────────────────────────────────────────────
-# Split in two so packaging recipes that ship the Plasma widget as its own
-# binary package (Fedora subpackage, Debian's second control stanza, Arch's
-# split package) can install just the piece they need. `install` (below)
-# runs both, unchanged for a plain from-source `sudo make install`.
-install-plasmoid:
-	# Translation files (standalone copy, see LANG_DIR comment above)
+# Split into granular targets so packaging recipes that ship each of these
+# as its own binary package (Fedora subpackages, Debian control stanzas,
+# Arch split packages) can install just the piece they need. `install`
+# (below) runs all of them, unchanged for a plain from-source
+# `sudo make install`. install-lang is its own target (not folded into
+# install-plasmoid) because both the Plasma widget and the GNOME extension
+# need it, and a package manager won't let two sibling packages both own
+# the same file.
+install-lang:
 	install -dm755 $(DESTDIR)$(LANG_DIR)
 	install -Dm644 $(LANG_FILES) -t $(DESTDIR)$(LANG_DIR)/
-	# KDE Plasma widget — cp -a, not `install -Dm644 -t`, because it's a
-	# nested tree (contents/ui, contents/config, contents/code) rather than
-	# a flat file list.
+
+install-plasmoid:
+	# cp -a, not `install -Dm644 -t`, because it's a nested tree
+	# (contents/ui, contents/config, contents/code) rather than a flat file
+	# list.
 	install -dm755 $(DESTDIR)$(PLASMOID_DEST_DIR)
 	cp -a $(PLASMOID_SRC_DIR)/. $(DESTDIR)$(PLASMOID_DEST_DIR)/
+
+install-gnome-extension:
+	install -dm755 $(DESTDIR)$(GNOME_EXT_DEST_DIR)
+	cp -a $(GNOME_EXT_SRC_DIR)/. $(DESTDIR)$(GNOME_EXT_DEST_DIR)/
+	# GSettings.new() (this.getSettings() in extension.js/prefs.js) loads
+	# the extension's *bundled* schema from its own schemas/ dir — compiled
+	# to binary here, at install time. No system-wide schema install or
+	# %post scriptlet involved, unlike a schema meant to be shared/looked up
+	# from /usr/share/glib-2.0/schemas/.
+	glib-compile-schemas $(DESTDIR)$(GNOME_EXT_DEST_DIR)/schemas
 
 install-core: build generate-services install-python
 	# Daemon binary
@@ -222,7 +246,7 @@ ifndef DESTDIR
 	@echo "  make enable"
 endif
 
-install: install-core install-plasmoid
+install: install-core install-lang install-plasmoid install-gnome-extension
 
 # ── Uninstall ──────────────────────────────────────────────────────────────────
 uninstall:
@@ -239,6 +263,7 @@ uninstall:
 	rm -rf $(DESTDIR)$(DEVICE_CONFIGS_DIR)
 	rm -rf $(DESTDIR)$(LANG_DIR)
 	rm -rf $(DESTDIR)$(PLASMOID_DEST_DIR)
+	rm -rf $(DESTDIR)$(GNOME_EXT_DEST_DIR)
 	rm -rf $(DESTDIR)$(LIBDIR)/linux-arctis-manager
 	-systemctl --user daemon-reload 2>/dev/null
 

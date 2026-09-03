@@ -43,6 +43,9 @@ BuildRequires:  python3-pip
 BuildRequires:  systemd-devel
 BuildRequires:  openssl-devel
 BuildRequires:  libcap
+# glib-compile-schemas, for the GNOME Shell extension's bundled GSettings
+# schema (see %install and %files gnome-extension below).
+BuildRequires:  glib2
 
 Requires:       python3
 Requires:       libcap
@@ -60,10 +63,22 @@ SteelSeries Arctis headsets on Linux. It provides a user-space daemon
 (written in Rust) and a Qt6 GUI (written in Python) for controlling
 equalizer settings, sidetone, ANC, LED profiles, and more.
 
+%package lang
+Summary:        Standalone translation files for %{name}
+BuildArch:      noarch
+
+%description lang
+Translation files for %{name}'s non-Python UI shells (the KDE Plasma widget,
+the GNOME Shell extension) — a standalone copy outside the main package's
+Python venv, which those UI shells can read without needing Python at all.
+Pulled in automatically by whichever of those shells you install; not
+useful on its own.
+
 %package plasma-widget
 Summary:        KDE Plasma widget for %{name}
 BuildArch:      noarch
 Requires:       %{name} = %{version}-%{release}
+Requires:       %{name}-lang = %{version}-%{release}
 # Hard requirement: the widget does nothing without Plasma. Separate from
 # the Supplements below, which is about *whether this subpackage installs
 # itself automatically* (not whether it needs plasma-workspace once chosen).
@@ -80,6 +95,22 @@ and a configurable set of quick-access controls in the Plasma panel,
 positioned and sized by Plasma itself like the volume/network applets. Talks
 to the already-running %{name} daemon directly over D-Bus — no Python
 process involved.
+
+%package gnome-extension
+Summary:        GNOME Shell extension for %{name}
+BuildArch:      noarch
+Requires:       %{name} = %{version}-%{release}
+Requires:       %{name}-lang = %{version}-%{release}
+# Same hard-Requires + soft-Supplements combination as plasma-widget above,
+# GNOME's equivalent of plasma-workspace.
+Requires:       gnome-shell >= 45
+Supplements:    (gnome-shell and %{name})
+
+%description gnome-extension
+A GNOME Shell extension for %{name}: shows headset status and a configurable
+set of quick-access controls from the top panel. Talks to the already-running
+%{name} daemon directly over D-Bus — no Python process involved. Targets
+GNOME Shell 45+ (ES-module extensions) only.
 
 %prep
 %autosetup -n %{name}-%{version}
@@ -125,13 +156,21 @@ fi
 %{_userunitdir}/lam-hidraw-helper.service
 %{_libdir}/linux-arctis-manager/
 
-%files plasma-widget
-# The GUI's own translations (%{_libdir}/linux-arctis-manager/venv/.../lang/)
-# are separate — this is the standalone copy install-plasmoid creates
-# specifically so this subpackage doesn't need the Python venv to have
-# translated strings. See Makefile's LANG_DIR comment.
+%files lang
+# The GUI's own translations, bundled inside the main package's Python venv,
+# are a separate copy — this is the standalone one install-plasmoid /
+# install-gnome-extension's shared LANG_DIR creates specifically so those
+# subpackages don't need the Python venv to have translated strings. See
+# Makefile's LANG_DIR comment. Its own subpackage (not folded into
+# plasma-widget or gnome-extension) because both of those need it, and RPM
+# won't let two sibling subpackages both own the same file.
 %{_datadir}/linux-arctis-manager/lang/
+
+%files plasma-widget
 %{_datadir}/plasma/plasmoids/name.giacomofurlan.arctismanager/
+
+%files gnome-extension
+%{_datadir}/gnome-shell/extensions/arctis-manager@giacomofurlan.name/
 
 %changelog
 * Tue Aug 25 2026 Giacomo Furlan <g.furlan@accenture.com> - 3.0.0~alpha1-1

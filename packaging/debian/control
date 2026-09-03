@@ -9,7 +9,8 @@ Build-Depends: debhelper-compat (= 13),
                libssl-dev,
                python3,
                python3-venv,
-               libcap2-bin
+               libcap2-bin,
+               libglib2.0-bin
 Standards-Version: 4.7.0
 Homepage: https://github.com/elegos/Linux-Arctis-Manager
 Rules-Requires-Root: no
@@ -28,10 +29,21 @@ Description: SteelSeries Arctis manager for Linux
  in Python for controlling equalizer settings, sidetone, ANC, LED profiles,
  and more.
 
+Package: linux-arctis-manager-lang
+Architecture: all
+Depends: ${misc:Depends}
+Description: Standalone translation files for linux-arctis-manager
+ Translation files for linux-arctis-manager's non-Python UI shells (the KDE
+ Plasma widget, the GNOME Shell extension) — a standalone copy outside the
+ main package's Python venv, which those UI shells can read without needing
+ Python at all. Pulled in automatically by whichever of those shells you
+ install; not useful on its own.
+
 Package: linux-arctis-manager-plasma-widget
 Architecture: all
 Depends: ${misc:Depends},
          linux-arctis-manager,
+         linux-arctis-manager-lang,
          plasma-workspace
 Description: KDE Plasma widget for linux-arctis-manager
  A native KDE Plasma 6 widget (plasmoid): shows headset status and a
@@ -39,3 +51,15 @@ Description: KDE Plasma widget for linux-arctis-manager
  and sized by Plasma itself like the volume/network applets. Talks to the
  already-running linux-arctis-manager daemon directly over D-Bus — no
  Python process involved.
+
+Package: linux-arctis-manager-gnome-extension
+Architecture: all
+Depends: ${misc:Depends},
+         linux-arctis-manager,
+         linux-arctis-manager-lang,
+         gnome-shell (>= 45~)
+Description: GNOME Shell extension for linux-arctis-manager
+ A GNOME Shell extension: shows headset status and a configurable set of
+ quick-access controls from the top panel. Talks to the already-running
+ linux-arctis-manager daemon directly over D-Bus — no Python process
+ involved. Targets GNOME Shell 45+ (ES-module extensions) only.
