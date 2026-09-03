@@ -1,18 +1,31 @@
 .pragma library
+.import "lang/en.js" as LangEn
 
-// Reuses the same translation files as the Qt Widgets GUI
+// Reuses the same translation *content* as the Qt Widgets GUI
 // (src/linux_arctis_manager/lang/*.ini, read by I18n.translate() in
-// src/linux_arctis_manager/gui/*.py) so both UIs share one translation
-// source. Only en.ini exists today, but this loads whichever file is
-// installed for the requested language, falling back to en.ini.
+// src/linux_arctis_manager/gui/*.py) so both UIs share one source of truth.
+// Only en.ini exists today, but falls back to English for any requested
+// language that isn't bundled.
 //
-// The venv's own copy of lang/*.ini lives under a Python-version-dependent
-// site-packages path we can't reliably guess from QML, so the Makefile
-// installs a second, stable copy at $(DATADIR)/linux-arctis-manager/lang/
-// (see LANG_DIR in the top-level Makefile) — /usr/share/linux-arctis-manager
-// /lang/ on all three packaged distros (Fedora/Debian/Arch all build with
-// PREFIX=/usr).
-var LANG_DIR = "/usr/share/linux-arctis-manager/lang/"
+// This can't just read lang/*.ini at runtime the way the GNOME extension's
+// i18n.js does (Gio-based file I/O, unaffected by any of this): Plasma's
+// applet QML engine hard-blocks local file reads through XMLHttpRequest
+// ("Set QML_XHR_ALLOW_FILE_READ to 1 to enable this feature" — a sandbox
+// applied to third-party plasmoids, not something a packaged app gets to
+// ask a user's desktop session for). So instead, `make generate-plasmoid-lang`
+// (wired into `make install-plasmoid`) compiles each lang/*.ini into a QML
+// JS module — lang/<code>.js, `.pragma library` + `var TEXT = "<ini text>"`
+// — and this file statically `.import`s each one: module imports go through
+// QML's own resolution, not XHR, so they aren't subject to that block.
+//
+// The tradeoff: `.import` targets must be literal/static, so a new language
+// needs a line added here (an `.import` above, an entry in _BUNDLED below) —
+// unlike the Python GUI and GNOME extension, which just pick up new
+// lang/*.ini files automatically. Not a regression to work around now since
+// only en.ini exists project-wide; revisit if/when a second language ships.
+var _BUNDLED = {
+    en: LangEn.TEXT,
+}
 
 var _sections = null
 
@@ -49,31 +62,8 @@ function _parseIni(text) {
 }
 
 function _load(langCode) {
-    var candidates = []
-    if (langCode) candidates.push(langCode)
-    candidates.push("en")
-
-    for (var i = 0; i < candidates.length; i++) {
-        var url = "file://" + LANG_DIR + candidates[i] + ".ini"
-        var xhr = new XMLHttpRequest()
-        try {
-            xhr.open("GET", url, false)
-            xhr.send()
-        } catch (e) {
-            continue
-        }
-        // file:// requests report success as status 0 with a body, not 200.
-        if (xhr.responseText) {
-            return _parseIni(xhr.responseText)
-        }
-    }
-    // Every candidate (including the "en" fallback) failed to load — most
-    // likely LANG_DIR was never populated (e.g. the plasmoid was installed
-    // by hand instead of via `make install-plasmoid`/the packaged widget,
-    // which installs its own standalone copy there). All translate() calls
-    // will silently return raw keys until this is fixed, so surface it.
-    console.warn("linux-arctis-manager plasmoid: no translation file found under " + LANG_DIR + " — is the package fully installed?")
-    return {}
+    var text = (langCode && _BUNDLED[langCode]) || _BUNDLED.en
+    return _parseIni(text)
 }
 
 function init(langCode) {

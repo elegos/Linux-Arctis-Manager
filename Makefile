@@ -35,6 +35,16 @@ PLASMOID_ID         := name.giacomofurlan.arctismanager
 PLASMOID_SRC_DIR    := packaging/plasma6/$(PLASMOID_ID)
 PLASMOID_DEST_DIR   := $(DATADIR)/plasma/plasmoids/$(PLASMOID_ID)
 
+# The Plasma widget can't read LANG_DIR (or any file://) at runtime — Plasma's
+# applet QML engine blocks XMLHttpRequest local file reads outright ("Set
+# QML_XHR_ALLOW_FILE_READ to 1", not something a packaged app gets to ask a
+# user's desktop session for). So instead of reading lang/*.ini at runtime,
+# each one is compiled into a QML JS module the widget statically `.import`s
+# (contents/code/i18n.js) — module imports aren't subject to that sandbox.
+# Generated, not committed (see .gitignore), same as SERVICE_*_OUT above.
+PLASMOID_LANG_DIR   := $(PLASMOID_SRC_DIR)/contents/code/lang
+PLASMOID_LANG_JS    := $(patsubst src/linux_arctis_manager/lang/%.ini,$(PLASMOID_LANG_DIR)/%.js,$(LANG_FILES))
+
 # GNOME Shell extension. Same "own package on all three distros" shape as
 # the Plasma widget above.
 GNOME_EXT_ID        := arctis-manager@giacomofurlan.name
@@ -73,7 +83,7 @@ GUI_WRAPPER_OUT := packaging/scripts/lam-gui
 
 DEVICE_YAMLS := $(wildcard daemon/device-configs/*.yaml)
 
-.PHONY: build build-python sync-version generate-services generate-gui-wrapper \
+.PHONY: build build-python sync-version generate-services generate-gui-wrapper generate-plasmoid-lang \
         install install-core install-lang install-plasmoid install-gnome-extension install-python uninstall enable disable \
         container-build-rpm container-build-deb container-build-pkg container-build-all \
         container-refresh-fedora container-refresh-debian container-refresh-arch container-refresh-all \
@@ -148,6 +158,19 @@ $(GUI_WRAPPER_OUT): $(GUI_WRAPPER_IN) Makefile
 	sed -e 's|@VENVDIR@|$(VENVDIR)|g' $< > $@
 	chmod +x $@
 
+# ── Generate the Plasma widget's bundled translation modules ──────────────────
+# JSON-encoding the raw .ini text (rather than reparsing it into a JS object
+# here) keeps i18n.js's existing _parseIni() as the one place that interprets
+# the format — this step's only job is getting the text past the sandbox.
+generate-plasmoid-lang: $(PLASMOID_LANG_JS)
+
+$(PLASMOID_LANG_DIR)/%.js: src/linux_arctis_manager/lang/%.ini Makefile
+	install -dm755 $(PLASMOID_LANG_DIR)
+	python3 -c "import json, sys; \
+		text = open(sys.argv[1], encoding='utf-8').read(); \
+		open(sys.argv[2], 'w', encoding='utf-8').write('.pragma library\nvar TEXT = ' + json.dumps(text) + '\n')" \
+		$< $@
+
 # uv_build (pyproject.toml's build backend) requires a static `version =`
 # field — it has no dynamic/file-sourced version support (unlike the Rust
 # side's build.rs reading VERSION directly) — so keep pyproject.toml in sync
@@ -201,7 +224,7 @@ install-lang:
 	install -dm755 $(DESTDIR)$(LANG_DIR)
 	install -Dm644 $(LANG_FILES) -t $(DESTDIR)$(LANG_DIR)/
 
-install-plasmoid:
+install-plasmoid: generate-plasmoid-lang
 	# cp -a, not `install -Dm644 -t`, because it's a nested tree
 	# (contents/ui, contents/config, contents/code) rather than a flat file
 	# list.
