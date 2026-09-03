@@ -886,14 +886,10 @@ impl NcInterface {
             }
         };
 
-        // See `SetVCSettings`'s identical comment: `autostart: false` means
-        // "off" must be what's persisted, even while `preset` is applied
-        // live for this session.
-        let mut persisted_cfg = cfg.clone();
-        if !persisted_cfg.autostart {
-            persisted_cfg.preset = "off".to_owned();
-        }
-        if !save_nc_config(&self.settings_base_dir, &persisted_cfg) {
+        // Unlike VC, NC has no autostart/session-only tri-state: any preset
+        // other than "off" is always active, so it's persisted as-is and
+        // always re-applied on daemon startup (see `autostart_nc_and_vc`).
+        if !save_nc_config(&self.settings_base_dir, &cfg) {
             warn!("SetNcSettings: failed to persist config");
         }
 
@@ -1784,13 +1780,14 @@ async fn try_apply_rvc_live(
 }
 
 /// Called once at daemon startup and on device (re)connect — re-applies
-/// NC/VC if their persisted config has `autostart: true`, mirroring the
-/// treatment device-hardware settings already get (see the "re-applying N
-/// persisted setting(s)" log line in `main.rs`) but that PipeWire-side
-/// NC/VC chains never had: previously, a persisted `enabled: true` was
-/// only ever *acted on* by an explicit `SetNCSettings`/`SetVCSettings`
-/// call, so it silently stopped being true (in effect, if not in the
-/// GUI's checkbox) across every daemon restart.
+/// NC whenever its persisted preset is active, and VC if its persisted
+/// config has `autostart: true`, mirroring the treatment device-hardware
+/// settings already get (see the "re-applying N persisted setting(s)" log
+/// line in `main.rs`) but that PipeWire-side NC/VC chains never had:
+/// previously, a persisted `enabled: true` was only ever *acted on* by an
+/// explicit `SetNCSettings`/`SetVCSettings` call, so it silently stopped
+/// being true (in effect, if not in the GUI's checkbox) across every
+/// daemon restart.
 #[allow(clippy::too_many_arguments)]
 /// Takes ownership of every argument (rather than the `&`-reference shape
 /// the rest of this module uses) so it can be handed to `tokio::spawn`
@@ -1804,7 +1801,7 @@ pub async fn autostart_nc_and_vc(
     signal_tx: broadcast::Sender<SignalEvent>,
 ) {
     let nc_cfg = load_nc_config(&settings_base_dir);
-    if nc_cfg.autostart && nc_cfg.active() {
+    if nc_cfg.active() {
         info!(
             "autostart: re-applying persisted NC config ({})",
             nc_cfg.preset
