@@ -1,8 +1,10 @@
 import QtQuick
 import QtQuick.Controls as QQC2
+import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.kde.plasma.plasmoid
 import org.kde.plasma.workspace.dbus as DBus
+import org.kde.plasma.plasma5support as Plasma5Support
 
 import "../code/dbus.js" as Dbus
 import "../code/i18n.js" as I18n
@@ -58,6 +60,21 @@ PlasmoidItem {
         Dbus.getStatus(DBus.SessionBus, function (s) { root.status = s || {} })
         Dbus.getSettings(DBus.SessionBus, function (s) { root.settingsPayload = s || {} })
         Dbus.getNcSettings(DBus.SessionBus, function (s) { root.ncSettings = s || {} })
+    }
+
+    // "executable" data engine: the standard Plasma trick for running a
+    // one-shot shell command from QML, which has no process-spawning API of
+    // its own. connectSource() starts `cmd`; disconnecting right away in
+    // onNewData (fired once the command exits) avoids leaking a live source.
+    Plasma5Support.DataSource {
+        id: executable
+        engine: "executable"
+        connectedSources: []
+        onNewData: (sourceName) => disconnectSource(sourceName)
+    }
+
+    function openMainApp() {
+        executable.connectSource("lam-gui")
     }
 
     Timer {
@@ -143,34 +160,47 @@ PlasmoidItem {
         implicitWidth: Kirigami.Units.gridUnit * 22
         implicitHeight: Kirigami.Units.gridUnit * 28
 
-        QQC2.SplitView {
+        ColumnLayout {
             anchors.fill: parent
-            orientation: Qt.Vertical
+            spacing: 0
 
-            QQC2.ScrollView {
-                QQC2.SplitView.fillHeight: true
-                QQC2.SplitView.minimumHeight: Kirigami.Units.gridUnit * 6
-
-                StatusView {
-                    width: parent.width
-                    status: root.status
-                    settingsConfig: root.settingsConfig
-                    enabledFields: Plasmoid.configuration.enabledStatusFields
-                    i18n: I18n
-                }
+            QQC2.ToolButton {
+                Layout.fillWidth: true
+                icon.name: "arctis-manager"
+                text: root.i18nReady ? I18n.translate("ui", "open_app") : ""
+                onClicked: root.openMainApp()
             }
 
-            QQC2.ScrollView {
-                QQC2.SplitView.minimumHeight: Kirigami.Units.gridUnit * 6
+            QQC2.SplitView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                orientation: Qt.Vertical
 
-                QuickSettingsView {
-                    width: parent.width
-                    pinnedSettings: Plasmoid.configuration.pinnedSettings
-                    settingsConfig: root.settingsConfig
-                    currentValues: root.currentValues
-                    ncPreset: root.ncSettings.preset || "off"
-                    dbusConnection: DBus.SessionBus
-                    i18n: I18n
+                QQC2.ScrollView {
+                    QQC2.SplitView.fillHeight: true
+                    QQC2.SplitView.minimumHeight: Kirigami.Units.gridUnit * 6
+
+                    StatusView {
+                        width: parent.width
+                        status: root.status
+                        settingsConfig: root.settingsConfig
+                        enabledFields: Plasmoid.configuration.enabledStatusFields
+                        i18n: I18n
+                    }
+                }
+
+                QQC2.ScrollView {
+                    QQC2.SplitView.minimumHeight: Kirigami.Units.gridUnit * 6
+
+                    QuickSettingsView {
+                        width: parent.width
+                        pinnedSettings: Plasmoid.configuration.pinnedSettings
+                        settingsConfig: root.settingsConfig
+                        currentValues: root.currentValues
+                        ncPreset: root.ncSettings.preset || "off"
+                        dbusConnection: DBus.SessionBus
+                        i18n: I18n
+                    }
                 }
             }
         }
