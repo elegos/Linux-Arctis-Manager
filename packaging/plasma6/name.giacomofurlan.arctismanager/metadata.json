@@ -1,0 +1,24 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Email": "claude.ai@giacomofurlan.name",
+                "Name": "Giacomo Furlan"
+            }
+        ],
+        "Category": "System Information",
+        "Description": "Status and quick settings for SteelSeries Arctis headsets",
+        "EnabledByDefault": false,
+        "Icon": "arctis-manager",
+        "Id": "name.giacomofurlan.arctismanager",
+        "License": "MIT",
+        "Name": "Arctis Manager",
+        "Version": "1.0"
+    },
+    "X-Plasma-API": "declarativeappletscript",
+    "X-Plasma-API-Minimum-Version": "6.0",
+    "X-Plasma-MainScript": "ui/main.qml",
+    "X-Plasma-NotificationArea": "true",
+    "X-Plasma-NotificationAreaCategory": "Hardware"
+}

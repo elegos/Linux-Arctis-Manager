@@ -59,6 +59,22 @@ SteelSeries Arctis headsets on Linux. It provides a user-space daemon
 (written in Rust) and a Qt6 GUI (written in Python) for controlling
 equalizer settings, sidetone, ANC, LED profiles, and more.
 
+%package plasma-widget
+Summary:        KDE Plasma widget for %{name}
+Requires:       %{name} = %{version}-%{release}
+# Suggested, not required: most Plasma installs already pull this in, but a
+# minimal/Wayland-only Plasma spin might not. Same "opt-in" reasoning as
+# python3-torch above — don't force a DE-specific dependency onto everyone
+# who installs the main package.
+Supplements:    (plasma-workspace and %{name})
+
+%description plasma-widget
+A native KDE Plasma 6 widget (plasmoid) for %{name}: shows headset status
+and a configurable set of quick-access controls in the Plasma panel,
+positioned and sized by Plasma itself like the volume/network applets. Talks
+to the already-running %{name} daemon directly over D-Bus — no Python
+process involved.
+
 %prep
 %autosetup -n %{name}-%{version}
 
@@ -100,6 +116,9 @@ fi
 %{_userunitdir}/lam-daemon.service
 %{_userunitdir}/lam-hidraw-helper.service
 %{_libdir}/linux-arctis-manager/
+
+%files plasma-widget
+%{_datadir}/plasma/plasmoids/name.giacomofurlan.arctismanager/
 
 %changelog
 * Tue Aug 25 2026 Giacomo Furlan <g.furlan@accenture.com> - 3.0.0~alpha1-1

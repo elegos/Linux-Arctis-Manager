@@ -13,6 +13,20 @@ VENVDIR             := $(LIBDIR)/linux-arctis-manager/venv
 DESKTOP_DIR         := $(DATADIR)/applications
 DESKTOP_FILES       := $(wildcard src/linux_arctis_manager/desktop/*.desktop)
 
+# A standalone copy of the translation files, outside the venv's site-packages
+# (whose path is Python-version-dependent), so non-Python UIs — e.g. the
+# Plasma widget in packaging/plasma6/ — have a stable path to read them from.
+LANG_DIR            := $(LAM_DATADIR)/lang
+LANG_FILES          := $(wildcard src/linux_arctis_manager/lang/*.ini)
+
+# KDE Plasma 6 widget (plasmoid). Installed on every distro (harmless on a
+# non-Plasma system, same as shipping a .desktop file); Fedora splits it into
+# its own subpackage (see packaging/fedora/linux-arctis-manager.spec),
+# Debian/Arch don't split it yet (follow-up).
+PLASMOID_ID         := name.giacomofurlan.arctismanager
+PLASMOID_SRC_DIR    := packaging/plasma6/$(PLASMOID_ID)
+PLASMOID_DEST_DIR   := $(DATADIR)/plasma/plasmoids/$(PLASMOID_ID)
+
 # ── Build tools ────────────────────────────────────────────────────────────────
 CARGO            ?= cargo
 UV               ?= uv
@@ -165,6 +179,14 @@ install: build generate-services install-python
 	# Device config YAML files
 	install -dm755 $(DESTDIR)$(DEVICE_CONFIGS_DIR)
 	install -Dm644 $(DEVICE_YAMLS) -t $(DESTDIR)$(DEVICE_CONFIGS_DIR)/
+	# Translation files (standalone copy, see LANG_DIR comment above)
+	install -dm755 $(DESTDIR)$(LANG_DIR)
+	install -Dm644 $(LANG_FILES) -t $(DESTDIR)$(LANG_DIR)/
+	# KDE Plasma widget — cp -a, not `install -Dm644 -t`, because it's a
+	# nested tree (contents/ui, contents/config, contents/code) rather than
+	# a flat file list.
+	install -dm755 $(DESTDIR)$(PLASMOID_DEST_DIR)
+	cp -a $(PLASMOID_SRC_DIR)/. $(DESTDIR)$(PLASMOID_DEST_DIR)/
 	# Systemd user service units
 	install -Dm644 $(SERVICE_HELPER_OUT) $(DESTDIR)$(SYSTEMD_USER_DIR)/lam-hidraw-helper.service
 	install -Dm644 $(SERVICE_DAEMON_OUT)  $(DESTDIR)$(SYSTEMD_USER_DIR)/lam-daemon.service
@@ -192,6 +214,8 @@ uninstall:
 	rm -f $(DESTDIR)$(SYSTEMD_USER_DIR)/lam-daemon.service
 	rm -f $(addprefix $(DESTDIR)$(DESKTOP_DIR)/,$(notdir $(DESKTOP_FILES)))
 	rm -rf $(DESTDIR)$(DEVICE_CONFIGS_DIR)
+	rm -rf $(DESTDIR)$(LANG_DIR)
+	rm -rf $(DESTDIR)$(PLASMOID_DEST_DIR)
 	rm -rf $(DESTDIR)$(LIBDIR)/linux-arctis-manager
 	-systemctl --user daemon-reload 2>/dev/null
 
