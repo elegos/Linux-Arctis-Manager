@@ -142,6 +142,13 @@ and `packaging/fedora/linux-arctis-manager.spec` for reference.
 > ln -sf /usr/local/share/applications/ArctisManagerSystray.desktop ~/.config/autostart/
 > ```
 
+> [!TIP]
+> On KDE Plasma 6, `make install` also installs a native Plasma widget
+> (`packaging/plasma6/`) that talks directly to the daemon over D-Bus — no
+> separate tray process needed. Add it to a panel like any other widget
+> ("Add Widgets..." → "Arctis Manager"); right-click it for its Configure
+> dialog to pick which status fields and quick settings it shows.
+
 ## 🧹 Uninstall / Cleanup
 
 Choose the method that matches your installation method:
