@@ -26,3 +26,15 @@ Description: SteelSeries Arctis manager for Linux
  on Linux. Provides a user-space daemon written in Rust and a Qt6 GUI written
  in Python for controlling equalizer settings, sidetone, ANC, LED profiles,
  and more.
+
+Package: linux-arctis-manager-plasma-widget
+Architecture: all
+Depends: ${misc:Depends},
+         linux-arctis-manager,
+         plasma-workspace
+Description: KDE Plasma widget for linux-arctis-manager
+ A native KDE Plasma 6 widget (plasmoid): shows headset status and a
+ configurable set of quick-access controls in the Plasma panel, positioned
+ and sized by Plasma itself like the volume/network applets. Talks to the
+ already-running linux-arctis-manager daemon directly over D-Bus — no
+ Python process involved.

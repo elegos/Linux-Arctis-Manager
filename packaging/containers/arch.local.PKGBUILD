@@ -4,18 +4,14 @@
 #
 # DO NOT submit this file to AUR — use packaging/arch/PKGBUILD instead.
 
-pkgname=linux-arctis-manager
+pkgbase=linux-arctis-manager
+pkgname=(linux-arctis-manager linux-arctis-manager-plasma-widget)
 pkgver=0        # overridden by arch.build.dockerfile from VERSION file
 pkgrel=1
-pkgdesc="SteelSeries Arctis manager for Linux — native daemon and Qt6 GUI"
 arch=('x86_64')
 url="https://github.com/elegos/Linux-Arctis-Manager"
 license=('MIT')
-depends=('python' 'libcap' 'openssl' 'systemd-libs')
 makedepends=('rust' 'cargo' 'python')
-provides=('linux-arctis-manager')
-conflicts=('linux-arctis-manager-git')
-install=lam.install
 
 # No source array — the Dockerfile has already placed the tree at /home/builder/source
 source=()
@@ -26,7 +22,23 @@ build() {
     make build PREFIX=/usr
 }
 
-package() {
+package_linux-arctis-manager() {
+    pkgdesc="SteelSeries Arctis manager for Linux — native daemon and Qt6 GUI"
+    depends=('python' 'libcap' 'openssl' 'systemd-libs')
+    provides=('linux-arctis-manager')
+    conflicts=('linux-arctis-manager-git')
+    install=lam.install
+
     cd /home/builder/source
-    make install PREFIX=/usr DESTDIR="$pkgdir"
+    make install-core PREFIX=/usr DESTDIR="$pkgdir"
+}
+
+package_linux-arctis-manager-plasma-widget() {
+    pkgdesc="KDE Plasma widget for linux-arctis-manager — status and configurable quick settings in the Plasma panel"
+    # No compiled code in this one — same package for every arch.
+    arch=('any')
+    depends=('linux-arctis-manager' 'plasma-workspace')
+
+    cd /home/builder/source
+    make install-plasmoid PREFIX=/usr DESTDIR="$pkgdir"
 }

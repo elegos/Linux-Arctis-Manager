@@ -1,31 +1,45 @@
 # Maintainer: Giacomo Furlan <g.furlan@accenture.com>
-pkgname=linux-arctis-manager-git
+pkgbase=linux-arctis-manager-git
+pkgname=(linux-arctis-manager-git linux-arctis-manager-plasma-widget-git)
 pkgver=0  # populated by pkgver() below
 pkgrel=1
-pkgdesc="SteelSeries Arctis manager for Linux — git build from main"
 arch=('x86_64')
 url="https://github.com/elegos/Linux-Arctis-Manager"
 license=('MIT')
-depends=('python' 'libcap')
 makedepends=('rust' 'cargo' 'uv' 'python' 'git')
-provides=('linux-arctis-manager')
-conflicts=('linux-arctis-manager')
-install=lam.install
-source=("$pkgname::git+https://github.com/elegos/Linux-Arctis-Manager.git#branch=main")
+source=("$pkgbase::git+https://github.com/elegos/Linux-Arctis-Manager.git#branch=main")
 sha256sums=('SKIP')
 
 pkgver() {
-    cd "$pkgname"
+    cd "$pkgbase"
     # e.g. v3.0.0-15-gabcdef1  →  3.0.0.r15.gabcdef1
     git describe --long --tags | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g'
 }
 
 build() {
-    cd "$pkgname"
+    cd "$pkgbase"
     make build PREFIX=/usr
 }
 
-package() {
-    cd "$pkgname"
-    make install PREFIX=/usr DESTDIR="$pkgdir"
+package_linux-arctis-manager-git() {
+    pkgdesc="SteelSeries Arctis manager for Linux — git build from main"
+    depends=('python' 'libcap')
+    provides=('linux-arctis-manager')
+    conflicts=('linux-arctis-manager')
+    install=lam.install
+
+    cd "$pkgbase"
+    make install-core PREFIX=/usr DESTDIR="$pkgdir"
+}
+
+package_linux-arctis-manager-plasma-widget-git() {
+    pkgdesc="KDE Plasma widget for linux-arctis-manager — git build from main"
+    # No compiled code in this one — same package for every arch.
+    arch=('any')
+    provides=('linux-arctis-manager-plasma-widget')
+    conflicts=('linux-arctis-manager-plasma-widget')
+    depends=('linux-arctis-manager-git' 'plasma-workspace')
+
+    cd "$pkgbase"
+    make install-plasmoid PREFIX=/usr DESTDIR="$pkgdir"
 }
