@@ -18,7 +18,13 @@ override_dh_auto_build:
 	make build PREFIX=/usr
 
 override_dh_auto_install:
-	make install DESTDIR=$(CURDIR)/debian/linux-arctis-manager PREFIX=/usr
+	# Stage into debian/tmp (not debian/linux-arctis-manager directly): two
+	# binary packages now share this one install (see
+	# linux-arctis-manager.install and
+	# linux-arctis-manager-plasma-widget.install), and dh_install (run
+	# automatically by `dh $@` below) fans debian/tmp out into each
+	# package's own directory per those files.
+	make install DESTDIR=$(CURDIR)/debian/tmp PREFIX=/usr
 
 override_dh_shlibdeps:
 	# The venv bundles its own private Qt6/ffmpeg/icu .so files (PySide6's

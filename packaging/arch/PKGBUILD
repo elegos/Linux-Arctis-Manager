@@ -1,23 +1,14 @@
 # Maintainer: Giacomo Furlan <g.furlan@accenture.com>
-pkgname=linux-arctis-manager
+pkgbase=linux-arctis-manager
+pkgname=(linux-arctis-manager linux-arctis-manager-plasma-widget)
 pkgver=3.0.0alpha1
 pkgrel=1
-pkgdesc="SteelSeries Arctis manager for Linux — replaces SteelSeries GG with a native daemon and Qt6 GUI"
 arch=('x86_64')
 url="https://github.com/elegos/Linux-Arctis-Manager"
 license=('MIT')
-depends=('python' 'libcap' 'openssl' 'systemd-libs')
 makedepends=('rust' 'cargo' 'python')
-# python-pytorch: only for the AI voice changer's one-shot .pth -> ONNX
-# conversion tool (E10-S6a/S7); optdepends is informational only on Arch
-# (pacman never auto-installs it), so runtime detection with a
-# consent-gated pip fallback is the primary mechanism here, not this line.
-optdepends=('python-pytorch: AI voice changer model conversion')
-provides=('linux-arctis-manager')
-conflicts=('linux-arctis-manager-git')
-install=lam.install
 # Update tag and sha256sum for each release.
-source=("$pkgname-$pkgver.tar.gz::https://github.com/elegos/Linux-Arctis-Manager/archive/refs/tags/v${pkgver}.tar.gz")
+source=("$pkgbase-$pkgver.tar.gz::https://github.com/elegos/Linux-Arctis-Manager/archive/refs/tags/v${pkgver}.tar.gz")
 sha256sums=('SKIP')
 
 build() {
@@ -25,7 +16,28 @@ build() {
     make build PREFIX=/usr
 }
 
-package() {
+package_linux-arctis-manager() {
+    pkgdesc="SteelSeries Arctis manager for Linux — replaces SteelSeries GG with a native daemon and Qt6 GUI"
+    depends=('python' 'libcap' 'openssl' 'systemd-libs')
+    # python-pytorch: only for the AI voice changer's one-shot .pth -> ONNX
+    # conversion tool (E10-S6a/S7); optdepends is informational only on Arch
+    # (pacman never auto-installs it), so runtime detection with a
+    # consent-gated pip fallback is the primary mechanism here, not this line.
+    optdepends=('python-pytorch: AI voice changer model conversion')
+    provides=('linux-arctis-manager')
+    conflicts=('linux-arctis-manager-git')
+    install=lam.install
+
     cd "Linux-Arctis-Manager-${pkgver}"
-    make install PREFIX=/usr DESTDIR="$pkgdir"
+    make install-core PREFIX=/usr DESTDIR="$pkgdir"
+}
+
+package_linux-arctis-manager-plasma-widget() {
+    pkgdesc="KDE Plasma widget for linux-arctis-manager — status and configurable quick settings in the Plasma panel"
+    # No compiled code in this one — same package for every arch.
+    arch=('any')
+    depends=('linux-arctis-manager' 'plasma-workspace')
+
+    cd "Linux-Arctis-Manager-${pkgver}"
+    make install-plasmoid PREFIX=/usr DESTDIR="$pkgdir"
 }

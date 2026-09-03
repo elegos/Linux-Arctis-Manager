@@ -60,7 +60,7 @@ GUI_WRAPPER_OUT := packaging/scripts/lam-gui
 DEVICE_YAMLS := $(wildcard daemon/device-configs/*.yaml)
 
 .PHONY: build build-python sync-version generate-services generate-gui-wrapper \
-        install install-python uninstall enable disable \
+        install install-core install-plasmoid install-python uninstall enable disable \
         container-build-rpm container-build-deb container-build-pkg container-build-all \
         container-refresh-fedora container-refresh-debian container-refresh-arch container-refresh-all \
         help
@@ -71,7 +71,9 @@ help:
 	@echo "  build              Build Rust release binaries (pass PREFIX= to bake the data dir)"
 	@echo "  build-python       Alias: checks uv lockfile is up to date"
 	@echo "  install            Build + install everything (requires sudo for setcap)"
-	@echo "  install-python     Install Python venv + lam-gui wrapper (called by install)"
+	@echo "  install-core       Daemon, helper, GUI, services, desktop entries (no Plasma widget)"
+	@echo "  install-plasmoid   Just the KDE Plasma widget + its translation files"
+	@echo "  install-python     Install Python venv + lam-gui wrapper (called by install-core)"
 	@echo "  uninstall          Remove installed files"
 	@echo "  enable             Enable and start user services (no sudo needed)"
 	@echo "  disable            Stop and disable user services"
@@ -171,14 +173,11 @@ endif
 	install -Dm755 $(GUI_WRAPPER_OUT) $(DESTDIR)$(BINDIR)/lam-gui
 
 # ── Install ────────────────────────────────────────────────────────────────────
-install: build generate-services install-python
-	# Daemon binary
-	install -Dm755 $(DAEMON_BIN) $(DESTDIR)$(BINDIR)/lam-daemon
-	# Privileged helper
-	install -Dm755 $(HELPER_BIN) $(DESTDIR)$(LIBEXECDIR)/lam-hidraw-helper
-	# Device config YAML files
-	install -dm755 $(DESTDIR)$(DEVICE_CONFIGS_DIR)
-	install -Dm644 $(DEVICE_YAMLS) -t $(DESTDIR)$(DEVICE_CONFIGS_DIR)/
+# Split in two so packaging recipes that ship the Plasma widget as its own
+# binary package (Fedora subpackage, Debian's second control stanza, Arch's
+# split package) can install just the piece they need. `install` (below)
+# runs both, unchanged for a plain from-source `sudo make install`.
+install-plasmoid:
 	# Translation files (standalone copy, see LANG_DIR comment above)
 	install -dm755 $(DESTDIR)$(LANG_DIR)
 	install -Dm644 $(LANG_FILES) -t $(DESTDIR)$(LANG_DIR)/
@@ -187,6 +186,15 @@ install: build generate-services install-python
 	# a flat file list.
 	install -dm755 $(DESTDIR)$(PLASMOID_DEST_DIR)
 	cp -a $(PLASMOID_SRC_DIR)/. $(DESTDIR)$(PLASMOID_DEST_DIR)/
+
+install-core: build generate-services install-python
+	# Daemon binary
+	install -Dm755 $(DAEMON_BIN) $(DESTDIR)$(BINDIR)/lam-daemon
+	# Privileged helper
+	install -Dm755 $(HELPER_BIN) $(DESTDIR)$(LIBEXECDIR)/lam-hidraw-helper
+	# Device config YAML files
+	install -dm755 $(DESTDIR)$(DEVICE_CONFIGS_DIR)
+	install -Dm644 $(DEVICE_YAMLS) -t $(DESTDIR)$(DEVICE_CONFIGS_DIR)/
 	# Systemd user service units
 	install -Dm644 $(SERVICE_HELPER_OUT) $(DESTDIR)$(SYSTEMD_USER_DIR)/lam-hidraw-helper.service
 	install -Dm644 $(SERVICE_DAEMON_OUT)  $(DESTDIR)$(SYSTEMD_USER_DIR)/lam-daemon.service
@@ -202,6 +210,8 @@ ifndef DESTDIR
 	@echo "Installation complete.  To activate:"
 	@echo "  make enable"
 endif
+
+install: install-core install-plasmoid
 
 # ── Uninstall ──────────────────────────────────────────────────────────────────
 uninstall:

@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Device settings now persist across daemon restarts.
 - GUI shows the daemon version and upgrades/starts the background service automatically.
 - Rust daemon (v3): rewrite of the background service, with support for the entire device lineup (Nova 5, Arctis 7+, Nova Pro Wired/Wireless/Omni, Nova Elite, Nova 7, Nova 7 Gen2, Nova 3/3X/4/4X, Arctis 7, Arctis 1 Wireless, Arctis 5, Arctis 9, Arctis Pro/Pro Wireless/Pro GameDAC, Arctis GameBuds) — see `docs/device_compatibility.md` for the full capability matrix.
-- KDE Plasma 6 widget (plasmoid): status and a configurable set of quick-access controls in the Plasma panel, positioned by Plasma itself. Packaged as an opt-in `linux-arctis-manager-plasma-widget` subpackage on Fedora.
+- KDE Plasma 6 widget (plasmoid): status and a configurable set of quick-access controls in the Plasma panel, positioned by Plasma itself. Ships as its own `linux-arctis-manager-plasma-widget` package (Fedora subpackage, Debian binary package, Arch split package) across the same build matrix as the main package.
 
 ### Changed
 

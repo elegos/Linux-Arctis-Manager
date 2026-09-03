@@ -61,11 +61,16 @@ equalizer settings, sidetone, ANC, LED profiles, and more.
 
 %package plasma-widget
 Summary:        KDE Plasma widget for %{name}
+BuildArch:      noarch
 Requires:       %{name} = %{version}-%{release}
-# Suggested, not required: most Plasma installs already pull this in, but a
-# minimal/Wayland-only Plasma spin might not. Same "opt-in" reasoning as
-# python3-torch above — don't force a DE-specific dependency onto everyone
-# who installs the main package.
+# Hard requirement: the widget does nothing without Plasma. Separate from
+# the Supplements below, which is about *whether this subpackage installs
+# itself automatically* (not whether it needs plasma-workspace once chosen).
+Requires:       plasma-workspace
+# Auto-suggested, not auto-installed on every main-package install: only
+# offered when both the main package and plasma-workspace are already
+# present, so a minimal/Wayland-only or non-Plasma install never gets it
+# uninvited. Same "opt-in" reasoning as python3-torch above.
 Supplements:    (plasma-workspace and %{name})
 
 %description plasma-widget
@@ -111,13 +116,18 @@ fi
 %{_bindir}/lam-daemon
 %{_bindir}/lam-gui
 %{_libexecdir}/lam-hidraw-helper
-%{_datadir}/linux-arctis-manager/
+%{_datadir}/linux-arctis-manager/devices/
 %{_datadir}/applications/*.desktop
 %{_userunitdir}/lam-daemon.service
 %{_userunitdir}/lam-hidraw-helper.service
 %{_libdir}/linux-arctis-manager/
 
 %files plasma-widget
+# The GUI's own translations (%{_libdir}/linux-arctis-manager/venv/.../lang/)
+# are separate — this is the standalone copy install-plasmoid creates
+# specifically so this subpackage doesn't need the Python venv to have
+# translated strings. See Makefile's LANG_DIR comment.
+%{_datadir}/linux-arctis-manager/lang/
 %{_datadir}/plasma/plasmoids/name.giacomofurlan.arctismanager/
 
 %changelog

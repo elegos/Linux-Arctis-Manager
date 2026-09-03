@@ -1,0 +1,7 @@
+usr/bin/lam-daemon
+usr/bin/lam-gui
+usr/libexec/lam-hidraw-helper
+usr/lib/linux-arctis-manager
+usr/lib/systemd/user
+usr/share/applications
+usr/share/linux-arctis-manager/devices

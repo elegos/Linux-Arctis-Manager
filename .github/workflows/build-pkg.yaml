@@ -110,7 +110,10 @@ jobs:
               # %{?dist} in the spec's Release already makes the built
               # filename version-unique per Fedora release (.fc41/.fc42/...),
               # so no extra tagging needed here unlike arch/deb.
-              find "$HOME/rpmbuild/RPMS" -name "${PKGNAME}-[0-9]*.rpm" \
+              # "${PKGNAME}*.rpm", not "${PKGNAME}-[0-9]*.rpm": the spec now
+              # also builds a linux-arctis-manager-plasma-widget subpackage,
+              # whose filename has no digit right after ${PKGNAME}-.
+              find "$HOME/rpmbuild/RPMS" -name "${PKGNAME}*.rpm" \
                   ! -name '*debuginfo*' ! -name '*debugsource*' -exec cp {} /out/ \;
               ;;
 
