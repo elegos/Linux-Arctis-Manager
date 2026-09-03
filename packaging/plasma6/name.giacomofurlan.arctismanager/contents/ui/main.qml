@@ -32,7 +32,11 @@ PlasmoidItem {
         return values
     }
 
-    Plasmoid.icon: "arctis-manager"
+    // "-symbolic" gets Kirigami/Plasma's automatic panel recoloring
+    // (light icon on a dark panel, dark on light) — the plain
+    // "arctis-manager" name is a fixed-color icon meant for the app
+    // launcher/window, not the tray.
+    Plasmoid.icon: "arctis-manager-symbolic"
     Plasmoid.title: I18n.translate("ui", "app_name")
 
     Component.onCompleted: {
@@ -61,7 +65,7 @@ PlasmoidItem {
     }
 
     compactRepresentation: Kirigami.Icon {
-        source: "arctis-manager"
+        source: "arctis-manager-symbolic"
         active: mouseArea.containsMouse
 
         MouseArea {

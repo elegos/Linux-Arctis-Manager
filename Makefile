@@ -13,6 +13,13 @@ VENVDIR             := $(LIBDIR)/linux-arctis-manager/venv
 DESKTOP_DIR         := $(DATADIR)/applications
 DESKTOP_FILES       := $(wildcard src/linux_arctis_manager/desktop/*.desktop)
 
+# Same mark (fill="currentColor") installed under two theme names: the plain
+# name for the app launcher/window icon, "-symbolic" for panel/tray contexts
+# (Plasma/Kirigami auto-recolor icons named "*-symbolic" to match the
+# panel's light/dark foreground; the plain name doesn't get that treatment).
+ICON_SRC            := src/linux_arctis_manager/gui/images/steelseries_logo.svg
+ICON_DIR            := $(DATADIR)/icons/hicolor/scalable/apps
+
 # A standalone copy of the translation files, outside the venv's site-packages
 # (whose path is Python-version-dependent), so non-Python UIs — e.g. the
 # Plasma widget in packaging/plasma6/ — have a stable path to read them from.
@@ -201,6 +208,10 @@ install-core: build generate-services install-python
 	# Desktop entries
 	install -dm755 $(DESTDIR)$(DESKTOP_DIR)
 	install -Dm644 $(DESKTOP_FILES) -t $(DESTDIR)$(DESKTOP_DIR)/
+	# hicolor icon theme entry (app launcher/window + Plasma panel/tray)
+	install -dm755 $(DESTDIR)$(ICON_DIR)
+	install -Dm644 $(ICON_SRC) $(DESTDIR)$(ICON_DIR)/arctis-manager.svg
+	install -Dm644 $(ICON_SRC) $(DESTDIR)$(ICON_DIR)/arctis-manager-symbolic.svg
 ifndef DESTDIR
 	# Apply DAC capability to the installed helper binary.
 	# Must run after the final copy; packaging tools handle this in post-install hooks.
@@ -223,6 +234,8 @@ uninstall:
 	rm -f $(DESTDIR)$(SYSTEMD_USER_DIR)/lam-hidraw-helper.service
 	rm -f $(DESTDIR)$(SYSTEMD_USER_DIR)/lam-daemon.service
 	rm -f $(addprefix $(DESTDIR)$(DESKTOP_DIR)/,$(notdir $(DESKTOP_FILES)))
+	rm -f $(DESTDIR)$(ICON_DIR)/arctis-manager.svg
+	rm -f $(DESTDIR)$(ICON_DIR)/arctis-manager-symbolic.svg
 	rm -rf $(DESTDIR)$(DEVICE_CONFIGS_DIR)
 	rm -rf $(DESTDIR)$(LANG_DIR)
 	rm -rf $(DESTDIR)$(PLASMOID_DEST_DIR)

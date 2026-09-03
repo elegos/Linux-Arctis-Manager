@@ -67,6 +67,12 @@ function _load(langCode) {
             return _parseIni(xhr.responseText)
         }
     }
+    // Every candidate (including the "en" fallback) failed to load — most
+    // likely LANG_DIR was never populated (e.g. the plasmoid was installed
+    // by hand instead of via `make install-plasmoid`/the packaged widget,
+    // which installs its own standalone copy there). All translate() calls
+    // will silently return raw keys until this is fixed, so surface it.
+    console.warn("linux-arctis-manager plasmoid: no translation file found under " + LANG_DIR + " — is the package fully installed?")
     return {}
 }
 
