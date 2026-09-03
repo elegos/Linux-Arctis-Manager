@@ -107,8 +107,7 @@ mod tests {
         // Old persisted configs written before `autostart` was removed —
         // `#[serde(default)]` (via `unknown_future_field`-style tolerance)
         // must still parse, simply dropping the now-unknown field.
-        let cfg: NcConfig = serde_json::from_str(r#"{"preset": "on", "autostart": true}"#)
-            .unwrap();
+        let cfg: NcConfig = serde_json::from_str(r#"{"preset": "on", "autostart": true}"#).unwrap();
         assert_eq!(cfg.preset, "on");
     }
 
