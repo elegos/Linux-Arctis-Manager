@@ -35,6 +35,21 @@ class QStatusWidget(QWidget):
             if widget is not None:
                 widget.deleteLater()
 
+    @staticmethod
+    def format_value(status: str, status_o: dict[str, str|int], settings_config: dict) -> str:
+        val = status_o['value']
+        dtype = status_o.get('type')
+        if dtype == 'percentage':
+            return f"{val}%"
+        if dtype == 'on_off':
+            return I18n.translate('status_values', 'on' if val else 'off')
+        if isinstance(val, (int, float)) and dtype in ('uint8', 'uint16', 'uint32'):
+            cfg = settings_config.get(status, {})
+            vm = cfg.get('values_mapping', {})
+            label_key = vm.get(str(int(val)), str(int(val))) if vm else str(int(val))
+            return I18n.translate('status_values', label_key)
+        return I18n.translate('status_values', val)
+
     def update_status(self, new_status: dict[str, dict[str, dict[str, str|int]]]):
         if hasattr(self, 'status') and new_status == self.status:
             return
@@ -72,18 +87,6 @@ class QStatusWidget(QWidget):
             for status, status_o in status_obj.items():
                 if status in skip_fields:
                     continue
-                val = status_o['value']
-                dtype = status_o.get('type')
-                if dtype == 'percentage':
-                    display = f"{val}%"
-                elif dtype == 'on_off':
-                    display = I18n.translate('status_values', 'on' if val else 'off')
-                elif isinstance(val, (int, float)) and dtype in ('uint8', 'uint16', 'uint32'):
-                    cfg = self._settings_config.get(status, {})
-                    vm = cfg.get('values_mapping', {})
-                    label_key = vm.get(str(int(val)), str(int(val))) if vm else str(int(val))
-                    display = I18n.translate('status_values', label_key)
-                else:
-                    display = I18n.translate('status_values', val)
+                display = self.format_value(status, status_o, self._settings_config)
                 label = QLabel(f"{I18n.translate('status', status)}: {display}")
                 self.main_layout.addWidget(label)

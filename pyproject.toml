@@ -79,8 +79,3 @@ ignore = [
     "PLC0415",  # import-outside-top-level: deliberate lazy-import pattern in this codebase (heavy/optional deps)
     "RUF001", "RUF002", "RUF003",  # ambiguous-unicode-character: false positives on legitimate UI/i18n text
 ]
-
-[tool.ruff.lint.per-file-ignores]
-# dbus_next's @method/@dbus_property/@signal decorators are annotated with
-# D-Bus type-signature strings ('s', 'a{sv}', ...), not real Python types.
-"src/linux_arctis_manager/gui/sni_item.py" = ["F821"]
