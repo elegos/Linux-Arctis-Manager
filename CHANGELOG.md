@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Byte-order mismatch that corrupted custom EQ gain on Nova Pro Wireless, Nova Pro Wired, Arctis 7+, and Nova 7.
 - GUI's automatic service restart now targets the actual installed v3 systemd units.
 - Noise Cancellation no longer swallows quiet consonants.
+- `SetNCSettings` no longer force-persists the preset as "off": Noise Cancellation has no autostart/session-only tri-state like Voice Changer — any preset other than "off" is always active and now correctly reported back over D-Bus (was previously always reported as "off", regardless of the selected preset, and lost on daemon restart).
 - EQ preset/gain changes no longer interrupt other apps' playback or leak PipeWire modules.
 - Settings with many options no longer overflow the window; sliders no longer stutter while dragging.
 - `lam-hidraw-helper` and the daemon's HTTP user agent now report the real project version instead of the crate-internal `0.1.0`/`CARGO_PKG_VERSION` placeholder.
