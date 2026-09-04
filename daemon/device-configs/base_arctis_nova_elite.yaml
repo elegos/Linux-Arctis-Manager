@@ -209,7 +209,7 @@ structs:
       - {name: bt_power_default,       type: uint8, range: [0, 1]}
       - {name: bt_call_default,        type: uint8, range: [0, 2]}
       - {name: bt_connection_mode,     type: uint8, range: [1, 4]}
-      - {name: bt_connection_status,   type: uint8, range: [1, 8]}
+      - {name: bt_connection_status,   type: uint8, range: [0, 8]}
       - {name: headset_batt_level,     type: uint8, range: [0, 100]}
       - {name: charger_batt_level,     type: uint8, range: [0, 100]}
       - {name: transparent_level,      type: uint8, range: [1, 10]}
