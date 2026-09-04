@@ -137,7 +137,16 @@ build-python:
 $(HELPER_BIN) $(DAEMON_BIN): build
 
 # ── Generate service files from templates ─────────────────────────────────────
+# Declared .PHONY even though they produce real files: these outputs are
+# gitignored build artefacts, and packaging tarballs (COPY . . / tar czf with
+# no .dockerignore) can carry a stale one in with an mtime that ties or beats
+# .in's, which makes mtime-based rebuilding skip regeneration and ship a
+# wrong hardcoded path (e.g. a leftover /usr/local from a prior `make
+# install-core` run without PREFIX=). .PHONY forces the sed to rerun every
+# time regardless of what's already on disk.
 generate-services: $(SERVICE_HELPER_OUT) $(SERVICE_DAEMON_OUT)
+
+.PHONY: $(SERVICE_HELPER_OUT) $(SERVICE_DAEMON_OUT)
 
 $(SERVICE_HELPER_OUT): $(SERVICE_HELPER_IN) Makefile
 	sed \
