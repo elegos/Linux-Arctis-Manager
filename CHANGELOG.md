@@ -47,6 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Settings with many options no longer overflow the window; sliders no longer stutter while dragging.
 - `lam-hidraw-helper` and the daemon's HTTP user agent now report the real project version instead of the crate-internal `0.1.0`/`CARGO_PKG_VERSION` placeholder.
 - `pyproject.toml`'s version is now synced from the shared `VERSION` file before packaging (`make sync-version`), so a stale `pyproject.toml` can no longer ship a mismatched GUI version.
+- Packaged systemd user services (`lam-daemon.service`, `lam-hidraw-helper.service`) could ship with a stale hardcoded `/usr/local` `ExecStart` path instead of the package's actual install prefix (`/usr`), if a leftover generated unit file from a prior local `make install` was picked up by the packaging build; the generation rule now always reruns instead of trusting file timestamps.
 
 ## [2.4.1]
 
