@@ -337,10 +337,13 @@ impl DeviceSession {
                     .map_err(EngineError::Io)?;
 
                 // The interrupt stream carries both command responses and
-                // unsolicited device notifications.  Drain any notification
-                // reports whose first byte (report_id) does not match the
-                // expected response ID before returning the real response.
-                let expected_id = op.request_bytes.first().copied();
+                // unsolicited device notifications.  Some devices (e.g. the
+                // Nova Pro Omni) put both on the same report ID, so matching
+                // on the ID alone can't tell a notification from the real
+                // reply — match on the ID *and* the echoed command byte
+                // (the first two bytes of the request we just sent) before
+                // returning the real response.
+                let expected_header = &op.request_bytes[..op.request_bytes.len().min(2)];
                 for _ in 0..8u8 {
                     let response = self
                         .transport
@@ -353,10 +356,12 @@ impl DeviceSession {
                                 "sync read timed out",
                             )),
                         })?;
-                    if expected_id.is_none_or(|id| response.first() == Some(&id)) {
+                    if expected_header.is_empty()
+                        || response.get(..expected_header.len()) == Some(expected_header)
+                    {
                         return Ok(response);
                     }
-                    // Wrong report ID — async notification buffered before response.
+                    // Wrong report ID/command — async notification buffered before response.
                 }
                 Err(EngineError::Io(std::io::Error::new(
                     std::io::ErrorKind::TimedOut,
@@ -364,6 +369,21 @@ impl DeviceSession {
                 )))
             }
             Transport::HidFeature => {
+                // Unlike HID_IO, a bare HIDIOCGFEATURE doesn't select *which*
+                // command's data comes back — the write side already knows
+                // this (`write_api_direct` above calls `write_feature` before
+                // anything else). A get-only read skipped that: it sent
+                // nothing, so the device had no idea we wanted `command`'s
+                // payload and just handed back its idle/default report
+                // (zeros), which is why every field starting from the front
+                // (`command`, then `report_id` once that was added) failed
+                // its constant check. SET first, with the same encoded
+                // request (report_id + command), to arm the device, then GET
+                // to read back what it populated.
+                self.transport
+                    .write_feature(&op.request_bytes)
+                    .map_err(EngineError::Io)?;
+
                 let mut buf = vec![0u8; op.chunk_size];
                 if let Some(&report_id) = op.request_bytes.first() {
                     buf[0] = report_id;
@@ -722,6 +742,69 @@ sync_read:
         let mut resp = vec![0u8; 8];
         resp[0] = 0x00; // report_id
         resp[1] = 0x45; // command
+        resp[2] = 42; // mic_volume
+        peer.write_interrupt(&resp).await.unwrap();
+
+        task.await.unwrap();
+        let events = rx.await.unwrap().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].signal, "mic_volume_changed");
+    }
+
+    /// Regression test for the Nova Pro Omni init hang: a device that shares
+    /// one report ID across both async notifications and command replies
+    /// (confirmed by its HID report descriptor, which declares numbered
+    /// reports but never a second ID for "notification vs. reply") can send
+    /// an unsolicited report between our write and the real answer. Matching
+    /// on report ID alone can't tell them apart — the drain loop must also
+    /// check the echoed command byte, or it hands the notification to
+    /// `parse_response` as if it were the reply, permanently failing the
+    /// struct's `command` constant check.
+    #[tokio::test]
+    async fn run_sync_read_skips_async_notification_sharing_the_reply_report_id() {
+        let (engine_fd, peer_fd) = make_pair();
+        let config = cfg(r#"
+structs:
+  audio_settings:
+    outgoing:
+      - {name: report_id,  type: uint8, constant: 0x01}
+      - {name: command,    type: uint8, constant: 0x20}
+    incoming:
+      - {name: report_id,  type: uint8, constant: 0x01}
+      - {name: command,    type: uint8, constant: 0x20}
+      - {name: mic_volume, type: uint8}
+apis:
+  audio_settings:
+    read: {transport: HID_IO, chunk_size: 8}
+sync_read:
+  - struct: audio_settings
+    maps:
+      - {emit: mic_volume_changed, field: mic_volume}
+"#);
+        let session_config = config.clone();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        let task = tokio::spawn(async move {
+            let mut s = DeviceSession::new(session_config, engine_fd).expect("from_fd");
+            let result = s.run_sync_read().await;
+            let _ = tx.send(result);
+        });
+
+        let mut peer = HidTransport::from_fd(peer_fd).expect("from_fd");
+        peer.read_interrupt(Duration::from_millis(500))
+            .await
+            .expect("engine should send read request");
+
+        // Unsolicited notification: same report ID (0x01) as the real reply,
+        // different command byte — must NOT be mistaken for the response.
+        let mut notification = vec![0u8; 8];
+        notification[0] = 0x01; // report_id — same as the real reply
+        notification[1] = 0xb0; // command — a device-initiated push, not 0x20
+        peer.write_interrupt(&notification).await.unwrap();
+
+        let mut resp = vec![0u8; 8];
+        resp[0] = 0x01; // report_id
+        resp[1] = 0x20; // command — the actual reply
         resp[2] = 42; // mic_volume
         peer.write_interrupt(&resp).await.unwrap();
 

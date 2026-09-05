@@ -20,11 +20,14 @@ extends: base_arctis_nova_elite
 # - `audio_settings` (the startup snapshot) is redefined with a different
 #   field layout — no on-ear fields, real (if still unused) per-band EQ/gain
 #   fields instead of Elite's raw placeholder split, one extra onboard mic
-#   EQ preset slot (0-9 vs Elite's 0-8). Per the raw spec, its `incoming`
-#   direction also has no leading `report_id` byte, unlike every other
-#   struct in this family (including Elite's own `audio_settings`) — kept
-#   as literally specified rather than assumed to be a copy-paste slip,
-#   since there's no hardware to verify against.
+#   EQ preset slot (0-9 vs Elite's 0-8). The raw spec's `incoming` direction
+#   appeared to have no leading `report_id` byte, unlike every other struct
+#   in this family — a real device's own HID report descriptor (captured via
+#   `hid-recorder`) rules that out: it declares two explicit report IDs, and
+#   per the USB HID spec any device with >1 explicit report ID must prefix
+#   *every* report with its ID, replies included. Treated as a copy-paste
+#   slip in the raw spec and fixed to include it, matching every sibling
+#   struct.
 #
 # EQ (parametric/10-band, all three domains: radio/Bluetooth/mic) is real on
 # this device too (`parametric_eq`/`ten_band_eq_mic`/`ten_band_eq_bt`,
@@ -51,6 +54,7 @@ structs:
       - {name: report_id, type: uint8, constant: 0x01}
       - {name: command,   type: uint8, constant: 0x20}
     incoming:
+      - {name: report_id,                     type: uint8, constant: 0x01}
       - {name: command,                       type: uint8, constant: 0x20}
       - {name: eq_region_raw,                 type: bytearray, size: 140}
       - {name: audio_input,                   type: uint8, range: [0, 3]}
@@ -115,21 +119,28 @@ sync_read:
       - {emit: oled_screen_saver_mode_changed,  field: oled_screen_saver_mode}
       - {emit: home_screen_option_changed,      field: home_screen_option}
 
-  - struct: audio_settings
-    maps:
-      - {emit: mic_volume_changed,           field: mic_volume}
-      - {emit: volume_limiter_changed,       field: volume_limiter, display_type: on_off}
-      - {emit: line_out_mode_changed,        field: line_out_mode}
-      - {emit: station_volume_changed,       field: station_volume, display_type: percentage}
-      - {emit: surround_changed,             field: surround_mode,  display_type: on_off}
-      - emit: boom_mic_sidetone_changed
-        fields: [boom_sidetone_state, boom_sidetone_level]
-      - emit: stream_mix_changed
-        fields: [stream_main, stream_aux, stream_mic]
-      - emit: chatmix_changed
-        fields: [chatmix_game, chatmix_chat]
-      - emit: mic_noise_reduction_changed
-        fields: [mic_noise_reduction_state, mic_noise_reduction_level]
+  # `audio_settings` deliberately NOT read at startup here, unlike the base
+  # file's own copy of this same sync_read entry (base_arctis_nova_elite.yaml,
+  # inherited by Nova Elite itself — untouched here, unverified on that
+  # device, same likely defect per the identical HID_FEATURE/1036 setup).
+  #
+  # Confirmed hardware-side, not just a byte-layout bug: `apis.audio_settings
+  # .read` above requests HID_FEATURE with chunk_size 1036, but a real Omni's
+  # full USB descriptor (`lsusb -v`) shows only 2 HID interfaces total —
+  # iface 3 (the proprietary command channel actually used here, every
+  # Feature/Input/Output report capped at 63 bytes) and iface 4 (a completely
+  # unrelated standard Consumer-Control page for the inline remote's media
+  # keys, 2-byte reports). No interface anywhere near large enough for a
+  # ~171-byte struct exists on this device. GET_FEATURE on iface 3
+  # accordingly returns nothing real — just an echo of whatever SET_FEATURE
+  # last wrote. This isn't a missing chunked-read engine primitive (there'd
+  # be nothing for one to read from either); the raw spec's single-shot
+  # 1036-byte model for this whole named-slot EQ-preset family is simply not
+  # realizable on real retail hardware, likely dead/unexercised code
+  # inherited from Nova Elite's own spec and never validated by SteelSeries
+  # against actual Omni units. Tracked as [E7-S10]. Every field below still
+  # updates live via `sync_events` (already wired, unaffected by this) —
+  # only the cold-boot startup snapshot is missing for these settings.
 
 device:
   name: "SteelSeries Arctis Nova Pro Omni"

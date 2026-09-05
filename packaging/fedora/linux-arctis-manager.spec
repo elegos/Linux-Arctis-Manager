@@ -1,6 +1,6 @@
 Name:           linux-arctis-manager
 Version:        3.0.0~alpha1
-Release:        1%{?dist}
+Release:        4%{?dist}
 Summary:        SteelSeries Arctis manager for Linux
 
 License:        MIT
@@ -178,5 +178,24 @@ fi
 %{_datadir}/gnome-shell/extensions/arctis-manager@giacomofurlan.name/
 
 %changelog
+* Sat Sep 05 2026 Giacomo 'Mr. Wolf' Furlan <git@giacomofurlan.name> - 3.0.0~alpha4-4
+- Nova Pro Omni: stop reading audio_settings at startup. Confirmed on real
+  hardware its HID_FEATURE report tops out at 63 bytes, nowhere near the
+  ~171-byte struct requested (chunk_size 1036) - GET_FEATURE just echoed
+  back our own SET_FEATURE write, never real device data. Needs a proper
+  chunked read the engine doesn't have yet (tracked as E7-S10); all these
+  settings still update live via sync_events, only the cold-boot snapshot
+  is affected
+
+* Sat Sep 05 2026 Giacomo 'Mr. Wolf' Furlan <git@giacomofurlan.name> - 3.0.0~alpha4-3
+- Fix Nova Pro Omni audio_settings read: HID_FEATURE reads never armed the
+  device with the wanted command (SET_FEATURE) before reading it back
+  (GET_FEATURE), so it always returned its idle/default all-zero report
+
+* Sat Sep 05 2026 Giacomo 'Mr. Wolf' Furlan <git@giacomofurlan.name> - 3.0.0~alpha4-2
+- Fix Nova Pro Omni init hang: audio_settings.incoming was missing its
+  leading report_id field, and the sync-read reply matcher couldn't tell
+  a real reply from an unsolicited notification sharing the same report ID
+
 * Tue Aug 25 2026 Giacomo Furlan <g.furlan@accenture.com> - 3.0.0~alpha1-1
 - Initial v3 package: Rust daemon + Python Qt6 GUI, lam-cli removed
