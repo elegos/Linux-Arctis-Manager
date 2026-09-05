@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use device_config::{load, DeviceConfig};
 
 fn main() {
-    let check_only = std::env::args().any(|a| a == "--check");
+    let check_only = std::env::args().any(|a| a == "--check"); // nosemgrep: rust.lang.security.args.args — build-time CI tool flag, not a security boundary
 
     let daemon_dir = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let configs_dir = daemon_dir.join("device-configs");
