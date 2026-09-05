@@ -49,14 +49,14 @@ jobs:
             arch)
               pacman -Syu --noconfirm
               pacman -S --noconfirm --needed base-devel git sudo
-              # CachyOS's own makepkg.conf defaults CFLAGS to -march=native,
-              # correct for a real user (same machine builds and runs it),
-              # wrong here: build-pkg and install-test land on different
-              # runner VMs, so a package built with the *builder's* exact
-              # CPU features can hit SIGILL on the *installer's* CPU. Force
-              # a portable baseline for this CI verification build only —
-              # not something to change in the PKGBUILD itself, which
-              # correctly defers to the ambient system's own makepkg.conf.
+              # makepkg.conf may default CFLAGS to -march=native, correct
+              # for a real user (same machine builds and runs it), wrong
+              # here: build-pkg and install-test land on different runner
+              # VMs, so a package built with the *builder's* exact CPU
+              # features can hit SIGILL on the *installer's* CPU. Force a
+              # portable baseline for this CI verification build only — not
+              # something to change in the PKGBUILD itself, which correctly
+              # defers to the ambient system's own makepkg.conf.
               sed -i 's/-march=native/-march=x86-64/' /etc/makepkg.conf
               useradd -m builder
               echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
@@ -67,17 +67,6 @@ jobs:
               cp packaging/arch/lam.install /home/builder/pkgbuild/lam.install
               # Arch pkgver can't contain '-'
               PKGVER=$(echo "$VERSION_RAW" | sed 's/-//g')
-              # Arch Linux and CachyOS share this exact PKGBUILD (same
-              # pkgname/pkgver/pkgrel), so their built filenames would
-              # otherwise collide byte-for-byte — harmless for install-test
-              # (separate artifacts per slug already) but fatal for a
-              # release, which needs every asset filename unique. Tag the
-              # CachyOS build's pkgver instead of touching pkgname (would
-              # ripple into provides=/conflicts=) — '_' is a legal pkgver
-              # character, '-' is not.
-              if [ "${{ matrix.slug }}" = "cachyos" ]; then
-                PKGVER="${PKGVER}_cachyos"
-              fi
               sed -i "s/^pkgver=.*/pkgver=${PKGVER}/" /home/builder/pkgbuild/PKGBUILD
               chown -R builder:builder /home/builder
 
