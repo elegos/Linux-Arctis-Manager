@@ -8,39 +8,18 @@ jobs:
   build-pkg:
     uses: ./.github/workflows/build-pkg.yaml
 
-  # CachyOS install-test disabled: flaky on GH-hosted runners (lam-daemon
-  # SIGILL on some, not all, runner instances — see removed diagnostic step's
-  # findings), not a real packaging issue. Re-enable once GH's runner fleet is
-  # consistent or the flakiness is otherwise root-caused.
-  #
-  # `matrix.exclude` can't do this: it only matches combinations generated
-  # from array-valued matrix keys, and this matrix has none (only `include`),
-  # so a plain `exclude: [{slug: cachyos}]` fails with "Matrix exclude key
-  # 'slug' does not match any key within the matrix". Filter the JSON instead.
-  filter-install-test-matrix:
-    needs: build-pkg
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.filter.outputs.matrix }}
-    steps:
-      - id: filter
-        env:
-          MATRIX_JSON: ${{ needs.build-pkg.outputs.matrix }}
-        run: |
-          echo "matrix=$(jq -c '[.[] | select(.slug != "cachyos")]' <<< "$MATRIX_JSON")" >> "$GITHUB_OUTPUT"
-
   # Installs the artifact from build-pkg on a *fresh* instance of the same
   # image via the distro's own package manager — this is the step that
   # actually resolves depends=/Requires:/Depends: against that distro's
   # repos, catching a missing or wrong runtime dependency declaration.
   install-test:
-    needs: filter-install-test-matrix
+    needs: build-pkg
     runs-on: ubuntu-latest
 
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJson(needs.filter-install-test-matrix.outputs.matrix) }}
+        include: ${{ fromJson(needs.build-pkg.outputs.matrix) }}
 
     container:
       image: ${{ matrix.image }}
@@ -59,14 +38,14 @@ jobs:
           set -e
           case "${{ matrix.family }}" in
             arch)
-              # CachyOS's pacman sandboxes install-scriptlet execution in an
-              # isolated network namespace; Docker's default container
-              # capabilities can't create one ("could not isolate the
-              # network: Operation not permitted"), so it refuses to run
-              # lam.install's post_install (the setcap step) at all instead
-              # of proceeding unsandboxed. A real CachyOS machine has normal
-              # namespace support and never hits this — CI-only workaround,
-              # not something to weaken in the package itself.
+              # pacman sandboxes install-scriptlet execution in an isolated
+              # network namespace; Docker's default container capabilities
+              # can't create one ("could not isolate the network: Operation
+              # not permitted"), so it refuses to run lam.install's
+              # post_install (the setcap step) at all instead of proceeding
+              # unsandboxed. A real machine has normal namespace support and
+              # never hits this — CI-only workaround, not something to
+              # weaken in the package itself.
               if ! grep -q '^DisableSandboxNetwork' /etc/pacman.conf; then
                 sed -i '/^\[options\]/a DisableSandboxNetwork' /etc/pacman.conf
               fi
