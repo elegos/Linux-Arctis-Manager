@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Collects a support bundle for Linux Arctis Manager bug reports: system/
 # package info, the daemon's live D-Bus state, systemd unit status, recent
-# logs, connected SteelSeries HID device descriptors, and the daemon's own
-# (non-secret) config files.
+# logs, PipeWire audio routing (sinks/sink-inputs/loopback modules), connected
+# SteelSeries HID device descriptors, and the daemon's own (non-secret) config
+# files.
 #
 # Cross-distro: never installs anything, only checks whether each tool
-# (lsusb, udevadm, busctl/gdbus, hid-recorder, rpm/dpkg/pacman) is present
-# and skips that section with a note if it's missing.
+# (lsusb, udevadm, busctl/gdbus, hid-recorder, pactl/wpctl, rpm/dpkg/pacman)
+# is present and skips that section with a note if it's missing.
 # Cross-device: doesn't hardcode a PID — enumerates every /dev/hidraw* node
 # under SteelSeries' vendor ID (0x1038) it finds.
 #
@@ -122,6 +123,27 @@ if have journalctl; then
     run "lam-hidraw-helper.service log" journalctl --user --no-pager -n 1000 -u lam-hidraw-helper.service
 else
     missing "journalctl" "systemd"
+fi
+
+# ── PipeWire / audio routing ─────────────────────────────────────────────────
+# Needed for anything chatmix/redirect/EQ-audible related: the daemon only
+# ever adjusts its own virtual sinks (Arctis_Media/Arctis_Chat) — whether that
+# change is actually heard depends on whether those sinks exist, have live
+# loopbacks to a real output, and are the system's default sink.
+section "PipeWire / audio routing"
+if have pactl; then
+    run "server info (default sink/source)" pactl info
+    run "sinks (Arctis_* virtual sinks + physical outputs)" pactl list sinks
+    run "sink-inputs (which sink each app is actually playing through)" pactl list sink-inputs
+    run "loopback/null-sink modules (module-loopback, module-null-sink)" bash -c \
+        "pactl list modules | grep -A2 -E 'Name: module-(loopback|null-sink)'"
+else
+    missing "pactl" "pulseaudio-utils / pipewire-pulse"
+fi
+if have wpctl; then
+    run "wpctl status (PipeWire graph overview)" wpctl status
+else
+    missing "wpctl" "wireplumber"
 fi
 
 # ── Connected SteelSeries devices ────────────────────────────────────────────
