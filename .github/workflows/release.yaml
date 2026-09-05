@@ -36,14 +36,37 @@ jobs:
         with:
           path: pkg
 
+      # Debug symbol packages (makepkg's auto-split "-debug-*" pkg.tar.zst,
+      # dpkg's auto-generated "*-dbgsym_*.deb"; rpm's debuginfo/debugsource
+      # are already dropped in build-pkg.yaml) aren't something end users
+      # install. Source packages (rpm SRPM, a debian source upload's
+      # .dsc/.orig.tar.*/.debian.tar.*) are redundant with the tag's own
+      # source archive GitHub already offers on every release.
+      - name: Drop debug and source packages from release assets
+        run: |
+          set -e
+          find pkg -type f \
+            ! -iname '*-debug-*.pkg.tar.zst' \
+            ! -iname '*dbgsym*.deb' \
+            ! -iname '*debuginfo*' \
+            ! -iname '*debugsource*' \
+            ! -iname '*.src.rpm' \
+            ! -iname '*.src.tar.*' \
+            ! -iname '*.dsc' \
+            ! -iname '*.orig.tar.*' \
+            ! -iname '*.debian.tar.*' \
+            ! -iname '*_source.changes' \
+            -print0 > /tmp/release-assets.list
+
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -e
+          mapfile -d '' -t ASSETS < /tmp/release-assets.list
           gh release create "${{ github.ref_name }}" \
             --repo "${{ github.repository }}" \
             --title "${{ github.ref_name }}" \
             --draft \
             --notes-file /tmp/release-notes.md \
-            pkg/*/*
+            "${ASSETS[@]}"
