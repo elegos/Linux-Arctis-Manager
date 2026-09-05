@@ -78,7 +78,7 @@ fn find_site_packages(venv_dir: &Path) -> Option<PathBuf> {
 /// dev `cargo run` build) — export needs `main.py`'s actual install to find
 /// the `linux_arctis_manager` package.
 pub fn main_site_packages() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
+    let exe = std::env::current_exe().ok()?; // nosemgrep: rust.lang.security.current-exe.current-exe — path lookup for locating the install layout, not a security decision
     let bin_dir = exe.parent()?;
     find_site_packages(&main_venv_dir(bin_dir))
 }
@@ -351,7 +351,7 @@ mod tests {
         // way through, and the shim must keep "hiding" system deps for the
         // `after` check to actually prove the ai_env (not PATH) is what's
         // now satisfying it.
-        unsafe {
+        unsafe { // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
             std::env::set_var("PATH", format!("{}:{old_path}", shim_dir.display()));
             std::env::set_var("XDG_DATA_HOME", tmp.path().join("data"));
         }
@@ -370,7 +370,7 @@ mod tests {
             None
         };
 
-        unsafe {
+        unsafe { // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
             std::env::set_var("PATH", &old_path);
             std::env::remove_var("XDG_DATA_HOME");
         }

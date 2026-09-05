@@ -139,7 +139,8 @@ mod tests {
         // is connected and bidirectional I/O works.
         nix::unistd::write(&harness_fd, b"ping").unwrap();
 
-        let mut engine_file = unsafe { std::fs::File::from_raw_fd(engine_fd) };
+        // SAFETY: engine_fd was just received via SCM_RIGHTS, which transfers ownership to us.
+        let mut engine_file = unsafe { std::fs::File::from_raw_fd(engine_fd) }; // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
         let mut resp = [0u8; 4];
         engine_file.read_exact(&mut resp).unwrap();
         assert_eq!(&resp, b"ping");
@@ -188,7 +189,8 @@ mod tests {
             let tag = [i];
             nix::unistd::write(&harness_fd, &tag).unwrap();
             let mut got = [0u8; 1];
-            let mut f = unsafe { std::fs::File::from_raw_fd(engine_fd) };
+            // SAFETY: engine_fd was just received via SCM_RIGHTS, which transfers ownership to us.
+            let mut f = unsafe { std::fs::File::from_raw_fd(engine_fd) }; // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
             f.read_exact(&mut got).unwrap();
             assert_eq!(got[0], i);
         }

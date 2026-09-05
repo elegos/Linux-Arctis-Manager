@@ -403,7 +403,8 @@ mod tests {
 
         assert_eq!(data_buf[0], 0x01);
 
-        let mut received_file = unsafe { std::fs::File::from_raw_fd(received_fd) };
+        // SAFETY: received_fd was just received via SCM_RIGHTS, which transfers ownership to us.
+        let mut received_file = unsafe { std::fs::File::from_raw_fd(received_fd) }; // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
         let mut content = String::new();
         received_file.read_to_string(&mut content).unwrap();
         assert_eq!(content, "hello");

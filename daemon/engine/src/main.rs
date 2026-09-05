@@ -653,7 +653,7 @@ fn chatmix_from_events(events: &[EmitEvent]) -> (Option<u8>, Option<u8>) {
 #[tokio::main]
 async fn main() {
     // Accept --log-level=<level> or --log-level <level>; falls back to RUST_LOG, then "info".
-    let log_level = std::env::args()
+    let log_level = std::env::args() // nosemgrep: rust.lang.security.args.args — CLI flag parsing, not a security boundary
         .collect::<Vec<_>>()
         .windows(2)
         .find_map(|w| {
