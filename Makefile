@@ -54,6 +54,18 @@ GNOME_EXT_DEST_DIR  := $(DATADIR)/gnome-shell/extensions/$(GNOME_EXT_ID)
 # ── Build tools ────────────────────────────────────────────────────────────────
 CARGO            ?= cargo
 UV               ?= uv
+
+# Canonical python3 path, not whatever alias PATH happens to resolve first.
+# `python3 -m venv` bakes the literal path it was invoked as into the venv's
+# interpreter symlink, unresolved. On merged-/usr systems /usr/sbin is a
+# symlink to /usr/bin, so `/usr/sbin/python3` (which PATH lists first: see
+# /etc/profile's sbin-before-bin order) is harmless there — but on a
+# non-merged system (an install upgraded from before Fedora's UsrMove, still
+# carrying a real separate /usr/sbin) that path doesn't exist, so a venv
+# built in a merged-/usr container ships a dangling symlink on install.
+# readlink -f collapses that to the real /usr/bin/python3.X, which exists
+# identically either way.
+PYTHON3 ?= $(shell readlink -f $$(command -v python3))
 CONTAINER_ENGINE ?= $(shell command -v podman 2>/dev/null || echo docker)
 
 # ── Container build variables ──────────────────────────────────────────────────
@@ -198,7 +210,7 @@ sync-version:
 # system-wide `uv` binary — unaffected by this.
 install-python: generate-gui-wrapper sync-version
 	install -dm755 $(DESTDIR)$(dir $(VENVDIR))
-	python3 -m venv --clear $(DESTDIR)$(VENVDIR)
+	$(PYTHON3) -m venv --clear $(DESTDIR)$(VENVDIR)
 	# activate/activate.{csh,fish,nu,bat} bake in an absolute VIRTUAL_ENV path
 	# at creation time (here, the DESTDIR buildroot) and are never sourced —
 	# lam-gui invokes $(VENVDIR)/bin/python3 directly. Left in place, rpmbuild's
