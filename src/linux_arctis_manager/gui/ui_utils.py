@@ -2,7 +2,6 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import defusedxml.ElementTree as DET
-
 from PySide6 import QtSvg
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPainter, QPalette, QPixmap
