@@ -1,4 +1,3 @@
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import defusedxml.ElementTree as DET
@@ -19,7 +18,7 @@ def get_icon_pixmap(icon_path: Path = ICON_PATH, color: QPalette.ColorRole = QPa
     for path in xml_root.findall('.//{http://www.w3.org/2000/svg}path'):
         path.set('fill', brush_color.name())
 
-    xml_str = ET.tostring(xml_root)
+    xml_str = DET.tostring(xml_root)
 
     svg_renderer = QtSvg.QSvgRenderer(xml_str)
 
