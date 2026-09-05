@@ -622,21 +622,20 @@ sync_read:
       - {emit: oled_screen_saver_mode_changed,  field: oled_screen_saver_mode}
       - {emit: home_screen_option_changed,      field: home_screen_option}
 
-  - struct: audio_settings
-    maps:
-      - {emit: mic_volume_changed,       field: mic_volume}
-      - {emit: volume_limiter_changed,   field: volume_limiter, display_type: on_off}
-      - {emit: line_out_mode_changed,    field: line_out_mode}
-      - {emit: station_volume_changed,   field: station_volume, display_type: percentage}
-      - {emit: surround_changed,         field: surround_mode,  display_type: on_off}
-      - emit: boom_mic_sidetone_changed
-        fields: [boom_sidetone_state, boom_sidetone_level]
-      - emit: on_ear_sidetone_changed
-        fields: [on_ear_sidetone_state, on_ear_sidetone_level]
-      - emit: stream_mix_changed
-        fields: [stream_main, stream_aux, stream_mic]
-      - emit: chatmix_changed
-        fields: [chatmix_game, chatmix_chat]
+  # `audio_settings` deliberately NOT read at startup: confirmed on real
+  # Nova Elite hardware (user report, daemon stuck forever logging "headset
+  # not ready, waiting for wireless event" — device_init's sync_read for
+  # this struct never returns) to be the exact same defect already
+  # documented and fixed for Nova Pro Omni's own copy of this struct (see
+  # nova_pro_omni.yaml). `apis.audio_settings.read` above requests
+  # HID_FEATURE with chunk_size 1036, but every other report on this
+  # device's command interface is capped at 64 bytes (chunk_size: 64
+  # throughout this file) — there is no interface on this family sized for
+  # a ~171-byte struct, so the 1036-byte single-shot model for this
+  # named-slot EQ-preset family (inherited from the same raw spec as Omni)
+  # is not realizable here either. Tracked as [E7-S10], same as Omni. Every
+  # field below still updates live via `sync_events` (already wired,
+  # unaffected by this) — only the cold-boot startup snapshot is missing.
 
 lifecycle:
   init:
