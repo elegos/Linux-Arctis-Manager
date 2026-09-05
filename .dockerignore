@@ -1,0 +1,41 @@
+# Keep container build contexts pristine: any host-generated artifact here
+# rides into the image with its mtime preserved, so make's file-based rules
+# (e.g. generate-gui-wrapper) see it as already up to date and skip
+# regenerating it — shipping whatever LIBDIR/config the *host* build used
+# instead of the container's. Mirrors .gitignore's generated-artifacts list,
+# plus VCS/editor cruft that has no business in a build context either.
+.git/
+
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Code coverage reports
+.coverage
+
+# Rust build artifacts
+daemon/target/
+
+# Decoded proprietary SteelSeries device specs (reverse-engineering source material)
+decoded-device-specifications.tar.gz
+decoded-device-specifications/
+
+# Generated packaging scripts (produced by make generate-gui-wrapper)
+packaging/scripts/lam-gui
+packaging/systemd/user/lam-hidraw-helper.service
+packaging/systemd/user/lam-daemon.service
+
+# Plasma widget's bundled translation modules (produced by make generate-plasmoid-lang)
+packaging/plasma6/name.giacomofurlan.arctismanager/contents/code/lang/
+
+# Container base image sentinels (produced by make container-build-*)
+.container-base-fedora
+.container-base-debian
+.container-base-arch
