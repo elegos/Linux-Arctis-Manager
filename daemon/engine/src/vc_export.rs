@@ -351,7 +351,8 @@ mod tests {
         // way through, and the shim must keep "hiding" system deps for the
         // `after` check to actually prove the ai_env (not PATH) is what's
         // now satisfying it.
-        unsafe { // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
+        // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
+        unsafe {
             std::env::set_var("PATH", format!("{}:{old_path}", shim_dir.display()));
             std::env::set_var("XDG_DATA_HOME", tmp.path().join("data"));
         }
@@ -370,7 +371,8 @@ mod tests {
             None
         };
 
-        unsafe { // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
+        // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
+        unsafe {
             std::env::set_var("PATH", &old_path);
             std::env::remove_var("XDG_DATA_HOME");
         }

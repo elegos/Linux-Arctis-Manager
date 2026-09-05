@@ -93,13 +93,15 @@ fn preload_cudnn() {
     // running its static initializers, same trust boundary as `ort` itself
     // loading `libonnxruntime.so` (and, transitively, this same cuDNN) a few
     // lines below.
-    if unsafe { libloading::Library::new("libcudnn.so.9") }.is_ok() { // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
+    // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
+    if unsafe { libloading::Library::new("libcudnn.so.9") }.is_ok() {
         return; // already resolvable via the standard search — nothing to do
     }
     let Some(path) = crate::vc_onnxruntime_detect::find_libcudnn() else {
         return;
     };
-    match unsafe { libloading::Library::new(&path) } { // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
+    // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
+    match unsafe { libloading::Library::new(&path) } {
         Ok(lib) => {
             tracing::info!(
                 "preloaded cuDNN from {} for the CUDA execution provider",
