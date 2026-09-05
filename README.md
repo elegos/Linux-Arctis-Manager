@@ -205,6 +205,7 @@ rm -rf ~/.config/arctis_manager
 - [Voice Changer](docs/voice-changing-feature.md) — usage and architecture
 - [Wireshark tutorial](https://www.youtube.com/watch?v=zWbdnHwTr3M)
 - [Migrating from v2 to v3](docs/migration-v2-to-v3.md)
+- [Release & distribution pipeline](docs/release-pipeline.md) — versioning/channels, the COPR/PPA/OBS publishing design, and the manual setup checklist
 
 ## ⚠️ Troubleshooting
 
