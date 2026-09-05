@@ -57,7 +57,26 @@ jobs:
               ;;
             deb)
               apt-get update
-              DEBIAN_FRONTEND=noninteractive apt-get install -y /pkg/*.deb
+
+              # linux-arctis-manager-gnome-extension needs gnome-shell >=45;
+              # older distro repos (e.g. Debian oldstable) simply don't
+              # carry that version, so apt can never satisfy the Depends —
+              # a real, correct dependency-resolution failure, not a
+              # packaging bug. Skip installing that one package in that
+              # case rather than failing the whole distro's install test.
+              pkgs=(/pkg/*.deb)
+              ext_pkg=$(ls /pkg/*gnome-extension*.deb 2>/dev/null || true)
+              if [ -n "$ext_pkg" ]; then
+                gs_ver="$(apt-cache policy gnome-shell | awk '/Candidate:/{print $2}')"
+                if [ -z "$gs_ver" ] || [ "$gs_ver" = "(none)" ] || ! dpkg --compare-versions "$gs_ver" ge 45; then
+                  echo "Skipping $ext_pkg: repo's gnome-shell ($gs_ver) is older than the >=45 it depends on"
+                  pkgs=()
+                  for p in /pkg/*.deb; do
+                    [ "$p" = "$ext_pkg" ] || pkgs+=("$p")
+                  done
+                fi
+              fi
+              DEBIAN_FRONTEND=noninteractive apt-get install -y "${pkgs[@]}"
               ;;
           esac
 
