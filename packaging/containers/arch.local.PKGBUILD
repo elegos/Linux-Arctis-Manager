@@ -37,6 +37,7 @@ package_linux-arctis-manager-lang() {
     pkgdesc="Standalone translation files for linux-arctis-manager"
     # No compiled code in this one — same package for every arch.
     arch=('any')
+    depends=('linux-arctis-manager')
 
     cd /home/builder/source
     make install-lang PREFIX=/usr DESTDIR="$pkgdir"

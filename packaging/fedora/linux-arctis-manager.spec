@@ -66,6 +66,11 @@ equalizer settings, sidetone, ANC, LED profiles, and more.
 %package lang
 Summary:        Standalone translation files for %{name}
 BuildArch:      noarch
+# Not needed by the main package itself (see below), but useless without one
+# of the UI shells, both of which already Require %{name} — depending on it
+# here too ties this package's removal to the main package's, same as those
+# shells, instead of being left behind as an untracked orphan.
+Requires:       %{name} = %{version}-%{release}
 
 %description lang
 Translation files for %{name}'s non-Python UI shells (the KDE Plasma widget,

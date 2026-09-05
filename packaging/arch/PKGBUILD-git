@@ -36,6 +36,7 @@ package_linux-arctis-manager-lang-git() {
     pkgdesc="Standalone translation files for linux-arctis-manager — git build from main"
     # No compiled code in this one — same package for every arch.
     arch=('any')
+    depends=('linux-arctis-manager-git')
     provides=('linux-arctis-manager-lang')
     conflicts=('linux-arctis-manager-lang')
 

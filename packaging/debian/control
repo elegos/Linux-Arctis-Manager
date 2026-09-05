@@ -31,7 +31,8 @@ Description: SteelSeries Arctis manager for Linux
 
 Package: linux-arctis-manager-lang
 Architecture: all
-Depends: ${misc:Depends}
+Depends: ${misc:Depends},
+         linux-arctis-manager
 Description: Standalone translation files for linux-arctis-manager
  Translation files for linux-arctis-manager's non-Python UI shells (the KDE
  Plasma widget, the GNOME Shell extension) — a standalone copy outside the
