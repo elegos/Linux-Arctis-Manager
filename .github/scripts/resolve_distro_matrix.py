@@ -6,12 +6,15 @@ top 10 (see the comment block below) intersected with "has an image we can
 actually trust in CI" — some of the top 10 have no official/maintained
 container image at all and are skipped, noted here rather than silently.
 
-The *version* of each versioned distro (Fedora, Ubuntu, Linux Mint) is
-resolved dynamically against endoflife.date at run time, the same idea as
+The *version* of each versioned distro (Debian, Fedora, Ubuntu, Linux Mint)
+is resolved dynamically against endoflife.date at run time, the same idea as
 an install script checking "what's currently supported" instead of a
-maintainer hand-updating version numbers every release. Debian ships its
-own floating stable/oldstable tags, so no lookup is needed there. Rolling
-distros (Arch, Bazzite) have no "version" to resolve at all.
+maintainer hand-updating version numbers every release. Debian's own
+"stable"/"oldstable" Docker tags already float to the right image without
+a lookup, but the lookup is still used to label the matrix entry (and thus
+the slug and package filenames) with the actual codename — e.g. "trixie" —
+rather than the relative "stable"/"oldstable" name. Rolling distros (Arch,
+Bazzite) have no "version" to resolve at all.
 
 Each entry also carries a `family` (arch/rpm/deb — which packaging recipe
 and native package manager applies) and a `slug` (artifact-name-safe id),
@@ -95,6 +98,27 @@ def _released_non_eol(cycles: list[dict]) -> list[dict]:
     return out
 
 
+def resolve_debian() -> list[dict]:
+    # Debian's own "stable"/"oldstable" Docker tags already float to
+    # whichever release currently holds that title, so the image reference
+    # itself needs no lookup. But endoflife.date's `eol` field reflects
+    # Debian's own five-year non-LTS window, which the *previous* release
+    # (oldstable) has typically already passed by the time it's superseded
+    # — Debian keeps the "oldstable" pointer on it regardless, via LTS/ELTS
+    # support — so unlike the other resolvers this doesn't filter by eol at
+    # all: "stable" is simply the most-recently-released cycle, "oldstable"
+    # the one before it.
+    cycles = [
+        c for c in _fetch_json("https://endoflife.date/api/debian.json")
+        if (released := _parse_date(c.get("releaseDate"))) is not None and released <= _today()
+    ]
+    cycles.sort(key=lambda c: _parse_date(c["releaseDate"]), reverse=True)
+    return [
+        _entry(f"Debian {c['codename']}", f"debian:{tag}-slim", "deb")
+        for tag, c in zip(("stable", "oldstable"), cycles)
+    ]
+
+
 def resolve_fedora() -> list[dict]:
     cycles = _released_non_eol(_fetch_json("https://endoflife.date/api/fedora.json"))
     cycles.sort(key=lambda c: int(c["cycle"]), reverse=True)
@@ -139,10 +163,6 @@ def resolve_linuxmint() -> list[dict]:
 
 def static_entries() -> list[dict]:
     return [
-        # Debian tracks its own current stable/oldstable via floating tags —
-        # no version lookup needed on our side.
-        _entry("Debian (stable)", "debian:stable-slim", "deb"),
-        _entry("Debian (oldstable)", "debian:oldstable-slim", "deb"),
         # Rolling / atomic — no versioned releases to resolve.
         _entry("Arch Linux", "archlinux:latest", "arch"),
     ]
@@ -150,7 +170,7 @@ def static_entries() -> list[dict]:
 
 def main() -> int:
     matrix = static_entries()
-    for resolver in (resolve_fedora, resolve_ubuntu, resolve_linuxmint):
+    for resolver in (resolve_debian, resolve_fedora, resolve_ubuntu, resolve_linuxmint):
         try:
             matrix.extend(resolver())
         except Exception as e:  # network hiccup, API shape change, ...
