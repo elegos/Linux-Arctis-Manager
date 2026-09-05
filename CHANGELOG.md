@@ -50,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Packaged systemd user services (`lam-daemon.service`, `lam-hidraw-helper.service`) could ship with a stale hardcoded `/usr/local` `ExecStart` path instead of the package's actual install prefix (`/usr`), if a leftover generated unit file from a prior local `make install` was picked up by the packaging build; the generation rule now always reruns instead of trusting file timestamps.
 - `linux-arctis-manager-lang` now depends on `linux-arctis-manager` (rpm/deb/Arch), so uninstalling the main package always removes it too instead of leaving it behind as an orphan.
 - The bundled Python venv's `python3` could be a dangling symlink on install (`lam-gui: ... File o directory non esistente`), on any system whose `/usr/sbin` isn't a symlink to `/usr/bin` (e.g. installs predating Fedora's `/usr`-merge): the RPM build container resolves plain `python3` to `/usr/sbin/python3` first (PATH order), and `python3 -m venv` bakes that unresolved path in verbatim. `make install-python` now resolves `python3` to its canonical, real path before creating the venv.
+- The tray icon's SVG is now parsed with `defusedxml` instead of the stdlib `xml` module (XXE hardening flagged by code scanning; the icon is a bundled local asset, but the fix removes the risk class outright instead of relying on a suppression comment).
 
 ## [2.4.1]
 
