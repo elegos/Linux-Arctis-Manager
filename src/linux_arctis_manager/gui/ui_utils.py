@@ -1,6 +1,8 @@
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+import defusedxml.ElementTree as DET
+
 from PySide6 import QtSvg
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPainter, QPalette, QPixmap
@@ -11,7 +13,7 @@ ICON_PATH = Path(__file__).parent / 'images' / 'steelseries_logo.svg'
 def get_icon_pixmap(icon_path: Path = ICON_PATH, color: QPalette.ColorRole = QPalette.ColorRole.Text) -> QPixmap:
     brush_color = QApplication.palette().color(color)
 
-    xml_tree = ET.parse(icon_path.absolute().as_posix())  # nosec B314 — nosemgrep: python.lang.security.use-defused-xml-parse.use-defused-xml-parse — input is a bundled local SVG asset, not user-supplied
+    xml_tree = DET.parse(icon_path.absolute().as_posix())
     xml_root = xml_tree.getroot()
 
     for path in xml_root.findall('.//{http://www.w3.org/2000/svg}path'):
