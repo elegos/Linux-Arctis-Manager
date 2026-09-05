@@ -14,6 +14,7 @@ def get_icon_pixmap(icon_path: Path = ICON_PATH, color: QPalette.ColorRole = QPa
 
     xml_tree = DET.parse(icon_path.absolute().as_posix())
     xml_root = xml_tree.getroot()
+    assert xml_root is not None
 
     for path in xml_root.findall('.//{http://www.w3.org/2000/svg}path'):
         path.set('fill', brush_color.name())
