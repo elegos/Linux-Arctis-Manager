@@ -71,13 +71,23 @@ device:
   name: "SteelSeries Arctis Nova 7"
   vendor_id: 0x1038
 
-  # NOTE ON command_interface/sync_interface: same discrepancy pattern as
-  # Nova 5/Arctis 7+ — the raw spec only declares a sync interface (5,
-  # usage-page 0xFF00), never a command interface. v2 (real hardware, PyUSB)
-  # found command_interface_index [0, 3] (interface 3) and only ever
-  # listened on interface 3, not 5. Trusting v2 fully here (command AND sync
-  # both on 3), same call made for Arctis 7+. Wants confirming on real
-  # hardware.
+  # sync_interface CONFIRMED as 5, not 3 (2026-09-06) — this note used to say
+  # "trusting v2 [interface 3] ... wants confirming on real hardware"; that's
+  # now resolved. A GitHub bug report against nova_7_gen2.yaml's sibling PID
+  # 0x22A1 showed device_init hanging forever with zero async notifications
+  # ever received on interface 3, despite the headset being confirmably
+  # connected (audio played through it the whole time) — matching the
+  # decoded vendor spec's `(sync-interface 0xff00 0x0001 5)` directive and
+  # the reporter's own hid-descriptor capture (interface 5, usage-page
+  # 0xFF00, present on the real device). Re-checked every Nova 7 family raw
+  # spec file (all 15 TX variants: gen1/gen2/upgrade × standard/7X/7P/WoW/
+  # Diablo IV/White) — every single one declares the identical `sync-
+  # interface ... 5`, zero exceptions, so this isn't a per-SKU quirk to
+  # re-verify per variant. v2's "always 3" was already weak evidence here:
+  # it polls every ~300ms unconditionally and never depended on catching a
+  # real unsolicited wake event (no such concept exists in its
+  # architecture), so it never actually tested whether interface 3 carries
+  # spontaneous notifications for this family. See [[project-v3-device-import]].
   variants:
     - product_id: 0x2202
       name: "Arctis Nova 7"
@@ -101,7 +111,7 @@ device:
     command_interface:
       interface: 3
     sync_interface:
-      interface: 3
+      interface: 5
 
   capabilities:
     - battery

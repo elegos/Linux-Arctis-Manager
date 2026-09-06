@@ -16,9 +16,25 @@ device:
   name: "SteelSeries Arctis Nova 7 (Gen 2 protocol)"
   vendor_id: 0x1038
 
-  # See nova_7.yaml for the command_interface/sync_interface note — same
-  # family, same v2-vs-spec interface discrepancy (v2's gen2 config uses the
-  # identical [0, 3] / [3] interface numbers as its gen1 config).
+  # sync_interface CONFIRMED as 5, not 3 — unlike nova_7.yaml's still-open
+  # "trusting v2 over spec" note, this one has real-hardware evidence: a
+  # GitHub bug report (PID 0x22A1, real device) showed device_init hanging
+  # forever with zero async notifications ever received on interface 3, even
+  # though the headset was confirmably connected (audio played fine through
+  # it the whole time). The reporter's own hid-descriptor capture confirms
+  # interface 5 exists with usage-page 0xFF00 — exactly matching the decoded
+  # vendor spec's `(sync-interface 0xff00 0x0001 5)` directive for this PID.
+  # v2 never actually validates its "listens on 3 only" choice for this
+  # family either (its `nova_7_wireless_perc_battery.yaml` is gen1's protocol
+  # replayed against gen2 hardware, see [[project-v3-device-import]]) and its
+  # polling loop doesn't depend on catching a real async wake event the way
+  # v3's reconnect loop does, so it was never good evidence here. Same fix
+  # applied to nova_7.yaml (gen1) and nova_7p.yaml — every Nova 7 family raw
+  # spec file (all 15 TX variants) declares the identical sync-interface 5,
+  # zero per-SKU exceptions, so this isn't a gen2-specific finding. The
+  # separate Arctis 7+ family (arctis_7_plus.yaml et al, different base
+  # protocol) shows the same pattern but was NOT changed — no equivalent
+  # real-hardware confirmation for that family yet.
   variants:
     - product_id: 0x227E
       name: "Arctis Nova 7 Gen 2"
@@ -54,7 +70,7 @@ device:
     command_interface:
       interface: 3
     sync_interface:
-      interface: 3
+      interface: 5
 
   capabilities:
     - battery

@@ -60,7 +60,10 @@ device:
   vendor_id: 0x1038
 
   # See nova_7.yaml for the command_interface/sync_interface note — same
-  # family, same v2-vs-spec interface discrepancy.
+  # family, now CONFIRMED as sync_interface 5 (real-hardware bug report
+  # against sibling PID 0x22A1, cross-checked against every Nova 7 family
+  # raw spec file — all declare identical sync-interface 5, no per-SKU
+  # exception, including this 7P tier).
   variants:
     - product_id: 0x220A
       name: "Arctis Nova 7P"
@@ -72,7 +75,7 @@ device:
     command_interface:
       interface: 3
     sync_interface:
-      interface: 3
+      interface: 5
 
   capabilities:
     - battery

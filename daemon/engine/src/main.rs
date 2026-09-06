@@ -39,10 +39,11 @@ use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
 use device_config::codec::FieldValue;
-use device_config::sync_dispatcher::{EmitEvent, EventValue};
+use device_config::sync_dispatcher::{EmitEvent, EventValue, SyncDispatcher};
 use device_config::DeviceConfig;
 use device_session::DeviceSession;
 use engine_error::EngineError;
+use hid_transport::{HidTransport, ReadError};
 use hotplug::DeviceInfo;
 use state::{AppState, DeviceCommand, DeviceEntry, SignalEvent};
 
@@ -307,6 +308,15 @@ async fn run_device(
             }
         };
 
+        // Some device families (e.g. Nova 7 Gen2) declare a `sync_interface`
+        // distinct from their `command_interface`: unsolicited notifications
+        // (wireless-connection-changed, chatmix dial turns, ...) arrive on a
+        // second HID interface the command channel never sees. Open it once
+        // per reconnect attempt, alongside the command fd, so both the
+        // reactive device_init wait below and the ongoing event loop can read
+        // from the interface that actually carries these reports.
+        let mut sync_transport = open_sync_transport(&config, info.pid, &helper_sock).await;
+
         // Inner loop: keep the fd open and wait reactively for the headset.
         // On timeout (headset off) we listen for any async HID event from the
         // dongle instead of sleeping; the wireless-connection-changed report
@@ -326,8 +336,24 @@ async fn run_device(
                     // any async notification (typically 0xB5 wireless-connection-
                     // changed when the headset powers on).  This is reactive:
                     // we wake the moment the dongle speaks, not on a timer.
+                    // When a distinct sync interface is open, wait on THAT fd
+                    // instead — the command interface never carries these
+                    // unsolicited reports for these device families.
                     info!("headset not ready, waiting for wireless event on {path_str}...");
-                    match session.read_any_report(Duration::from_secs(30)).await {
+                    let wake = match sync_transport.as_mut() {
+                        Some(t) => t
+                            .read_interrupt(Duration::from_secs(30))
+                            .await
+                            .map_err(|e| match e {
+                                ReadError::Io(io_e) => EngineError::Io(io_e),
+                                ReadError::Timeout => EngineError::Io(std::io::Error::new(
+                                    std::io::ErrorKind::TimedOut,
+                                    "sync-interface wait timed out",
+                                )),
+                            }),
+                        None => session.read_any_report(Duration::from_secs(30)).await,
+                    };
+                    match wake {
                         Ok(report) => {
                             debug!(
                                 "async event received (cmd={:#04x}), retrying device_init",
@@ -468,6 +494,13 @@ async fn run_device(
             Arc::clone(&audio_shared),
         ));
 
+        // If a distinct sync interface is open, keep draining it for the
+        // lifetime of this connection too, feeding its dispatched events into
+        // the same channel `forward_events` above already consumes.
+        let sync_listener = sync_transport
+            .take()
+            .map(|t| tokio::spawn(run_sync_listener(t, Arc::clone(&config), event_tx.clone())));
+
         match session.run_event_loop_with_commands(event_tx, cmd_rx).await {
             Err(EngineError::Io(ref io_e))
                 if io_e.kind() == std::io::ErrorKind::UnexpectedEof
@@ -479,12 +512,118 @@ async fn run_device(
             Ok(()) => info!("headset disconnected: {friendly_name}"),
         }
 
+        if let Some(h) = sync_listener {
+            h.abort();
+        }
+
         // Tear down any sinks still alive (e.g. hidraw EOF while headset was on).
         if let Some(setup) = audio_shared.lock().await.take() {
             audio::teardown_sinks(setup).await;
         }
 
         tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
+
+/// Open the device's `sync_interface` hidraw node, when the config declares
+/// one distinct from its `command_interface`. Returns `None` for every device
+/// that doesn't (the common case — most families answer and notify on the
+/// same interface), so callers can treat it as "nothing extra to do".
+///
+/// The raw SteelSeries spec only ever states this as a *different* interface
+/// from the implicit command one when the device genuinely splits its wire
+/// protocol that way; the command interface's own fd never carries these
+/// reports for those devices; see [[project-v3-device-import]] for how this
+/// was discovered (Nova 7 Gen2, confirmed against the decoded vendor spec —
+/// `sync-interface` directive plus a real hidraw report-descriptor capture).
+///
+/// Does a fresh, cheap `hotplug::scan_existing` lookup rather than relying on
+/// the hotplug watcher having already handed us the sync interface's
+/// `DeviceInfo` — simpler than threading interface pairing through the
+/// Added/Removed event dispatch, and the node is expected to already be
+/// enumerated (same physical dongle, same USB configuration) whenever the
+/// command interface is.
+async fn open_sync_transport(
+    config: &DeviceConfig,
+    pid: u16,
+    helper_sock: &Path,
+) -> Option<HidTransport> {
+    let hid = config.device.as_ref()?.hid.as_ref()?;
+    let sync = hid.sync_interface.as_ref()?;
+    if hid
+        .command_interface
+        .as_ref()
+        .is_some_and(|cmd| cmd.interface == sync.interface)
+    {
+        return None; // same interface as command — nothing extra to open
+    }
+
+    let devs = match hotplug::scan_existing(&[pid]) {
+        Ok(devs) => devs,
+        Err(e) => {
+            debug!("udev scan for sync interface failed: {e}");
+            return None;
+        }
+    };
+    let dev = devs
+        .into_iter()
+        .find(|d| d.interface_num == Some(sync.interface))?;
+
+    match hidraw_client::request_fd(helper_sock, &dev.hidraw_path.to_string_lossy()).await {
+        Ok(fd) => match HidTransport::from_fd(fd) {
+            Ok(t) => Some(t),
+            Err(e) => {
+                debug!("failed to open sync-interface transport for PID {pid:#06x}: {e}");
+                None
+            }
+        },
+        Err(e) => {
+            debug!(
+                "sync-interface fd request failed for PID {pid:#06x} iface {}: {e}",
+                sync.interface
+            );
+            None
+        }
+    }
+}
+
+/// Continuously read raw interrupt reports from a device's sync interface and
+/// forward any dispatched `EmitEvent`s into `event_tx` — the same channel
+/// `forward_events` drains for the command interface's own event loop, so
+/// sync-interface notifications (e.g. wireless-connection-changed) merge into
+/// the same `AppState`/D-Bus status pipeline as everything else.
+///
+/// Runs for the lifetime of one connection (spawned/aborted alongside it in
+/// `run_device`'s reconnect loop); exits on its own if the interface's fd
+/// errors (e.g. dongle physically removed).
+async fn run_sync_listener(
+    mut transport: HidTransport,
+    config: Arc<DeviceConfig>,
+    event_tx: mpsc::Sender<EmitEvent>,
+) {
+    let dispatcher = SyncDispatcher::new(&config);
+    loop {
+        match transport.read_interrupt(Duration::from_secs(30)).await {
+            Ok(report) => match dispatcher.dispatch(&report) {
+                Ok(Some(result)) => {
+                    if let Some(ev) = result.emit {
+                        if event_tx.send(ev).await.is_err() {
+                            return; // primary session's forwarder is gone
+                        }
+                    }
+                    // `side_effects` aren't handled here: no shipped device's
+                    // sync interface reports carry a side-effect call — only
+                    // plain status-changed notifications.
+                }
+                Ok(None) => {} // report has no sync_events entry — ignore
+                Err(e) => debug!("sync-interface dispatch error: {e:?}"),
+            },
+            Err(ReadError::Timeout) => {} // idle — keep listening
+            Err(ReadError::Io(e)) => {
+                debug!("sync-interface read error: {e}");
+                return;
+            }
+        }
     }
 }
 
@@ -1190,5 +1329,88 @@ mod tests {
         }])];
 
         assert_eq!(find_bootloader_variant(&configs, 0x1234), None);
+    }
+
+    // ── open_sync_transport ──────────────────────────────────────────────────
+
+    use device_config::{HidConfig, HidInterface};
+
+    fn config_with_hid(hid: Option<HidConfig>) -> DeviceConfig {
+        DeviceConfig {
+            device: Some(DeviceSection {
+                name: Some("Test Device".to_string()),
+                hid,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn open_sync_transport_none_when_no_hid_section() {
+        let cfg = config_with_hid(None);
+        assert!(open_sync_transport(&cfg, 0x1234, Path::new("/nonexistent"))
+            .await
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn open_sync_transport_none_when_no_sync_interface_declared() {
+        let cfg = config_with_hid(Some(HidConfig {
+            command_interface: Some(HidInterface {
+                interface: 3,
+                ..Default::default()
+            }),
+            sync_interface: None,
+            ..Default::default()
+        }));
+        assert!(open_sync_transport(&cfg, 0x1234, Path::new("/nonexistent"))
+            .await
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn open_sync_transport_none_when_sync_matches_command_interface() {
+        // The common case — most shipped devices answer and notify on the
+        // same interface, so there's nothing extra to open.
+        let cfg = config_with_hid(Some(HidConfig {
+            command_interface: Some(HidInterface {
+                interface: 3,
+                ..Default::default()
+            }),
+            sync_interface: Some(HidInterface {
+                interface: 3,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }));
+        assert!(open_sync_transport(&cfg, 0x1234, Path::new("/nonexistent"))
+            .await
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn open_sync_transport_none_when_distinct_sync_interface_not_enumerated() {
+        // sync_interface (5) genuinely differs from command_interface (3),
+        // so this doesn't short-circuit — it falls through to the udev
+        // lookup, which finds nothing for a PID no real device uses. Confirms
+        // the "not currently enumerated" path degrades to None rather than
+        // erroring, same as a headset that's off.
+        let cfg = config_with_hid(Some(HidConfig {
+            command_interface: Some(HidInterface {
+                interface: 3,
+                ..Default::default()
+            }),
+            sync_interface: Some(HidInterface {
+                interface: 5,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }));
+        assert!(
+            open_sync_transport(&cfg, 0xFFFF, Path::new("/nonexistent"))
+                .await
+                .is_none()
+        );
     }
 }
