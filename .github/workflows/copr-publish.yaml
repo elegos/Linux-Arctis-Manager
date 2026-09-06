@@ -1,0 +1,123 @@
+name: Publish to COPR (reusable)
+
+# Called twice by release.yaml (stable and testing channel), each call gated
+# by its own GitHub Environment approval - see docs/release-pipeline.md
+# ("Pipeline shape" / "Job breakdown") for the full design this implements.
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Tag to check out, fetch the release notes for, and publish'
+        required: true
+        type: string
+      copr-project:
+        description: 'COPR project (owner/project) to submit the build to'
+        required: true
+        type: string
+      environment-name:
+        description: 'GitHub Environment gating this publish (maintainer approval)'
+        required: true
+        type: string
+      finalize-release:
+        description: 'Flip the GitHub Release out of draft once the build is submitted'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      COPR_API_LOGIN:
+        required: true
+      COPR_API_USERNAME:
+        required: true
+      COPR_API_TOKEN:
+        required: true
+      COPR_API_COPR_URL:
+        required: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment-name }}
+    container:
+      image: fedora:latest
+      options: --user root
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+
+      # The maintainer-edited GitHub Release draft body is the authoritative
+      # changelog text for this release (see docs/release-pipeline.md,
+      # "Changelog handling") - not CHANGELOG.md directly, since the
+      # maintainer may have hand-edited the draft after it was seeded from
+      # CHANGELOG.md by this same workflow's `release` job. Requires a
+      # release (draft or published) to already exist for `inputs.ref`.
+      - name: Fetch release draft body
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          dnf install -y gh
+          gh release view "${{ inputs.ref }}" --repo "${{ github.repository }}" \
+              --json body -q .body > /tmp/release-notes.md
+
+      # Only the SRPM is built here - COPR builds the binary RPM itself, per
+      # chroot, on its own infrastructure once the SRPM is submitted below.
+      - name: Build SRPM with a %changelog entry from the release notes
+        run: |
+          set -e
+          dnf install -y rpm-build rpmdevtools tar gzip python3 git
+          rpmdev-setuptree
+
+          PKGNAME=linux-arctis-manager
+          VERSION_RAW=$(cat VERSION)
+          VERSION=$(echo "$VERSION_RAW" | sed 's/-/~/g')
+          RELEASE=1
+          # HEAD, not github.sha: this job is a reusable workflow_call, and
+          # on a manual workflow_dispatch run github.sha is the branch the
+          # run was dispatched from, not inputs.ref - HEAD is always what
+          # the checkout step above actually put in the working tree.
+          # Attributes the %changelog entry to whoever made the tagged
+          # commit, not to whichever maintainer clicked "approve" on the
+          # environment gate.
+          MAINTAINER=$(git log -1 --format='%an <%ae>' HEAD)
+
+          tar czf "$HOME/rpmbuild/SOURCES/${PKGNAME}-${VERSION}.tar.gz" \
+              --transform "s,^\./,${PKGNAME}-${VERSION}/," \
+              --exclude='./.git' --exclude='./.venv' --exclude='./dist' --exclude='./daemon/target' \
+              .
+          sed "s/^Version:.*/Version:        ${VERSION}/" \
+              packaging/fedora/linux-arctis-manager.spec \
+              > "$HOME/rpmbuild/SPECS/${PKGNAME}.spec"
+
+          ENTRY_FILE=$(mktemp)
+          python3 .github/scripts/format_rpm_changelog.py \
+              --maintainer "$MAINTAINER" --version "$VERSION" --release "$RELEASE" \
+              < /tmp/release-notes.md > "$ENTRY_FILE"
+
+          python3 .github/scripts/insert_rpm_changelog.py \
+              "$HOME/rpmbuild/SPECS/${PKGNAME}.spec" "$ENTRY_FILE"
+
+          rpmbuild -bs "$HOME/rpmbuild/SPECS/${PKGNAME}.spec"
+
+      - name: Submit build to COPR
+        env:
+          COPR_LOGIN: ${{ secrets.COPR_API_LOGIN }}
+          COPR_USERNAME: ${{ secrets.COPR_API_USERNAME }}
+          COPR_TOKEN: ${{ secrets.COPR_API_TOKEN }}
+          COPR_URL: ${{ secrets.COPR_API_COPR_URL }}
+        run: |
+          set -e
+          dnf install -y copr-cli
+          mkdir -p ~/.config
+          printf '[copr-cli]\nlogin = %s\nusername = %s\ntoken = %s\ncopr_url = %s\n' \
+              "$COPR_LOGIN" "$COPR_USERNAME" "$COPR_TOKEN" "$COPR_URL" > ~/.config/copr
+          chmod 600 ~/.config/copr
+          copr-cli build "${{ inputs.copr-project }}" "$HOME"/rpmbuild/SRPMS/*.src.rpm
+
+      - name: Take the GitHub Release out of draft
+        if: ${{ inputs.finalize-release }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${{ inputs.ref }}" --repo "${{ github.repository }}" --draft=false

@@ -4,18 +4,41 @@ on:
   push:
     tags:
       - 'v*'
+  # Lets the maintainer (re)run just the COPR publish jobs for a tag that
+  # already has a release (draft or published) - e.g. resubmitting after a
+  # COPR-side failure, or approving a publish that wasn't gated through at
+  # tag-push time. Does not rebuild or recreate the GitHub Release itself;
+  # `build-pkg`/`release` below stay tag-push only so a manual run can never
+  # collide with an existing draft/release for the same tag.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to publish to COPR (e.g. v3.0.0-alpha7)'
+        required: true
 
 permissions:
   contents: write
 
 jobs:
+  # Single source of truth for "which tag are we operating on" - the pushed
+  # tag on a tag-push trigger, or the given input on a manual run.
+  prep:
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.pick.outputs.ref }}
+    steps:
+      - id: pick
+        run: echo "ref=${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+
   # Reuses install-test.yaml's build job: same real PKGBUILD/.spec/debian
   # build across the full distro matrix, so a tag ships exactly what CI
   # already verified installs cleanly, not a separately-built copy.
   build-pkg:
+    if: ${{ github.event_name == 'push' }}
     uses: ./.github/workflows/build-pkg.yaml
 
   release:
+    if: ${{ github.event_name == 'push' }}
     needs: build-pkg
     runs-on: ubuntu-latest
     steps:
@@ -24,7 +47,10 @@ jobs:
       # Body = CHANGELOG.md's top-most "## [...]" section (normally
       # [Unreleased], already renamed to the version if the maintainer
       # bumped it before tagging) instead of GitHub's auto-generated
-      # commit-list notes, which say nothing about *what* changed.
+      # commit-list notes, which say nothing about *what* changed. This is
+      # only the starting point - the maintainer edits the draft body by
+      # hand before the publish-* jobs below read it back as the
+      # authoritative changelog text (see docs/release-pipeline.md).
       - name: Extract changelog section for release notes
         run: python3 .github/scripts/changelog_section.py > /tmp/release-notes.md
 
@@ -70,3 +96,30 @@ jobs:
             --draft \
             --notes-file /tmp/release-notes.md \
             "${ASSETS[@]}"
+
+  # Both publish jobs run on a tag push (right after the release draft is
+  # created) and on a manual workflow_dispatch (targeting an existing tag's
+  # existing release) - `needs: release` doesn't block the dispatch path
+  # since a skipped job still satisfies `needs:`. See copr-publish.yaml for
+  # the actual build+submit steps, and docs/release-pipeline.md for the
+  # full design (channel naming, secrets, one-time setup).
+  publish-stable:
+    needs: [prep, release]
+    if: ${{ !contains(needs.prep.outputs.ref, '-') }}
+    uses: ./.github/workflows/copr-publish.yaml
+    with:
+      ref: ${{ needs.prep.outputs.ref }}
+      copr-project: elegos/linux-arctis-manager
+      environment-name: release-stable
+      finalize-release: ${{ github.event_name == 'push' }}
+    secrets: inherit
+
+  publish-unstable:
+    needs: [prep, release]
+    uses: ./.github/workflows/copr-publish.yaml
+    with:
+      ref: ${{ needs.prep.outputs.ref }}
+      copr-project: elegos/linux-arctis-manager-testing
+      environment-name: release-testing
+      finalize-release: false
+    secrets: inherit
