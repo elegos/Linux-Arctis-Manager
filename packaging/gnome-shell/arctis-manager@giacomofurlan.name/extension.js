@@ -83,11 +83,25 @@ export default class ArctisManagerExtension extends Extension {
             }),
             Dbus.subscribeSettingsChanged(settings => {
                 this._settingsPayload = settings || {};
-                this._renderSettings();
+                // Deferred: this can fire while a quick-settings control
+                // (e.g. a Slider drag-end) is mid-interaction — our own
+                // SetSetting call is what triggers this signal. Rebuilding
+                // the section synchronously here disposes the very actor
+                // Clutter is still finishing event processing on. Defer to
+                // the next mainloop iteration so that unwinds first.
+                GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                    if (this._settingsSection)
+                        this._renderSettings();
+                    return GLib.SOURCE_REMOVE;
+                });
             }),
             Dbus.subscribeNcChanged(nc => {
                 this._ncSettings = nc || {};
-                this._renderSettings();
+                GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                    if (this._settingsSection)
+                        this._renderSettings();
+                    return GLib.SOURCE_REMOVE;
+                });
             }),
         ];
 
