@@ -850,7 +850,7 @@ async fn main() {
 
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
-    info!("lam-daemon {}", env!("LAM_VERSION"));
+    info!("lam-daemon {} ({})", env!("LAM_VERSION"), env!("LAM_GIT_COMMIT"));
 
     let cfg_dirs = config_dirs();
     let dir_refs: Vec<&Path> = cfg_dirs.iter().map(PathBuf::as_path).collect();
