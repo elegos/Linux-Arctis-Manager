@@ -7,11 +7,18 @@ implementation-ready — when it's time to write the actual workflow YAML, this
 document is the spec to follow, not a proposal to re-litigate.
 
 > [!NOTE]
-> Distribution channels (COPR/PPA/OBS accounts and projects) have not been created
-> yet, and the `publish-stable`/`publish-unstable` jobs described below do not exist
-> yet. What already exists today: `build-pkg.yaml` (distro build matrix),
-> `install-test.yaml` (install verification), and `release.yaml` (drafts a GitHub
-> Release with the built packages, debug/source packages already filtered out).
+> **COPR is implemented.** `elegos/linux-arctis-manager` (stable) and
+> `elegos/linux-arctis-manager-testing` (testing) exist, and `release.yaml`'s
+> `publish-stable`/`publish-unstable` jobs (via the reusable `copr-publish.yaml`,
+> see §5) submit to them. **Launchpad (PPA) and OBS are not implemented yet** —
+> no accounts/PPAs/OBS project exist, and the `dput`/`osc commit` steps described
+> below for those two platforms are still a proposal, not working code. What
+> already exists: `build-pkg.yaml` (distro build matrix), `install-test.yaml`
+> (install verification), `release.yaml` (drafts a GitHub Release, then gates
+> COPR publishing behind `release-stable`/`release-testing` environment approval),
+> `copr-publish.yaml` (the actual COPR build+submit steps), and
+> `.github/scripts/{changelog_body,format_rpm_changelog,insert_rpm_changelog}.py`
+> (changelog conversion — see §4).
 
 ## 1. Versioning and channels
 
@@ -113,33 +120,50 @@ Flow:
    gate, see §5), it reads the **current** draft body via
    `gh release view <tag> --json body -q .body` and treats that text as the
    authoritative changelog for this release.
-4. A shared script converts that raw text into each platform's required format:
-   - **`debian/changelog`**: prepend a new stanza
+4. Per-platform scripts convert that raw text into each platform's required
+   format, sharing one parsing step:
+   - **`.github/scripts/changelog_body.py`** (`parse_changelog_body`): turns the
+     raw draft body into a flat, heading-free list of change strings. Handles,
+     without silently dropping content, what a maintainer's hand-edited draft can
+     actually contain: any ATX heading level (this project's own CHANGELOG.md
+     history mixes `##` and `###` for the same kind of section), `-`/`*`/`+` as
+     the bullet marker, a bullet's text wrapped onto unmarked continuation
+     lines (joined back into one item), and nested sub-bullets (flattened into
+     the list rather than merged into their parent).
+   - **`.github/scripts/format_rpm_changelog.py`**: formats those items as one
+     `%changelog` entry — `* <day> <mon> <DD> <YYYY> <maintainer> - <version>-<release>`
+     header, `- ` bullet lines. **Implemented**, used by `copr-publish.yaml`.
+   - **`.github/scripts/insert_rpm_changelog.py`**: inserts that entry right
+     after the spec's `%changelog` line (newest-first, matching the existing
+     hand-written entries in `packaging/fedora/linux-arctis-manager.spec`) —
+     applied to the *copy* of the spec used to build the SRPM, not committed
+     back to the repository.
+   - **`debian/changelog` stanza formatter**: **not yet written** — deferred
+     until the Launchpad/OBS work starts (see the top-of-file NOTE). Would be a
+     second formatter function consuming the same `parse_changelog_body()`
+     output: prepend a new stanza
      (`linux-arctis-manager (<version>) <distribution>; urgency=medium` /
      bullet lines prefixed with `  * ` / trailer with maintainer + RFC 5322 date),
      built once per target distro slug (mirrors the existing per-slug `+<slug>`
      version tagging already in `build-pkg.yaml`).
-   - **`%changelog`** (rpm spec): prepend a new
-     `* <date> <maintainer> - <version>` entry with `- ` bullet lines.
-   - Neither of these is a copy-paste of the raw markdown — both formats have
-     strict structural requirements (exact date format, exact stanza header
-     syntax) that the script must produce, not the maintainer.
-
-> [!NOTE]
-> This script is new work, not yet written. It needs one function per output
-> format (debian stanza, rpm entry), sharing only the parsed
-> version/date/changelog-body input. Keep it in `.github/scripts/`, next to
-> `changelog_section.py` and `resolve_distro_matrix.py`.
 
 ## 5. Pipeline shape
 
+COPR is implemented; the PPA/OBS steps sketched in earlier revisions of this
+diagram are removed below until that work actually starts (see §1's NOTE).
+
 ```mermaid
 flowchart TB
-    Tag(["git push tag v*"]) --> BuildPkg
+    Tag(["git push tag v*"]) --> Prep
+    Dispatch(["workflow_dispatch: tag=<existing tag>"]) --> Prep
 
-    subgraph Existing["Existing — unchanged"]
+    Prep["prep job<br/>ref = dispatch input, or the pushed tag"]
+
+    Prep --> BuildPkg
+
+    subgraph TagPushOnly["Tag-push only (if: github.event_name == 'push')"]
         BuildPkg["build-pkg.yaml<br/>distro build matrix"]
-        Release["release job<br/>creates/updates GitHub Release (draft)<br/>body = CHANGELOG.md excerpt (starting point)"]
+        Release["release job<br/>creates GitHub Release (draft)<br/>body = CHANGELOG.md excerpt (starting point)"]
     end
 
     BuildPkg -->|rpm/deb/pkg.tar.zst artifacts| Release
@@ -148,87 +172,111 @@ flowchart TB
 
     Edited --> Stable
     Edited --> Unstable
+    Dispatch -.->|re-publish an existing tag<br/>without rebuilding/redrafting| Stable
+    Dispatch -.-> Unstable
 
-    subgraph Stable["publish-stable job"]
+    subgraph Stable["publish-stable (copr-publish.yaml call)"]
         direction TB
-        SkipCheck{"tag has no '-'?<br/>(not a prerelease)"}
+        SkipCheck{"ref has no '-'?<br/>(not a prerelease)"}
         GateStable["environment: release-stable<br/>(blocked on required reviewer approval)"]
-        DoStable["read draft body -> write debian/changelog + %changelog<br/>build SRPM / signed .dsc<br/>copr-cli build (stable project)<br/>dput ppa:.../stable<br/>osc commit (stable subproject)<br/>gh release edit --draft=false"]
+        DoStable["checkout ref -> gh release view -> parse_changelog_body<br/>-> format_rpm_changelog -> insert into spec copy<br/>rpmbuild -bs -> copr-cli build (stable project)<br/>gh release edit --draft=false (tag-push trigger only)"]
         SkipCheck -->|yes| GateStable --> DoStable
         SkipCheck -->|no: prerelease tag| Skipped(["job skipped"])
     end
 
-    subgraph Unstable["publish-unstable job (always runs)"]
+    subgraph Unstable["publish-unstable (copr-publish.yaml call, always runs)"]
         direction TB
         GateUnstable["environment: release-testing<br/>(blocked on required reviewer approval)"]
-        DoUnstable["read draft body -> write debian/changelog + %changelog<br/>build SRPM / signed .dsc<br/>copr-cli build (testing project)<br/>dput ppa:.../testing<br/>osc commit (testing subproject)"]
+        DoUnstable["same steps as publish-stable<br/>copr-cli build (testing project)<br/>never un-drafts the Release"]
         GateUnstable --> DoUnstable
     end
 ```
 
 ### Job breakdown
 
-- **`publish-stable`**
-  - `if: ${{ !contains(github.ref_name, '-') }}` — skipped outright for any
-    prerelease tag, before the approval gate is even reached. This is a
+- **`prep`** — resolves one `ref` output used by every job below: the pushed
+  tag (`github.ref_name`) on a tag-push trigger, or the `tag` input on a manual
+  `workflow_dispatch` run. This is what makes the manual trigger safe: nothing
+  downstream needs to know which event fired.
+- **`build-pkg` / `release`** — `if: ${{ github.event_name == 'push' }}` only.
+  A manual dispatch never re-creates or rebuilds the GitHub Release — `gh
+  release create` errors on a tag that already has one, and the whole point of
+  the manual trigger is to (re)run *publishing* for a tag whose release already
+  exists. `publish-stable`/`publish-unstable` still declare `needs: release`:
+  a skipped job satisfies `needs:` in GitHub Actions, so this doesn't block them
+  on a dispatch run.
+- **`publish-stable`** (`copr-publish.yaml`, called with
+  `copr-project: elegos/linux-arctis-manager`, `environment-name:
+  release-stable`, `finalize-release: ${{ github.event_name == 'push' }}`)
+  - `if: ${{ !contains(needs.prep.outputs.ref, '-') }}` — skipped outright for
+    any prerelease ref, before the approval gate is even reached. This is a
     correctness guard, not just a formality: it makes it structurally impossible
     to accidentally approve a prerelease into the stable channel.
   - `environment: release-stable`, with the maintainer as required reviewer.
-  - On approval: writes changelogs, builds source packages, submits to
-    COPR-stable, PPA-stable, OBS-stable, and — since this is the channel that
-    represents "this version is really out" — also flips the GitHub Release out
-    of draft (`gh release edit <tag> --draft=false`).
-- **`publish-unstable`**
-  - No `if:` condition — runs for every tag, stable or prerelease, since
+  - On approval: reads the release draft body, builds an SRPM with a
+    `%changelog` entry generated from it, submits to COPR-stable, and — only on
+    the tag-push trigger, since a manual re-publish shouldn't un-draft again —
+    flips the GitHub Release out of draft.
+- **`publish-unstable`** (same reusable workflow, `copr-project:
+  elegos/linux-arctis-manager-testing`, `environment-name: release-testing`,
+  `finalize-release: false`)
+  - No `if:` condition — runs for every ref, stable or prerelease, since
     `testing` is always a superset of `stable`.
   - `environment: release-testing`, with the maintainer as required reviewer.
-  - Does **not** un-draft the GitHub Release on a prerelease tag (there is
-    nothing else in the pipeline that would un-draft it for a prerelease, which
-    is correct — prereleases aren't meant to become the "Latest" GitHub Release).
-    On a stable tag, both jobs run; whichever finishes last un-drafting is a
-    no-op the second time, so no ordering dependency needs to be enforced between
-    the two jobs.
+  - Never un-drafts the GitHub Release (nothing else in the pipeline would need
+    that on a prerelease, and on a stable tag `publish-stable` already does it).
 
-Both jobs live inside `release.yaml` as additional jobs (not separate workflow
-files) — one workflow run shows build → release-draft → both gated publish jobs
-in a single place, and GitHub Environments already provide the per-job approval
-gate without needing `workflow_run`-chained separate files.
+`publish-stable` and `publish-unstable` both call the same `copr-publish.yaml`
+reusable workflow (`uses:` + `secrets: inherit`) instead of duplicating the
+build+submit steps inline — a deliberate change from this document's original
+"not separate workflow files" call: a `uses:`-called reusable workflow still
+shows as jobs inside the *same* workflow run in the Actions UI (unlike a
+`workflow_run`-chained separate workflow, which is the thing that call was
+actually ruling out), so the "one run, one place" property this document cared
+about is unaffected, and the two channels no longer drift out of sync with
+each other by construction.
 
 ## 6. Secrets and configuration
 
 | Name | Kind | Scope | Used by |
 |---|---|---|---|
-| `COPR_CONFIG` | secret (contents of a `copr-cli` config ini: login, token, copr_url) | repo-level (same account for both COPR projects; only the target project name differs, which is a plain non-secret value) | both publish jobs |
+| `COPR_API_LOGIN` / `COPR_API_USERNAME` / `COPR_API_TOKEN` / `COPR_API_COPR_URL` | secrets (the four fields of a `copr-cli` config ini) | repo-level (same account for both COPR projects; only the target project name differs, which is a plain non-secret value) | both publish jobs |
 | `LAUNCHPAD_GPG_PRIVATE_KEY` | secret (armored private key) | repo-level | both publish jobs |
-| `LAUNCHPAD_GPG_PASSPHRASE` | secret | repo-level | both publish jobs |
-| `LAUNCHPAD_GPG_KEY_ID` | variable (not secret — a key ID isn't sensitive) | repo-level | both publish jobs |
-| `OBS_USERNAME` / `OBS_PASSWORD` (or an OBS API token, if supported for the account) | secret | repo-level | both publish jobs |
-| Target project/PPA/subproject names (`linux-arctis-manager` vs `-testing`) | plain job-level values, not secrets | hardcoded per job or as repo variables | both publish jobs |
+| `LAUNCHPAD_GPG_PASSPHRASE` | secret | repo-level | *not implemented yet* |
+| `LAUNCHPAD_GPG_KEY_ID` | variable (not secret — a key ID isn't sensitive) | repo-level | *not implemented yet* |
+| `OBS_USERNAME` / `OBS_PASSWORD` (or an OBS API token, if supported for the account) | secret | repo-level | *not implemented yet* |
+| Target project/PPA/subproject names (`linux-arctis-manager` vs `-testing`) | plain job-level values, not secrets | hardcoded per `copr-publish.yaml` call in `release.yaml` | both publish jobs |
 
 > [!NOTE]
 > Nothing here needs to be scoped *differently* per environment — the same COPR
-> account, GPG key, and OBS account publish to both the stable and testing
-> targets, only the destination project/PPA/subproject name changes. Environment
-> scoping is only needed for the *approval gate*, not for splitting credentials.
+> account (and, once implemented, the same GPG key and OBS account) publishes to
+> both the stable and testing targets, only the destination project/PPA/subproject
+> name changes. Environment scoping is only needed for the *approval gate*, not
+> for splitting credentials. The Launchpad/OBS rows above are kept for when that
+> work starts — they don't correspond to any secret actually in use today.
 
-## 7. One-time manual setup (before implementation starts)
+## 7. One-time manual setup
 
-This is manual, maintainer-side work — not scriptable from CI, and a prerequisite
-for writing the actual workflow jobs:
+Done, for COPR:
 
-1. Create COPR account + two projects: `elegos/linux-arctis-manager`,
-   `elegos/linux-arctis-manager-testing`. Generate a `copr-cli` API token.
-2. Create a Launchpad account (if not already existing) + two PPAs:
+1. ~~Create COPR account + two projects: `elegos/linux-arctis-manager`,
+   `elegos/linux-arctis-manager-testing`. Generate a `copr-cli` API token.~~
+2. ~~Register `COPR_API_LOGIN`/`COPR_API_USERNAME`/`COPR_API_TOKEN`/`COPR_API_COPR_URL`
+   as GitHub repo secrets (§6).~~
+3. ~~Create the two GitHub Environments (`release-stable`, `release-testing`)
+   with the maintainer set as a required reviewer on each.~~
+
+Still needed, before the Launchpad/OBS steps in §4/§5 can move past "proposal":
+
+1. Create a Launchpad account (if not already existing) + two PPAs:
    `linux-arctis-manager`, `linux-arctis-manager-testing`. Generate (or reuse) a
    GPG key and register it with the Launchpad account (Launchpad requires the
    key's fingerprint to be confirmed via their own signed-cleartext challenge
    flow before it can sign uploads).
-3. Create an OBS account + one project (`home:elegos:linux-arctis-manager`) with
+2. Create an OBS account + one project (`home:elegos:linux-arctis-manager`) with
    a `testing` subproject, each configured with a Debian build target (and
    optionally an openSUSE target, see §8).
-4. Register all of the above as GitHub repo secrets (§6).
-5. Create the two GitHub Environments (`release-stable`, `release-testing`) with
-   the maintainer set as a required reviewer on each.
+3. Register the Launchpad/OBS secrets from §6 once the above exist.
 
 ## 8. Deferred / open items
 
