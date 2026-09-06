@@ -1,7 +1,12 @@
 name: Rust CI
 
 on:
+  # branches: '**' (any branch, no tags filter) - a bare `push:` also fires
+  # on tag pushes, which would re-run this against a commit its own branch
+  # push already ran it against (see release.yaml's tag-triggered publish).
   push:
+    branches:
+      - '**'
   pull_request:
 
 jobs:
