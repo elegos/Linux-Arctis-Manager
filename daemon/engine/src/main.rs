@@ -1407,10 +1407,8 @@ mod tests {
             }),
             ..Default::default()
         }));
-        assert!(
-            open_sync_transport(&cfg, 0xFFFF, Path::new("/nonexistent"))
-                .await
-                .is_none()
-        );
+        assert!(open_sync_transport(&cfg, 0xFFFF, Path::new("/nonexistent"))
+            .await
+            .is_none());
     }
 }

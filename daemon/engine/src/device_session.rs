@@ -908,7 +908,11 @@ sync_events:
 
         task.await.unwrap();
         let events = rx.await.unwrap().unwrap();
-        assert_eq!(events.len(), 2, "both the stray sync_event and the sync_read reply must surface");
+        assert_eq!(
+            events.len(),
+            2,
+            "both the stray sync_event and the sync_read reply must surface"
+        );
         assert!(events.iter().any(|e| e.signal == "stream_mix_changed"));
         assert!(events.iter().any(|e| e.signal == "mic_volume_changed"));
     }
