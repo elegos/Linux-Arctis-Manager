@@ -317,7 +317,10 @@ async fn run_device(
         // from the interface that actually carries these reports.
         let mut sync_transport = open_sync_transport(&config, info.pid, &helper_sock).await;
         if sync_transport.is_some() {
-            info!("opened sync interface for {path_str} (PID={:#06x})", info.pid);
+            info!(
+                "opened sync interface for {path_str} (PID={:#06x})",
+                info.pid
+            );
         }
 
         // Inner loop: keep the fd open and wait reactively for the headset.
@@ -575,7 +578,10 @@ async fn open_sync_transport(
             return None;
         }
     };
-    let Some(dev) = devs.into_iter().find(|d| d.interface_num == Some(sync.interface)) else {
+    let Some(dev) = devs
+        .into_iter()
+        .find(|d| d.interface_num == Some(sync.interface))
+    else {
         debug!(
             "sync interface {} not (yet) enumerated for PID {pid:#06x} — will retry \
              next reconnect attempt",
