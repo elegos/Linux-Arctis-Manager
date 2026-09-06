@@ -346,6 +346,18 @@ pub struct HidConfig {
     pub command_interface: Option<HidInterface>,
     #[serde(default)]
     pub sync_interface: Option<HidInterface>,
+    /// True when this device's HID interfaces have no Report ID in their
+    /// descriptor (confirmed via a real `hid-recorder` capture, not
+    /// guessed). Every struct in this DSL models `report_id` as its first
+    /// field symmetrically for both directions, matching what writes always
+    /// need on Linux (`hidraw_write` treats `buf[0]` as a report id to strip
+    /// regardless) — but reads on an unnumbered-report interface never carry
+    /// that byte back. Setting this tells the engine to synthesize it back
+    /// onto every read, transparently, instead of every struct/byte-offset
+    /// in this file needing to model the asymmetry directly. See
+    /// [[project-v3-device-import]] (Nova 7 Gen2) for how this was found.
+    #[serde(default)]
+    pub unnumbered_reports: bool,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]

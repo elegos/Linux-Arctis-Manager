@@ -58,6 +58,8 @@ impl From<std::io::Error> for ReadError {
 /// Async wrapper around an open hidraw fd received from `lam-hidraw-helper`.
 pub struct HidTransport {
     inner: AsyncFd<std::fs::File>,
+    // See `with_synthetic_read_report_id`.
+    prepend_report_id_on_read: bool,
 }
 
 impl HidTransport {
@@ -75,7 +77,29 @@ impl HidTransport {
         let std_file = unsafe { std::fs::File::from_raw_fd(fd.into_raw_fd()) }; // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
         Ok(Self {
             inner: AsyncFd::new(std_file)?,
+            prepend_report_id_on_read: false,
         })
+    }
+
+    /// Enable synthesizing a leading `0x00` report-id byte onto every
+    /// `read_interrupt` result.
+    ///
+    /// For a HID interface with no Report ID in its descriptor (confirmed via
+    /// a real `hid-recorder` capture — see [[project-v3-device-import]], Nova
+    /// 7 Gen2), Linux's hidraw needs a synthetic leading report-id byte on
+    /// WRITES regardless (`hidraw_write` always treats `buf[0]` as a report
+    /// id to strip before the real transfer) but never adds one back on
+    /// READS — the raw reply starts directly with the device's real first
+    /// byte. The device-config DSL models every struct's first field as
+    /// `report_id` symmetrically for both directions, so without this, every
+    /// read comes back shifted one byte short of what every consumer (header
+    /// matching, codec deserialize, sync-event byte offsets) expects.
+    /// Enabling this re-adds the byte transparently, so nothing downstream
+    /// needs to know the wire framing is asymmetric.
+    #[must_use]
+    pub fn with_synthetic_read_report_id(mut self, enabled: bool) -> Self {
+        self.prepend_report_id_on_read = enabled;
+        self
     }
 
     /// Write an interrupt (HID_IO) report. `data` must be <= `REPORT_SIZE_HID_IO`.
@@ -109,7 +133,12 @@ impl HidTransport {
             }
         };
         match tokio::time::timeout(timeout, read_fut).await {
-            Ok(Ok(buf)) => Ok(buf),
+            Ok(Ok(mut buf)) => {
+                if self.prepend_report_id_on_read {
+                    buf.insert(0, 0u8);
+                }
+                Ok(buf)
+            }
             Ok(Err(e)) => Err(ReadError::Io(e)),
             Err(_elapsed) => Err(ReadError::Timeout),
         }
@@ -177,6 +206,35 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result, payload);
+    }
+
+    #[tokio::test]
+    async fn read_interrupt_prepends_synthetic_report_id_when_enabled() {
+        let (transport, peer_fd) = make_pair();
+        let mut transport = transport.with_synthetic_read_report_id(true);
+
+        let payload = [0xb0u8, 0x03, 0x64]; // real device reply, no leading byte
+        nix::unistd::write(&peer_fd, &payload).unwrap();
+
+        let result = transport
+            .read_interrupt(Duration::from_millis(500))
+            .await
+            .unwrap();
+        assert_eq!(result, [0x00, 0xb0, 0x03, 0x64]);
+    }
+
+    #[tokio::test]
+    async fn read_interrupt_leaves_data_untouched_when_disabled() {
+        let (mut transport, peer_fd) = make_pair();
+
+        let payload = [0xb0u8, 0x03, 0x64];
+        nix::unistd::write(&peer_fd, &payload).unwrap();
+
+        let result = transport
+            .read_interrupt(Duration::from_millis(500))
+            .await
+            .unwrap();
+        assert_eq!(result, payload); // default: unchanged, matches from_fd()
     }
 
     #[tokio::test]

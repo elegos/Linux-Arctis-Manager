@@ -35,6 +35,30 @@ device:
   # separate Arctis 7+ family (arctis_7_plus.yaml et al, different base
   # protocol) shows the same pattern but was NOT changed — no equivalent
   # real-hardware confirmation for that family yet.
+  #
+  # unnumbered_reports CONFIRMED true (2026-09-06) — the same bug report's
+  # `--hidraw-capture` (a second `hid-recorder` reader on /dev/hidraw0
+  # alongside lam-daemon, no other tooling needed) caught the device's real
+  # 0xB0 reply while the daemon was stuck retrying: `b0 03 64 03 63 64 00 00
+  # 01 00 ...` — the command byte IS byte 0, not byte 1. The daemon was
+  # writing (and expecting back) [report_id=0x00, command=0xB0, ...], so
+  # every real reply was silently misclassified as an unrecognized stray
+  # event and discarded, forever — completely independent of the
+  # sync_interface fix above, which only affects how fast device_init
+  # *retries*, not whether the command interface's own reply is ever
+  # recognized. Decoded the whole reply against this struct's field order
+  # with the byte shifted down by 1 (dropping the assumed leading
+  # report_id): connection_status=3 (PAIRED_CONNECTED), battery=100%,
+  # charging_status=3 (DISCHARGING), chatmix~99-100/100 — every value sane
+  # and consistent with the reporter's own confirmed-connected, on-battery
+  # headset. Root cause: this interface's HID descriptor has no Report ID
+  # tag at all (confirmed — no `0x85` anywhere in the reporter's own
+  # `hidraw0`/`hidraw2` descriptor dumps), and Linux's hidraw only needs
+  # (and only ever adds) the synthetic report-id byte on WRITES for such an
+  # interface, never on READS — see `unnumbered_reports` on `HidConfig` and
+  # `HidTransport::with_synthetic_read_report_id` for the fix, which
+  # compensates at the transport layer so no struct/byte-offset in this file
+  # needs to change to account for it.
   variants:
     - product_id: 0x227E
       name: "Arctis Nova 7 Gen 2"
@@ -71,6 +95,7 @@ device:
       interface: 3
     sync_interface:
       interface: 5
+    unnumbered_reports: true
 
   capabilities:
     - battery

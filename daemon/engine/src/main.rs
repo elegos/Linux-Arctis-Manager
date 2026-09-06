@@ -592,7 +592,7 @@ async fn open_sync_transport(
 
     match hidraw_client::request_fd(helper_sock, &dev.hidraw_path.to_string_lossy()).await {
         Ok(fd) => match HidTransport::from_fd(fd) {
-            Ok(t) => Some(t),
+            Ok(t) => Some(t.with_synthetic_read_report_id(hid.unnumbered_reports)),
             Err(e) => {
                 warn!("failed to open sync-interface transport for PID {pid:#06x}: {e}");
                 None
