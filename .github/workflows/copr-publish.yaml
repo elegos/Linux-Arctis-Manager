@@ -1,8 +1,14 @@
-name: Publish to COPR (reusable)
+name: Publish to COPR
 
-# Called twice by release.yaml (stable and testing channel), each call gated
-# by its own GitHub Environment approval - see docs/release-pipeline.md
-# ("Pipeline shape" / "Job breakdown") for the full design this implements.
+# Dual-purpose: called by release.yaml (stable and testing channel, each call
+# gated by its own GitHub Environment approval - see docs/release-pipeline.md
+# "Pipeline shape" / "Job breakdown") AND directly runnable from the Actions
+# tab's "Run workflow" button, for publishing (or republishing) an existing
+# tag without touching release.yaml at all - e.g. a tag whose GitHub Release
+# already went out before this pipeline existed. Both triggers share the same
+# job body; only the `on:` shape differs (workflow_call's `secrets:` block has
+# no workflow_dispatch equivalent - a directly-dispatched run already has
+# unscoped access to repo secrets by name, no forwarding needed).
 
 on:
   workflow_call:
@@ -33,6 +39,26 @@ on:
         required: true
       COPR_API_COPR_URL:
         required: true
+
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Existing release tag to publish (e.g. v3.0.0-alpha7)'
+        required: true
+        type: string
+      copr-project:
+        description: 'COPR project (owner/project) to submit the build to'
+        required: true
+        type: string
+      environment-name:
+        description: 'GitHub Environment gating this publish (maintainer approval, if the environment exists and has protection rules - see docs/release-pipeline.md §7)'
+        required: true
+        type: string
+      finalize-release:
+        description: 'Flip the GitHub Release out of draft once the build is submitted'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   publish:

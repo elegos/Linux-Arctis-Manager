@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - README's Supported Devices table rewritten and re-checked against SteelSeries' own device specs.
 - CI now enforces Python code quality (`ruff`, `basedpyright`, coverage floor) alongside the existing Rust checks (`cargo-deny` added).
 - SAST, Python CI, Rust CI, and the install-test matrix no longer re-run on tag pushes (only on branch pushes and PRs) — a tag points at a commit its branch push already ran them against.
-- `release.yaml` now publishes tagged builds to COPR (`elegos/linux-arctis-manager` for stable tags, always also to `elegos/linux-arctis-manager-testing`), gated behind maintainer approval on a `release-stable`/`release-testing` GitHub Environment, with the `%changelog` entry generated from the GitHub Release's draft notes. Also runnable manually (`workflow_dispatch`) to (re)publish an existing tag without recreating its release.
+- `release.yaml` now publishes tagged builds to COPR (`elegos/linux-arctis-manager` for stable tags, always also to `elegos/linux-arctis-manager-testing`), gated behind maintainer approval on a `release-stable`/`release-testing` GitHub Environment, with the `%changelog` entry generated from the GitHub Release's draft notes. Also runnable manually, either through `release.yaml`'s own `workflow_dispatch` or directly as its own "Publish to COPR" entry in the Actions tab, to (re)publish an existing tag without recreating its release.
 
 ### Removed
 
