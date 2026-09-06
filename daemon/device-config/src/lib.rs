@@ -1134,6 +1134,67 @@ mod nova_yaml_tests {
         assert_eq!(bands_payload.len(), 65, "padded to chunk_size");
     }
 
+    /// Regression for a real bug report: turning the Nova 7 family's hardware
+    /// chatmix dial produced correct `0x45` events on the wire (confirmed via
+    /// a real device's `hid-recorder` capture) but never rebalanced audio,
+    /// because `main.rs`'s `forward_events` matches the literal field names
+    /// `chatmix_game`/`chatmix_chat`/`radio_connection_status` to drive live
+    /// rebalancing and the virtual-sink wireless lifecycle — a convention
+    /// already used by nova_pro_wireless/nova_pro_omni/nova_elite, but this
+    /// family's `headset_status` struct instead called them
+    /// `game_chatmix_level`/`chat_chatmix_level`/`connection_status`, so the
+    /// values landed in `AppState` under keys `forward_events` never looks
+    /// for. Asserts the real (non-inline) YAML now dispatches under the
+    /// engine's expected names, for every device file in the family that
+    /// redefines/inherits this struct.
+    #[test]
+    fn nova_7_family_chatmix_and_connection_events_use_engine_field_names() {
+        use crate::codec::FieldValue;
+        use crate::sync_dispatcher::{EventValue, SyncDispatcher};
+
+        for name in ["nova_7_gen2.yaml", "nova_7.yaml", "nova_7p.yaml"] {
+            let Some(cfg) = load_tier2_device(name) else {
+                continue;
+            };
+            let dispatcher = SyncDispatcher::new(&cfg);
+
+            // 0x45 chatmix_changed: report_id, command, game=0x63, chat=0x64.
+            let chatmix_report = [0x00u8, 0x45, 0x63, 0x64];
+            let result = dispatcher
+                .dispatch(&chatmix_report)
+                .unwrap_or_else(|e| panic!("{name}: dispatch 0x45 failed: {e:?}"))
+                .unwrap_or_else(|| panic!("{name}: 0x45 must be a known sync event"));
+            let emit = result
+                .emit
+                .unwrap_or_else(|| panic!("{name}: 0x45 must emit"));
+            assert_eq!(
+                emit.fields.get("chatmix_game"),
+                Some(&EventValue::Field(FieldValue::U8(0x63))),
+                "{name}: chatmix_game must be present under the engine's expected key"
+            );
+            assert_eq!(
+                emit.fields.get("chatmix_chat"),
+                Some(&EventValue::Field(FieldValue::U8(0x64))),
+                "{name}: chatmix_chat must be present under the engine's expected key"
+            );
+
+            // 0xB9 connection_changed: report_id, command, connection_status=3 (PAIRED_CONNECTED).
+            let connection_report = [0x00u8, 0xB9, 0x03, 0x00];
+            let result = dispatcher
+                .dispatch(&connection_report)
+                .unwrap_or_else(|e| panic!("{name}: dispatch 0xB9 failed: {e:?}"))
+                .unwrap_or_else(|| panic!("{name}: 0xB9 must be a known sync event"));
+            let emit = result
+                .emit
+                .unwrap_or_else(|| panic!("{name}: 0xB9 must emit"));
+            assert_eq!(
+                emit.fields.get("radio_connection_status"),
+                Some(&EventValue::Str("PAIRED_CONNECTED".to_string())),
+                "{name}: radio_connection_status must be present under the engine's expected key"
+            );
+        }
+    }
+
     fn load_tier2_device(name: &str) -> Option<crate::DeviceConfig> {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()

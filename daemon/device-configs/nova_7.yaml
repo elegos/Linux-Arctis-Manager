@@ -24,11 +24,16 @@ structs:
     incoming:
       - {name: report_id,          type: uint8, constant: 0x00}
       - {name: command,            type: uint8, constant: 0xB0}
-      - {name: connection_status,  type: uint8, range: [0, 3]}
+      - {name: radio_connection_status, type: uint8, range: [0, 3]}
       - {name: battery_status,     type: uint8, range: [0, 4]}
       - {name: charging_status,    type: uint8, range: [0, 3]}
-      - {name: game_chatmix_level, type: uint8, range: [0, 100]}
-      - {name: chat_chatmix_level, type: uint8, range: [0, 100]}
+      # chatmix_game/chatmix_chat/radio_connection_status match the engine's
+      # cross-device field-name contract (main.rs's forward_events matches
+      # these literal names for live audio rebalancing and the virtual-sink
+      # wireless lifecycle) — see nova_7_gen2.yaml's sibling note, same bug,
+      # same fix.
+      - {name: chatmix_game, type: uint8, range: [0, 100]}
+      - {name: chatmix_chat, type: uint8, range: [0, 100]}
 
 apis:
   sidetone:
@@ -40,8 +45,8 @@ sync_events:
   0x45:
     emit: chatmix_changed
     fields:
-      - {name: game_chatmix_level, byte: 2}
-      - {name: chat_chatmix_level, byte: 3}
+      - {name: chatmix_game, byte: 2}
+      - {name: chatmix_chat, byte: 3}
 
   0xB7:
     emit: battery_changed
@@ -51,7 +56,7 @@ sync_events:
   0xB9:
     emit: connection_changed
     fields:
-      - {name: connection_status, byte: 2, transform: connection_status_to_label}
+      - {name: radio_connection_status, byte: 2, transform: connection_status_to_label}
 
   0xBB:
     emit: charging_changed
@@ -61,11 +66,11 @@ sync_events:
 sync_read:
   - struct: headset_status
     maps:
-      - {emit: connection_changed, field: connection_status, transform: connection_status_to_label}
+      - {emit: connection_changed, field: radio_connection_status, transform: connection_status_to_label}
       - {emit: battery_changed,    field: battery_status,     transform: battery_level_to_percent, display_type: percentage}
       - {emit: charging_changed,   field: charging_status,    transform: charging_status_to_label}
       - emit: chatmix_changed
-        fields: [game_chatmix_level, chat_chatmix_level]
+        fields: [chatmix_game, chatmix_chat]
 
 device:
   name: "SteelSeries Arctis Nova 7"
