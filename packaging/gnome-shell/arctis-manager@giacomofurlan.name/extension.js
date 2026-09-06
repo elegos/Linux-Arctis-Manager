@@ -192,8 +192,13 @@ export default class ArctisManagerExtension extends Extension {
             return;
         }
 
-        for (const sid of renderable)
-            this._buildControl(sid, settingsConfig, currentValues);
+        for (const sid of renderable) {
+            try {
+                this._buildControl(sid, settingsConfig, currentValues);
+            } catch (e) {
+                logError(e, `arctis-manager: failed to build quick setting control for "${sid}"`);
+            }
+        }
     }
 
     _currentValues(settingsConfig) {
