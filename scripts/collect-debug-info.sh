@@ -261,12 +261,27 @@ if [[ -n "$USB_CAPTURE_SECONDS" ]]; then
             echo "issue (headset powered on, daemon running/stuck retrying) during" >&2
             echo "this window." >&2
             if sudo -v; then
-                sudo modprobe usbmon 2>/dev/null
+                MODPROBE_ERR="$(sudo modprobe usbmon 2>&1 1>/dev/null)"
+                # debugfs isn't always auto-mounted; try to mount it ourselves
+                # before giving up, rather than just telling the user to.
+                if [[ ! -d /sys/kernel/debug/usb ]]; then
+                    sudo mount -t debugfs none /sys/kernel/debug 2>/dev/null
+                fi
                 MON_NODE="/sys/kernel/debug/usb/usbmon/${BUS}u"
                 if [[ ! -e "$MON_NODE" ]]; then
-                    echo "[skipped: ${MON_NODE} not found — debugfs may not be mounted" \
-                        "(try: sudo mount -t debugfs none /sys/kernel/debug) or the" \
-                        "usbmon kernel module isn't available]" >>"$REPORT"
+                    {
+                        echo "[skipped: ${MON_NODE} not found]"
+                        echo "diagnostics:"
+                        echo "  modprobe usbmon: ${MODPROBE_ERR:-ok, no error}"
+                        echo "  debugfs mounted: $(mountpoint -q /sys/kernel/debug && echo yes || echo no)"
+                        echo "  usbmon loaded:   $(lsmod 2>/dev/null | grep -q '^usbmon' && echo yes || echo 'no (or built-in — check /sys/kernel/debug/usb/usbmon existing above)')"
+                        echo "  /sys/kernel/debug/usb present: $([[ -d /sys/kernel/debug/usb ]] && echo yes || echo no)"
+                        echo "If usbmon is loaded/built-in and debugfs is mounted but the" \
+                            "per-bus node still doesn't exist, this kernel may have usbmon" \
+                            "disabled outright (CONFIG_USB_MON=n) — common on some hardened" \
+                            "kernel builds; a raw USB capture won't be possible without" \
+                            "switching to a stock kernel."
+                    } >>"$REPORT"
                 else
                     CAP_FILE="${BUNDLE}/usbmon-bus${BUS}.txt"
                     echo "capturing... (this blocks for ${USB_CAPTURE_SECONDS}s)" >&2
