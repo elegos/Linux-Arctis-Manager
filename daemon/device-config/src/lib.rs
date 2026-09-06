@@ -1144,15 +1144,26 @@ mod nova_yaml_tests {
     /// family's `headset_status` struct instead called them
     /// `game_chatmix_level`/`chat_chatmix_level`/`connection_status`, so the
     /// values landed in `AppState` under keys `forward_events` never looks
-    /// for. Asserts the real (non-inline) YAML now dispatches under the
-    /// engine's expected names, for every device file in the family that
-    /// redefines/inherits this struct.
+    /// for. A grep-driven audit found the identical mismatch, same field
+    /// names, on Nova 4/5 and Arctis Nova 3 Wireless too (no bug report
+    /// against those, but the same string-match logic applies identically),
+    /// fixed the same way in the same pass. Asserts the real (non-inline)
+    /// YAML now dispatches under the engine's expected names, for every
+    /// device file across all these families that redefines/inherits this
+    /// struct.
     #[test]
     fn nova_7_family_chatmix_and_connection_events_use_engine_field_names() {
         use crate::codec::FieldValue;
         use crate::sync_dispatcher::{EventValue, SyncDispatcher};
 
-        for name in ["nova_7_gen2.yaml", "nova_7.yaml", "nova_7p.yaml"] {
+        for name in [
+            "nova_7_gen2.yaml",
+            "nova_7.yaml",
+            "nova_7p.yaml",
+            "nova_4.yaml",
+            "nova_5.yaml",
+            "arctis_nova_3_wireless.yaml",
+        ] {
             let Some(cfg) = load_tier2_device(name) else {
                 continue;
             };
