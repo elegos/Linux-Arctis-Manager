@@ -180,6 +180,14 @@ export default class ArctisManagerExtension extends Extension {
     }
 
     _renderSettings() {
+        try {
+            this._renderSettingsUnsafe();
+        } catch (e) {
+            logError(e, 'arctis-manager: _renderSettings failed');
+        }
+    }
+
+    _renderSettingsUnsafe() {
         this._settingsSection.removeAll();
 
         const settingsConfig = (this._settingsPayload && this._settingsPayload.settings_config) || {};
