@@ -316,6 +316,9 @@ async fn run_device(
         // reactive device_init wait below and the ongoing event loop can read
         // from the interface that actually carries these reports.
         let mut sync_transport = open_sync_transport(&config, info.pid, &helper_sock).await;
+        if sync_transport.is_some() {
+            info!("opened sync interface for {path_str} (PID={:#06x})", info.pid);
+        }
 
         // Inner loop: keep the fd open and wait reactively for the headset.
         // On timeout (headset off) we listen for any async HID event from the
@@ -339,7 +342,14 @@ async fn run_device(
                     // When a distinct sync interface is open, wait on THAT fd
                     // instead — the command interface never carries these
                     // unsolicited reports for these device families.
-                    info!("headset not ready, waiting for wireless event on {path_str}...");
+                    if sync_transport.is_some() {
+                        info!(
+                            "headset not ready, waiting for wireless event on {path_str}'s \
+                             sync interface..."
+                        );
+                    } else {
+                        info!("headset not ready, waiting for wireless event on {path_str}...");
+                    }
                     let wake = match sync_transport.as_mut() {
                         Some(t) => t
                             .read_interrupt(Duration::from_secs(30))
@@ -355,7 +365,7 @@ async fn run_device(
                     };
                     match wake {
                         Ok(report) => {
-                            debug!(
+                            info!(
                                 "async event received (cmd={:#04x}), retrying device_init",
                                 report.get(1).copied().unwrap_or(0)
                             );
@@ -561,24 +571,29 @@ async fn open_sync_transport(
     let devs = match hotplug::scan_existing(&[pid]) {
         Ok(devs) => devs,
         Err(e) => {
-            debug!("udev scan for sync interface failed: {e}");
+            warn!("udev scan for sync interface failed: {e}");
             return None;
         }
     };
-    let dev = devs
-        .into_iter()
-        .find(|d| d.interface_num == Some(sync.interface))?;
+    let Some(dev) = devs.into_iter().find(|d| d.interface_num == Some(sync.interface)) else {
+        debug!(
+            "sync interface {} not (yet) enumerated for PID {pid:#06x} — will retry \
+             next reconnect attempt",
+            sync.interface
+        );
+        return None;
+    };
 
     match hidraw_client::request_fd(helper_sock, &dev.hidraw_path.to_string_lossy()).await {
         Ok(fd) => match HidTransport::from_fd(fd) {
             Ok(t) => Some(t),
             Err(e) => {
-                debug!("failed to open sync-interface transport for PID {pid:#06x}: {e}");
+                warn!("failed to open sync-interface transport for PID {pid:#06x}: {e}");
                 None
             }
         },
         Err(e) => {
-            debug!(
+            warn!(
                 "sync-interface fd request failed for PID {pid:#06x} iface {}: {e}",
                 sync.interface
             );
@@ -607,6 +622,7 @@ async fn run_sync_listener(
             Ok(report) => match dispatcher.dispatch(&report) {
                 Ok(Some(result)) => {
                     if let Some(ev) = result.emit {
+                        debug!(signal = %ev.signal, fields = ?ev.fields, "sync-interface event");
                         if event_tx.send(ev).await.is_err() {
                             return; // primary session's forwarder is gone
                         }
@@ -616,11 +632,11 @@ async fn run_sync_listener(
                     // plain status-changed notifications.
                 }
                 Ok(None) => {} // report has no sync_events entry — ignore
-                Err(e) => debug!("sync-interface dispatch error: {e:?}"),
+                Err(e) => warn!("sync-interface dispatch error: {e:?}"),
             },
             Err(ReadError::Timeout) => {} // idle — keep listening
             Err(ReadError::Io(e)) => {
-                debug!("sync-interface read error: {e}");
+                warn!("sync-interface read error, stopping listener: {e}");
                 return;
             }
         }
