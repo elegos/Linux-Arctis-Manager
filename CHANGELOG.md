@@ -52,6 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The bundled Python venv's `python3` could be a dangling symlink on install (`lam-gui: ... File o directory non esistente`), on any system whose `/usr/sbin` isn't a symlink to `/usr/bin` (e.g. installs predating Fedora's `/usr`-merge): the RPM build container resolves plain `python3` to `/usr/sbin/python3` first (PATH order), and `python3 -m venv` bakes that unresolved path in verbatim. `make install-python` now resolves `python3` to its canonical, real path before creating the venv.
 - The tray icon's SVG is now parsed with `defusedxml` instead of the stdlib `xml` module (XXE hardening flagged by code scanning; the icon is a bundled local asset, but the fix removes the risk class outright instead of relying on a suppression comment).
 - GNOME Shell extension's `metadata.json` now declares support up to GNOME 50 (was capped at 49), so it no longer shows as incompatible on Fedora 44.
+- Focus monitor no longer spams `starting xprop` / `xprop exited` every 2 seconds on GNOME Wayland: `DISPLAY` is set there for XWayland compatibility even though Mutter never mirrors `_NET_ACTIVE_WINDOW`/`_NET_CLIENT_LIST` onto that root window, so the X11 backend was being selected and immediately failing in a loop; it's now correctly reported as unsupported like other GNOME Wayland sessions. The X11 backend also now gives up and logs once instead of retrying forever if `xprop -spy -root` keeps exiting immediately for any other reason.
 
 ## [2.4.1]
 
