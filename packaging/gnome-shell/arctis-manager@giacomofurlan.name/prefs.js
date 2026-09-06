@@ -99,20 +99,24 @@ export default class ArctisManagerPreferences extends ExtensionPreferences {
             logError(e, 'arctis-manager prefs: GetSettings failed');
         }
 
+        const labelFor = id => {
+            let label = id === 'nc_preset' ? I18n.translate('ui', 'nc') : I18n.translate('settings', id);
+            if (label === id)
+                label = I18n.translate('status', id);
+            return label;
+        };
+
         const ids = ['nc_preset'];
         for (const id of Object.keys((settingsPayload && settingsPayload.settings_config) || {})) {
-            if (!ids.includes(id))
+            // Excludes internal/protocol fields with no [settings] or
+            // [status] translation entry — e.g. the EQ curve editor's
+            // per-band gain1..gainN. Mirrors ConfigQuickSettings.qml.
+            if (!ids.includes(id) && labelFor(id) !== id)
                 ids.push(id);
         }
 
         for (const id of ids) {
-            let label = id === 'nc_preset' ? I18n.translate('ui', 'nc') : I18n.translate('settings', id);
-            if (label === id)
-                label = I18n.translate('status', id);
-            if (label === id)
-                label = id;
-
-            const row = new Adw.SwitchRow({title: label});
+            const row = new Adw.SwitchRow({title: labelFor(id)});
             group.add(row);
 
             row.active = settings.get_strv('pinned-settings').includes(id);
