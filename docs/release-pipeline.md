@@ -16,9 +16,26 @@ document is the spec to follow, not a proposal to re-litigate.
 > already exists: `build-pkg.yaml` (distro build matrix), `install-test.yaml`
 > (install verification), `release.yaml` (drafts a GitHub Release, then gates
 > COPR publishing behind `release-stable`/`release-testing` environment approval),
-> `copr-publish.yaml` (the actual COPR build+submit steps), and
+> `copr-publish.yaml` (the actual COPR build+submit steps — also directly
+> runnable on its own from the Actions tab, not just via `release.yaml`; see
+> §5), and
 > `.github/scripts/{changelog_body,format_rpm_changelog,insert_rpm_changelog}.py`
 > (changelog conversion — see §4).
+>
+> The `release-stable`/`release-testing` **environments don't exist yet** — the
+> COPR API credentials are plain repo-level secrets (§6), so this doesn't block
+> publishing, it just means `environment: <name>` currently has no protection
+> rules: GitHub auto-creates a bare, unprotected environment the first time a
+> job references an unknown name, so runs go through immediately with no
+> approval step until the two environments are actually created per §7.
+>
+> A `workflow_dispatch` trigger is only offered by GitHub's "Run workflow" UI
+> button once it exists in the workflow file **on the repository's default
+> branch** (`develop` here) — while this work is still only on a feature
+> branch, use `gh workflow run copr-publish.yaml --ref <branch> -f ref=<tag>
+> -f copr-project=<owner/project> -f environment-name=<name>` instead (works
+> on any branch/tag that already has the trigger, since the workflow has
+> already run at least once via another event).
 
 ## 1. Versioning and channels
 
