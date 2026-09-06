@@ -53,12 +53,26 @@ pub fn detect() -> FocusBackend {
     if std::env::var("SWAYSOCK").is_ok() {
         return FocusBackend::Sway;
     }
-    if std::env::var("DISPLAY").is_ok() {
-        return FocusBackend::X11;
-    }
     let de = std::env::var("XDG_CURRENT_DESKTOP")
         .unwrap_or_default()
         .to_ascii_lowercase();
+    // GNOME sets `DISPLAY` for XWayland compatibility even under a pure Wayland
+    // session, but Mutter never mirrors _NET_ACTIVE_WINDOW/_NET_CLIENT_LIST onto
+    // that XWayland root window. Falling through to the X11 backend there would
+    // spawn `xprop -spy -root`, which connects fine then immediately errors and
+    // exits, so the backend must be rejected before the DISPLAY check below.
+    let is_wayland = std::env::var("XDG_SESSION_TYPE").as_deref() == Ok("wayland")
+        || std::env::var("WAYLAND_DISPLAY").is_ok();
+    if is_wayland && de.contains("gnome") {
+        return FocusBackend::Unsupported(
+            "GNOME Wayland does not expose active window information. \
+             Hardware EQ app overrides are unavailable on this session."
+                .to_string(),
+        );
+    }
+    if std::env::var("DISPLAY").is_ok() {
+        return FocusBackend::X11;
+    }
     if de.contains("gnome") {
         return FocusBackend::Unsupported(
             "GNOME Wayland does not expose active window information. \

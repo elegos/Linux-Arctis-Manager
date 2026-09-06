@@ -13,9 +13,18 @@ use tracing::{info, warn};
 
 use super::event::FocusEvent;
 
+/// If `xprop -spy -root` exits this fast, it never actually started spying
+/// (e.g. the root window doesn't carry _NET_ACTIVE_WINDOW/_NET_CLIENT_LIST at
+/// all) and retrying will just fail the same way forever.
+const FAST_EXIT_THRESHOLD: std::time::Duration = std::time::Duration::from_secs(1);
+/// Consecutive fast exits before giving up instead of retrying indefinitely.
+const FAST_EXIT_GIVE_UP: u32 = 5;
+
 pub async fn run(tx: mpsc::Sender<FocusEvent>) {
+    let mut consecutive_fast_exits = 0u32;
     loop {
         info!("focus/x11: starting xprop");
+        let started_at = std::time::Instant::now();
         let mut child = match tokio::process::Command::new("xprop")
             .args(["-spy", "-root", "_NET_ACTIVE_WINDOW", "_NET_CLIENT_LIST"])
             .stdout(std::process::Stdio::piped())
@@ -91,6 +100,20 @@ pub async fn run(tx: mpsc::Sender<FocusEvent>) {
         }
 
         let _ = child.kill().await;
+
+        if started_at.elapsed() < FAST_EXIT_THRESHOLD {
+            consecutive_fast_exits += 1;
+            if consecutive_fast_exits >= FAST_EXIT_GIVE_UP {
+                warn!(
+                    "focus/x11: xprop exited immediately {consecutive_fast_exits} times in a row, \
+                     giving up (root window likely doesn't expose EWMH active-window properties)"
+                );
+                return;
+            }
+        } else {
+            consecutive_fast_exits = 0;
+        }
+
         tokio::time::sleep(super::DISCONNECT_PAUSE).await;
     }
 }
