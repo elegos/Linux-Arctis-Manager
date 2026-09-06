@@ -325,7 +325,8 @@ export default class ArctisManagerExtension extends Extension {
         const item = new PopupMenu.PopupBaseMenuItem({activate: false});
         item.add_child(new St.Label({text: this._labelFor(sid), x_expand: false}));
 
-        const slider = new Slider(max > min ? (value - min) / (max - min) : 0);
+        const fraction = max > min ? (value - min) / (max - min) : 0;
+        const slider = new Slider(Math.min(Math.max(fraction, 0), 1));
         slider.x_expand = true;
         slider.connect('drag-end', () => {
             const newValue = Math.round(min + slider.value * (max - min));
