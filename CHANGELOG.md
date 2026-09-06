@@ -53,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The tray icon's SVG is now parsed with `defusedxml` instead of the stdlib `xml` module (XXE hardening flagged by code scanning; the icon is a bundled local asset, but the fix removes the risk class outright instead of relying on a suppression comment).
 - GNOME Shell extension's `metadata.json` now declares support up to GNOME 50 (was capped at 49), so it no longer shows as incompatible on Fedora 44.
 - Focus monitor no longer spams `starting xprop` / `xprop exited` every 2 seconds on GNOME Wayland: `DISPLAY` is set there for XWayland compatibility even though Mutter never mirrors `_NET_ACTIVE_WINDOW`/`_NET_CLIENT_LIST` onto that root window, so the X11 backend was being selected and immediately failing in a loop; it's now correctly reported as unsupported like other GNOME Wayland sessions. The X11 backend also now gives up and logs once instead of retrying forever if `xprop -spy -root` keeps exiting immediately for any other reason.
+- Devices whose stream-volume/chat-mix values only ever arrive as unsolicited notifications (e.g. Nova Elite) could show only their polled settings (e.g. just OLED Brightness) after a cold daemon start, only gaining the rest once the headset was later power-cycled: a notification buffered ahead of a sync-read reply during startup was silently discarded instead of being dispatched, so its value never reached the settings panel until a later reconnect happened to deliver it while the event loop was already running.
 
 ## [2.4.1]
 
