@@ -11,7 +11,26 @@
 # Cross-device: doesn't hardcode a PID — enumerates every /dev/hidraw* node
 # under SteelSeries' vendor ID (0x1038) it finds.
 #
-# Usage: ./scripts/collect-debug-info.sh
+# Usage: ./scripts/collect-debug-info.sh [--usb-capture[=SECONDS]]
+#
+#   --usb-capture[=SECONDS]  Opt-in, needs root. Also records a raw USB
+#                            bus-level trace (via usbmon) for SECONDS
+#                            (default 40) into the bundle. Use this for a
+#                            device_init/"headset not ready" hang report:
+#                            hidraw-level tools (hid-recorder, below) only
+#                            show reports arriving at YOUR process, not what
+#                            lam-daemon itself writes out or whether the
+#                            device replies at all — a usbmon capture shows
+#                            both directions on the wire. Start the daemon
+#                            (or make sure it's already stuck retrying) and
+#                            have the headset powered on *before* running
+#                            this, since the capture window is short and
+#                            fixed. CAVEAT: usbmon captures per USB BUS, not
+#                            per device — if another USB device shares the
+#                            same bus/hub as the SteelSeries one, its traffic
+#                            is in the capture too. Review usbmon-bus*.txt
+#                            before attaching it anywhere.
+#
 # Output: a .tar.gz under /tmp, whose path is printed at the end. Attach
 # that file to your GitHub issue by hand — this script does not send or
 # upload anything on its own.
@@ -19,6 +38,22 @@
 set -uo pipefail
 
 VID="1038" # SteelSeries
+
+USB_CAPTURE_SECONDS=""
+for arg in "$@"; do
+    case "$arg" in
+        --usb-capture) USB_CAPTURE_SECONDS=40 ;;
+        --usb-capture=*) USB_CAPTURE_SECONDS="${arg#*=}" ;;
+        --help | -h)
+            sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'
+            exit 0
+            ;;
+        *)
+            echo "unknown argument: $arg (see --help)" >&2
+            exit 1
+            ;;
+    esac
+done
 
 WORK_DIR="$(mktemp -d /tmp/lam-debug-info.XXXXXX)"
 BUNDLE="${WORK_DIR}/bundle"
@@ -200,6 +235,58 @@ else
         done
     else
         echo "[skipped: sudo access unavailable]" >>"$REPORT"
+    fi
+fi
+
+# ── USB bus-level capture (usbmon) ──────────────────────────────────────────
+# Opt-in (--usb-capture): shows both directions of raw USB traffic — every
+# command write lam-daemon sends and every reply (or lack of one) the device
+# sends back — for whichever bus the SteelSeries device is on. This is the
+# tool for "device_init/headset_status never gets a reply" reports: unlike
+# the hid-recorder descriptor dump above (which only shows reports arriving
+# at ITS OWN reader, not what another process writes), usbmon sees the whole
+# URB traffic on the bus regardless of which process/interface it's on.
+if [[ -n "$USB_CAPTURE_SECONDS" ]]; then
+    section "USB bus-level capture (usbmon)"
+    if ! have lsusb; then
+        missing "lsusb" "usbutils (needed to find the bus number)"
+    else
+        BUS="$(lsusb -d "${VID}:" | head -1 | sed -n 's/^Bus \([0-9]\+\).*/\1/p')"
+        if [[ -z "$BUS" ]]; then
+            echo "[skipped: no SteelSeries device found by lsusb — is it plugged in?]" >>"$REPORT"
+        else
+            echo "SteelSeries device found on USB bus ${BUS}." >&2
+            echo "This needs root — you may be asked for your sudo password." >&2
+            echo "Capturing for ${USB_CAPTURE_SECONDS}s starting now — reproduce the" >&2
+            echo "issue (headset powered on, daemon running/stuck retrying) during" >&2
+            echo "this window." >&2
+            if sudo -v; then
+                sudo modprobe usbmon 2>/dev/null
+                MON_NODE="/sys/kernel/debug/usb/usbmon/${BUS}u"
+                if [[ ! -e "$MON_NODE" ]]; then
+                    echo "[skipped: ${MON_NODE} not found — debugfs may not be mounted" \
+                        "(try: sudo mount -t debugfs none /sys/kernel/debug) or the" \
+                        "usbmon kernel module isn't available]" >>"$REPORT"
+                else
+                    CAP_FILE="${BUNDLE}/usbmon-bus${BUS}.txt"
+                    echo "capturing... (this blocks for ${USB_CAPTURE_SECONDS}s)" >&2
+                    sudo timeout "${USB_CAPTURE_SECONDS}" cat "$MON_NODE" >"$CAP_FILE" 2>/dev/null
+                    sudo chown "$(id -u):$(id -g)" "$CAP_FILE" 2>/dev/null
+                    lines="$(wc -l <"$CAP_FILE" 2>/dev/null || echo 0)"
+                    {
+                        echo
+                        echo "--- capture summary ---"
+                        echo "bus ${BUS}, ${USB_CAPTURE_SECONDS}s, ${lines} line(s) -> usbmon-bus${BUS}.txt"
+                        echo "(one line per URB submit/complete; the SteelSeries device's own"
+                        echo " address on this bus may change across replugs — cross-check"
+                        echo " against the lsusb/hidraw output above for the run this capture"
+                        echo " was taken in, not a prior one)"
+                    } >>"$REPORT"
+                fi
+            else
+                echo "[skipped: sudo access unavailable]" >>"$REPORT"
+            fi
+        fi
     fi
 fi
 
