@@ -11,7 +11,7 @@
 # Cross-device: doesn't hardcode a PID — enumerates every /dev/hidraw* node
 # under SteelSeries' vendor ID (0x1038) it finds.
 #
-# Usage: ./scripts/collect-debug-info.sh [--usb-capture[=SECONDS]]
+# Usage: ./scripts/collect-debug-info.sh [--usb-capture[=SECONDS]] [--hidraw-capture[=SECONDS]]
 #
 #   --usb-capture[=SECONDS]  Opt-in, needs root. Also records a raw USB
 #                            bus-level trace (via usbmon) for SECONDS
@@ -29,7 +29,27 @@
 #                            per device — if another USB device shares the
 #                            same bus/hub as the SteelSeries one, its traffic
 #                            is in the capture too. Review usbmon-bus*.txt
-#                            before attaching it anywhere.
+#                            before attaching it anywhere. Requires the
+#                            kernel's usbmon (CONFIG_USB_MON) — some hardened/
+#                            custom kernels don't ship it; the report says so
+#                            if it's missing, and --hidraw-capture below is
+#                            the fallback that doesn't need it.
+#
+#   --hidraw-capture[=SECONDS]  Opt-in, needs root. Runs hid-recorder against
+#                            EVERY matched SteelSeries hidraw node in
+#                            parallel for SECONDS (default 40), not just the
+#                            quick 2s descriptor grab below. Doesn't need
+#                            usbmon/debugfs at all — works anywhere hidraw
+#                            itself works. Can't show what lam-daemon WRITES
+#                            (a second reader on the same node only sees
+#                            INPUT reports, not another process's writes),
+#                            but it does show, definitively, whether the
+#                            device ever sends anything back on a given
+#                            interface at all — e.g. whether interface 3
+#                            (command) ever replies to device_init while
+#                            interface 5 (sync) is confirmed already
+#                            chatty. Same reproduce-during-the-window caveat
+#                            as --usb-capture.
 #
 # Output: a .tar.gz under /tmp, whose path is printed at the end. Attach
 # that file to your GitHub issue by hand — this script does not send or
@@ -40,12 +60,15 @@ set -uo pipefail
 VID="1038" # SteelSeries
 
 USB_CAPTURE_SECONDS=""
+HIDRAW_CAPTURE_SECONDS=""
 for arg in "$@"; do
     case "$arg" in
         --usb-capture) USB_CAPTURE_SECONDS=40 ;;
         --usb-capture=*) USB_CAPTURE_SECONDS="${arg#*=}" ;;
+        --hidraw-capture) HIDRAW_CAPTURE_SECONDS=40 ;;
+        --hidraw-capture=*) HIDRAW_CAPTURE_SECONDS="${arg#*=}" ;;
         --help | -h)
-            sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,56p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -235,6 +258,49 @@ else
         done
     else
         echo "[skipped: sudo access unavailable]" >>"$REPORT"
+    fi
+fi
+
+# ── Extended hidraw capture (all interfaces, in parallel) ───────────────────
+# Opt-in (--hidraw-capture): doesn't need usbmon/debugfs, works anywhere
+# hidraw does. Can't show lam-daemon's own writes (a second reader on the
+# same node only sees INPUT reports, not another process's writes to it) —
+# but it settles, definitively, whether the device ever replies on a given
+# interface at all. Captures every matched node at once so activity across
+# interfaces (e.g. command vs sync) can be compared from the same window.
+if [[ -n "$HIDRAW_CAPTURE_SECONDS" ]]; then
+    section "Extended hidraw capture (all matched interfaces)"
+    if ((${#MATCHED_DEVS[@]} == 0)); then
+        echo "[skipped: no matching hidraw devices found above]" >>"$REPORT"
+    elif ! have hid-recorder; then
+        missing "hid-recorder" "hid-tools"
+    else
+        echo "Capturing all matched hidraw nodes for ${HIDRAW_CAPTURE_SECONDS}s —" >&2
+        echo "reproduce the issue (headset powered on, daemon running/stuck" >&2
+        echo "retrying) during this window." >&2
+        if sudo -v; then
+            pids=()
+            for dev in "${MATCHED_DEVS[@]}"; do
+                name="$(basename "$dev")"
+                out="${BUNDLE}/hid-descriptors/${name}-capture.txt"
+                sudo timeout "${HIDRAW_CAPTURE_SECONDS}" hid-recorder "$dev" >"$out" 2>&1 &
+                pids+=("$!")
+            done
+            echo "capturing... (this blocks for ${HIDRAW_CAPTURE_SECONDS}s)" >&2
+            wait "${pids[@]}" 2>/dev/null
+            {
+                echo
+                echo "--- capture summary ---"
+                for dev in "${MATCHED_DEVS[@]}"; do
+                    name="$(basename "$dev")"
+                    out="${BUNDLE}/hid-descriptors/${name}-capture.txt"
+                    lines="$(wc -l <"$out" 2>/dev/null || echo 0)"
+                    echo "$dev -> hid-descriptors/${name}-capture.txt (${lines} line(s))"
+                done
+            } >>"$REPORT"
+        else
+            echo "[skipped: sudo access unavailable]" >>"$REPORT"
+        fi
     fi
 fi
 
