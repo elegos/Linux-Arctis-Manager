@@ -79,7 +79,8 @@ impl DeviceSession {
                     .map_err(EngineError::Api)?
             };
 
-            let response = self.execute_read_op(&read_op).await?;
+            let (response, stray_events) = self.execute_read_op(&read_op).await?;
+            events.extend(stray_events);
 
             let fields = {
                 let api = ApiExecutor::new(&self.config);
@@ -328,7 +329,12 @@ impl DeviceSession {
         Ok(())
     }
 
-    async fn execute_read_op(&mut self, op: &ReadOp) -> Result<Vec<u8>, EngineError> {
+    /// Returns the matched response bytes, plus any `EmitEvent`s recovered
+    /// from stray reports buffered along the way (see below).
+    async fn execute_read_op(
+        &mut self,
+        op: &ReadOp,
+    ) -> Result<(Vec<u8>, Vec<EmitEvent>), EngineError> {
         match op.transport {
             Transport::HidIo => {
                 self.transport
@@ -344,6 +350,7 @@ impl DeviceSession {
                 // (the first two bytes of the request we just sent) before
                 // returning the real response.
                 let expected_header = &op.request_bytes[..op.request_bytes.len().min(2)];
+                let mut stray_events = Vec::new();
                 for _ in 0..8u8 {
                     let response = self
                         .transport
@@ -359,9 +366,34 @@ impl DeviceSession {
                     if expected_header.is_empty()
                         || response.get(..expected_header.len()) == Some(expected_header)
                     {
-                        return Ok(response);
+                        return Ok((response, stray_events));
                     }
-                    // Wrong report ID/command — async notification buffered before response.
+                    // Wrong report ID/command — async notification buffered
+                    // before the response (e.g. a stream-mix/chatmix push
+                    // fired by a fresh radio-connect handshake during
+                    // device_init). It's a legitimate sync_event, not noise —
+                    // dispatch it through the same table `forward_events`
+                    // uses so its value still reaches entry.status /
+                    // SettingsChanged instead of being silently dropped.
+                    let dispatched = {
+                        let dispatcher = SyncDispatcher::new(&self.config);
+                        dispatcher.dispatch(&response).ok().flatten()
+                    };
+                    if let Some(dr) = dispatched {
+                        if let Some(emit) = dr.emit {
+                            stray_events.push(emit);
+                        }
+                        for effect in dr.side_effects {
+                            // Boxed: dispatch_call_by_name's "sync_all" arm
+                            // calls run_sync_read, which calls back into
+                            // execute_read_op — an async recursion cycle that
+                            // needs indirection to have a finite-sized future.
+                            match Box::pin(self.dispatch_call_by_name(&effect.call)).await {
+                                Ok(side_events) => stray_events.extend(side_events),
+                                Err(e) => warn!("side effect '{}' failed: {e}", effect.call),
+                            }
+                        }
+                    }
                 }
                 Err(EngineError::Io(std::io::Error::new(
                     std::io::ErrorKind::TimedOut,
@@ -393,7 +425,7 @@ impl DeviceSession {
                     .read_feature(&mut buf)
                     .map_err(EngineError::Io)?;
                 buf.truncate(n);
-                Ok(buf)
+                Ok((buf, Vec::new()))
             }
         }
     }
@@ -812,6 +844,73 @@ sync_read:
         let events = rx.await.unwrap().unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].signal, "mic_volume_changed");
+    }
+
+    /// Regression test for the Nova Elite "missing sliders on cold daemon
+    /// start" bug: a report buffered ahead of a sync_read reply isn't always
+    /// noise — if its command byte matches a `sync_events` entry (e.g. the
+    /// stream-mix push fired by a fresh radio-connect handshake happening
+    /// right as device_init runs), it must still be dispatched and its
+    /// EmitEvent surfaced, not silently discarded like a true stray report.
+    #[tokio::test]
+    async fn run_sync_read_captures_known_sync_event_buffered_before_the_reply() {
+        let (engine_fd, peer_fd) = make_pair();
+        let config = cfg(r#"
+structs:
+  audio_settings:
+    outgoing:
+      - {name: report_id,  type: uint8, constant: 0x01}
+      - {name: command,    type: uint8, constant: 0x20}
+    incoming:
+      - {name: report_id,  type: uint8, constant: 0x01}
+      - {name: command,    type: uint8, constant: 0x20}
+      - {name: mic_volume, type: uint8}
+apis:
+  audio_settings:
+    read: {transport: HID_IO, chunk_size: 8}
+sync_read:
+  - struct: audio_settings
+    maps:
+      - {emit: mic_volume_changed, field: mic_volume}
+sync_events:
+  0x47:
+    emit: stream_mix_changed
+    fields:
+      - {name: stream_main, byte: 2}
+"#);
+        let session_config = config.clone();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        let task = tokio::spawn(async move {
+            let mut s = DeviceSession::new(session_config, engine_fd).expect("from_fd");
+            let result = s.run_sync_read().await;
+            let _ = tx.send(result);
+        });
+
+        let mut peer = HidTransport::from_fd(peer_fd).expect("from_fd");
+        peer.read_interrupt(Duration::from_millis(500))
+            .await
+            .expect("engine should send read request");
+
+        // Buffered ahead of the reply: a known sync_event (0x47, stream mix),
+        // same as what a real reconnect handshake fires unsolicited.
+        let mut stream_mix = vec![0u8; 8];
+        stream_mix[0] = 0x01;
+        stream_mix[1] = 0x47;
+        stream_mix[2] = 75; // stream_main
+        peer.write_interrupt(&stream_mix).await.unwrap();
+
+        let mut resp = vec![0u8; 8];
+        resp[0] = 0x01;
+        resp[1] = 0x20;
+        resp[2] = 42; // mic_volume
+        peer.write_interrupt(&resp).await.unwrap();
+
+        task.await.unwrap();
+        let events = rx.await.unwrap().unwrap();
+        assert_eq!(events.len(), 2, "both the stray sync_event and the sync_read reply must surface");
+        assert!(events.iter().any(|e| e.signal == "stream_mix_changed"));
+        assert!(events.iter().any(|e| e.signal == "mic_volume_changed"));
     }
 
     // ── E1-S5: async event loop ───────────────────────────────────────────────
