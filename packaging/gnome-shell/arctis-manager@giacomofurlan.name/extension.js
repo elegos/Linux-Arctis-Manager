@@ -23,6 +23,7 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
+import {Slider} from 'resource:///org/gnome/shell/ui/slider.js';
 
 import * as Dbus from './lib/dbus.js';
 import * as I18n from './lib/i18n.js';
@@ -129,6 +130,14 @@ export default class ArctisManagerExtension extends Extension {
     }
 
     _renderStatus() {
+        try {
+            this._renderStatusUnsafe();
+        } catch (e) {
+            logError(e, 'arctis-manager: _renderStatus failed');
+        }
+    }
+
+    _renderStatusUnsafe() {
         this._statusSection.removeAll();
 
         const categories = Object.keys(this._status || {});
@@ -316,7 +325,7 @@ export default class ArctisManagerExtension extends Extension {
         const item = new PopupMenu.PopupBaseMenuItem({activate: false});
         item.add_child(new St.Label({text: this._labelFor(sid), x_expand: false}));
 
-        const slider = new St.Slider({value: max > min ? (value - min) / (max - min) : 0});
+        const slider = new Slider(max > min ? (value - min) / (max - min) : 0);
         slider.x_expand = true;
         slider.connect('drag-end', () => {
             const newValue = Math.round(min + slider.value * (max - min));
