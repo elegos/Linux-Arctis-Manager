@@ -2,7 +2,7 @@
     "uuid": "arctis-manager@giacomofurlan.name",
     "name": "Arctis Manager",
     "description": "Status and quick settings for SteelSeries Arctis headsets",
-    "shell-version": ["45", "46", "47", "48", "49"],
+    "shell-version": ["45", "46", "47", "48", "49", "50"],
     "url": "https://github.com/elegos/Linux-Arctis-Manager",
     "settings-schema": "name.giacomofurlan.arctismanager",
     "version-name": "1.0"
