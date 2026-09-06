@@ -30,9 +30,14 @@ pub struct DeviceSession {
 
 impl DeviceSession {
     pub fn new(config: DeviceConfig, fd: OwnedFd) -> std::io::Result<Self> {
+        let unnumbered = config
+            .device
+            .as_ref()
+            .and_then(|d| d.hid.as_ref())
+            .is_some_and(|h| h.unnumbered_reports);
         Ok(Self {
             config,
-            transport: HidTransport::from_fd(fd)?,
+            transport: HidTransport::from_fd(fd)?.with_synthetic_read_report_id(unnumbered),
         })
     }
 
@@ -775,6 +780,67 @@ sync_read:
         resp[0] = 0x00; // report_id
         resp[1] = 0x45; // command
         resp[2] = 42; // mic_volume
+        peer.write_interrupt(&resp).await.unwrap();
+
+        task.await.unwrap();
+        let events = rx.await.unwrap().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].signal, "mic_volume_changed");
+    }
+
+    /// Regression test for the Nova 7 Gen2 device_init hang: a real
+    /// hid-recorder capture on a bug reporter's own hardware showed the
+    /// device's actual reply starting directly with the command byte, no
+    /// leading report_id — confirmed via the HID descriptor having no
+    /// Report ID tag at all. Linux hidraw needs a synthetic report_id byte
+    /// on writes regardless but never adds one back on reads, so every real
+    /// reply was silently misclassified as a stray event and discarded,
+    /// forever. `hid.unnumbered_reports: true` makes `DeviceSession`
+    /// synthesize the byte back onto every read so the existing struct
+    /// layout (report_id assumed first, symmetric with the write side)
+    /// still applies without any byte-offset changes.
+    #[tokio::test]
+    async fn run_sync_read_with_unnumbered_reports_prepends_missing_report_id() {
+        let (engine_fd, peer_fd) = make_pair();
+        let config = cfg(r#"
+device:
+  hid:
+    unnumbered_reports: true
+structs:
+  audio_settings:
+    outgoing:
+      - {name: report_id,  type: uint8, constant: 0x00}
+      - {name: command,    type: uint8, constant: 0x45}
+    incoming:
+      - {name: report_id,  type: uint8, constant: 0x00}
+      - {name: command,    type: uint8, constant: 0x45}
+      - {name: mic_volume, type: uint8}
+apis:
+  audio_settings:
+    read: {transport: HID_IO, chunk_size: 8}
+sync_read:
+  - struct: audio_settings
+    maps:
+      - {emit: mic_volume_changed, field: mic_volume}
+"#);
+        let session_config = config.clone();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        let task = tokio::spawn(async move {
+            let mut s = DeviceSession::new(session_config, engine_fd).expect("from_fd");
+            let result = s.run_sync_read().await;
+            let _ = tx.send(result);
+        });
+
+        // Serve the read: receive the request (still framed with the
+        // synthetic leading byte — writes are unaffected), reply with the
+        // REAL device framing — no leading report_id, command byte first.
+        let mut peer = HidTransport::from_fd(peer_fd).expect("from_fd");
+        peer.read_interrupt(Duration::from_millis(500))
+            .await
+            .expect("engine should send read request");
+
+        let resp = [0x45u8, 42, 0, 0, 0, 0, 0]; // no leading 0x00
         peer.write_interrupt(&resp).await.unwrap();
 
         task.await.unwrap();

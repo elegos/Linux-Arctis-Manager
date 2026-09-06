@@ -88,6 +88,24 @@ device:
   # real unsolicited wake event (no such concept exists in its
   # architecture), so it never actually tested whether interface 3 carries
   # spontaneous notifications for this family. See [[project-v3-device-import]].
+  #
+  # unnumbered_reports: true — INFERRED, not independently captured on gen1
+  # hardware (unlike sync_interface above, which every raw spec file states
+  # explicitly). This device's sibling PID 0x22A1 (nova_7_gen2.yaml, same
+  # dongle silicon/interface scheme, same lack of a Report ID tag in its own
+  # captured HID descriptor) was confirmed via a real hidraw capture: every
+  # command-interface reply starts with the command byte directly (no
+  # leading report_id byte), which the daemon was misreading as an
+  # unrecognized stray event forever. Since gen1 shares the same USB
+  # interface numbering/usage-page scheme (that's the whole basis v2 used
+  # interface 3 for both, and why every raw spec variant across generations
+  # agrees on sync_interface 5), the same descriptor shape is very likely
+  # here too. Low-risk to apply speculatively even if wrong: every struct's
+  # `report_id` field is a hard `constant: 0x00` check, so an incorrect
+  # guess here fails loud (`ConstantMismatch` on the very next field, the
+  # command byte) rather than silently misdecoding status — no worse than
+  # today's "stuck" state, not a new corruption risk. Flip back to `false`
+  # if a real capture on non-gen2 hardware ever shows otherwise.
   variants:
     - product_id: 0x2202
       name: "Arctis Nova 7"
@@ -112,6 +130,7 @@ device:
       interface: 3
     sync_interface:
       interface: 5
+    unnumbered_reports: true
 
   capabilities:
     - battery

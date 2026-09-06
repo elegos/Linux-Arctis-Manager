@@ -63,7 +63,10 @@ device:
   # family, now CONFIRMED as sync_interface 5 (real-hardware bug report
   # against sibling PID 0x22A1, cross-checked against every Nova 7 family
   # raw spec file — all declare identical sync-interface 5, no per-SKU
-  # exception, including this 7P tier).
+  # exception, including this 7P tier). `unnumbered_reports: true` below is
+  # the same inferred-not-independently-captured call made in nova_7.yaml —
+  # see that file's note for the full reasoning and the fail-safe argument
+  # for applying it speculatively.
   variants:
     - product_id: 0x220A
       name: "Arctis Nova 7P"
@@ -76,6 +79,7 @@ device:
       interface: 3
     sync_interface:
       interface: 5
+    unnumbered_reports: true
 
   capabilities:
     - battery
