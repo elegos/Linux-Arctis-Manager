@@ -99,13 +99,17 @@ jobs:
 
   # Both publish jobs run on a tag push (right after the release draft is
   # created) and on a manual workflow_dispatch (targeting an existing tag's
-  # existing release) - `needs: release` doesn't block the dispatch path
-  # since a skipped job still satisfies `needs:`. See copr-publish.yaml for
-  # the actual build+submit steps, and docs/release-pipeline.md for the
+  # existing release). `release` is tag-push-only, so on a dispatch run it's
+  # `skipped`, not `success` - and a plain `needs: [prep, release]` job has
+  # an *implicit* `if: success()`, which GitHub evaluates false when any
+  # needed job was skipped rather than succeeded. Without the explicit
+  # needs.release.result check below, both publish jobs silently no-op on
+  # every manual dispatch (confirmed via a real run). See copr-publish.yaml
+  # for the actual build+submit steps, and docs/release-pipeline.md for the
   # full design (channel naming, secrets, one-time setup).
   publish-stable:
     needs: [prep, release]
-    if: ${{ !contains(needs.prep.outputs.ref, '-') }}
+    if: ${{ !cancelled() && needs.prep.result == 'success' && (needs.release.result == 'success' || needs.release.result == 'skipped') && !contains(needs.prep.outputs.ref, '-') }}
     uses: ./.github/workflows/copr-publish.yaml
     with:
       ref: ${{ needs.prep.outputs.ref }}
@@ -116,6 +120,7 @@ jobs:
 
   publish-unstable:
     needs: [prep, release]
+    if: ${{ !cancelled() && needs.prep.result == 'success' && (needs.release.result == 'success' || needs.release.result == 'skipped') }}
     uses: ./.github/workflows/copr-publish.yaml
     with:
       ref: ${{ needs.prep.outputs.ref }}
