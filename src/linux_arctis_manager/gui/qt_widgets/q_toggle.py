@@ -52,6 +52,7 @@ class QToggle(QCheckBox):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
+        painter.setOpacity(1.0 if self.isEnabled() else 0.4)
         
         QRect(0, 0, self.width(), self.height())
 
