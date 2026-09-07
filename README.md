@@ -11,6 +11,8 @@ An open-source replacement for SteelSeries GG, to manage your Arctis headset on 
 [![Discord](https://img.shields.io/badge/Discord-join-7289DA?logo=discord&logoColor=white)](https://discord.gg/FXfvUXWXt4)
 [![Fluxer](https://img.shields.io/badge/Fluxer-join-5d5cfe?logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIzLjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCI+PHBhdGggZD0iTTQgOC41YzIuNjYtMi42NiA1LjMzLTIuNjYgOCAwczUuMzMgMi42NiA4IDAiLz48cGF0aCBkPSJNNCAxNS41YzIuNjYtMi42NiA1LjMzLTIuNjYgOCAwczUuMzMgMi42NiA4IDAiLz48L3N2Zz4=)](https://chat.giacomofurlan.name/invite/f8vnlZGp)
 
+<a href="https://www.paypal.com/donate/?hosted_button_id=W68BN982DMU9U"><img alt="Paypal donation" src="docs/images/paypal-donate-blue.svg" height="72"></a>
+
 ## 🎚️ Key Points
 
 - Control ChatMix - enable and control balance between `Media` and `Chat` audio streams
