@@ -28,7 +28,7 @@ class QSettingsWidget(QWidget):
     settings: dict[str, int|bool|str]
     settings_config: dict[str, ConfigSetting]
 
-    def __init__(self, parent: QWidget, i18n_section_name: str, dbus_settings_section: str):
+    def __init__(self, parent: QWidget | None, i18n_section_name: str, dbus_settings_section: str):
         super().__init__(parent)
 
         layout = QVBoxLayout()

@@ -84,7 +84,10 @@ mod tests {
         );
 
         std::env::remove_var("XDG_RUNTIME_DIR");
-        assert_eq!(lease_path(), PathBuf::from("/tmp/lam-sink-visibility.lease"));
+        assert_eq!(
+            lease_path(),
+            PathBuf::from("/tmp/lam-sink-visibility.lease")
+        );
 
         match original {
             Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
