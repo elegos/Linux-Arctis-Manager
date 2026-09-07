@@ -81,7 +81,8 @@ Cross-checked against SteelSeries' own device specs, not just the previous v2 li
 Choose the installation method that fits your setup:
 
 - **[Arch Linux (AUR)](#arch-linux-aur)** - community-maintained package for Arch users
-- **[Build from source](#build-from-source)** - for all other Linux distros (Fedora, Bazzite, Debian, Ubuntu, ...)
+- **[Fedora (COPR)](#fedora-copr)** - prebuilt RPM packages for Fedora/Bazzite
+- **[Build from source](#build-from-source)** - for all other Linux distros (Debian, Ubuntu, ...)
 
 ---
 
@@ -116,13 +117,61 @@ systemctl --user enable --now lam-hidraw-helper.service lam-daemon.service
 
 ---
 
+### Fedora (COPR)
+
+Prebuilt RPM packages are published on [COPR](https://copr.fedorainfracloud.org/),
+split into two channels:
+
+- `elegos/linux-arctis-manager` - stable, tagged releases only
+- `elegos/linux-arctis-manager-testing` - every alpha/beta/rc build, ahead of stable
+
+Enable the channel you want and install the main package:
+
+```bash
+sudo dnf copr enable elegos/linux-arctis-manager
+# or, for the testing channel:
+# sudo dnf copr enable elegos/linux-arctis-manager-testing
+
+sudo dnf install linux-arctis-manager
+```
+
+Optionally add whichever UI shell(s) you want, on top of the main package:
+
+```bash
+sudo dnf install linux-arctis-manager-plasma-widget    # KDE Plasma 6 widget
+sudo dnf install linux-arctis-manager-gnome-extension  # GNOME Shell 45+ extension
+```
+
+The package's post-install scriptlet applies the required capability to
+`lam-hidraw-helper` - just enable the services:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now lam-hidraw-helper.service lam-daemon.service
+```
+
+> [!TIP]
+> To launch the system tray app automatically on login:
+>
+> ```bash
+> ln -sf /usr/share/applications/ArctisManagerSystray.desktop ~/.config/autostart/
+> ```
+>
+> On KDE Plasma 6, `linux-arctis-manager-plasma-widget` adds a native widget
+> to a panel like any other widget ("Add Widgets..." → "Arctis Manager");
+> right-click it for its Configure dialog. On GNOME Shell 45+,
+> `linux-arctis-manager-gnome-extension` adds an equivalent extension - enable
+> it with the Extensions app (or
+> `gnome-extensions enable arctis-manager@giacomofurlan.name`); its
+> Preferences page picks which status fields and quick settings it shows.
+
+---
+
 ### Build from source
 
-Prebuilt RPM/deb packages aren't published yet (Fedora/Bazzite users can build
-the `.spec` in `packaging/fedora/` locally with `make container-build-rpm`,
-which produces a `.rpm` under `dist/`). Until then, building straight from
-source with the provided `Makefile` is the supported path everywhere except
-Arch.
+Fedora/Bazzite users: prefer the [COPR packages](#fedora-copr) above. Building
+straight from source with the provided `Makefile` is the supported path for
+every other distro (Debian, Ubuntu, ...).
 
 #### Prerequisites
 
@@ -146,6 +195,14 @@ make enable           # enable + start lam-hidraw-helper and lam-daemon (no sudo
 `make install` accepts the usual `PREFIX`/`DESTDIR` overrides — see `make help`
 for the full variable list, or the packaging recipes in `packaging/arch/PKGBUILD`
 and `packaging/fedora/linux-arctis-manager.spec` for reference.
+
+> [!WARNING]
+> `PREFIX` defaults to `/usr/local`, not `/usr` — the AUR/COPR packages'
+> prefix. The two installs coexist on disk without file conflicts, but you'll
+> end up with two separate sets of binaries, systemd units and desktop
+> entries. Uninstall one before installing the other (see
+> [Uninstall / Cleanup](#-uninstall--cleanup)) rather than running both side
+> by side.
 
 > [!TIP]
 > To launch the system tray app automatically on login:
@@ -173,6 +230,7 @@ and `packaging/fedora/linux-arctis-manager.spec` for reference.
 Choose the method that matches your installation method:
 
 - **[Arch Linux (AUR)](#arch-linux-aur-1)**
+- **[Fedora (COPR)](#fedora-copr-1)**
 - **[Build from source](#build-from-source-1)**
 
 ### Arch Linux (AUR)
@@ -180,6 +238,15 @@ Use the system package manager — the pre-removal hook stops and disables the s
 
 ```bash
 sudo pacman -Rns linux-arctis-manager
+```
+
+### Fedora (COPR)
+
+Removing the main package also pulls in whichever UI-shell subpackages you
+installed, since they `Requires:` it:
+
+```bash
+sudo dnf remove linux-arctis-manager
 ```
 
 ### Build from source
