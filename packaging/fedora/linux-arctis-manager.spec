@@ -82,6 +82,11 @@ Requires:       hicolor-icon-theme
 # all. Falls back to a per-user pip venv, with explicit consent, when absent.
 Suggests:       python3-torch
 
+# Only needed for the optional "hide_physical_sink" General setting (GH #67)
+# — the shipped WirePlumber policy script is a no-op without it, and the
+# rest of the daemon only ever uses pactl/pw-cli, never WirePlumber directly.
+Suggests:       wireplumber
+
 %description
 Linux Arctis Manager replaces the SteelSeries GG software for managing
 SteelSeries Arctis headsets on Linux. It provides a user-space daemon
@@ -184,6 +189,8 @@ fi
 %{_datadir}/icons/hicolor/scalable/apps/arctis-manager-symbolic.svg
 %{_userunitdir}/lam-daemon.service
 %{_userunitdir}/lam-hidraw-helper.service
+%{_datadir}/wireplumber/scripts/lam/sink-visibility.lua
+%{_datadir}/wireplumber/wireplumber.conf.d/51-lam-sink-visibility.conf
 %{_libdir}/linux-arctis-manager/
 
 %files lang

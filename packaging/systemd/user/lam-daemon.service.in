@@ -11,5 +11,14 @@ Restart=on-failure
 RestartSec=5
 Environment=RUST_LOG=info,lam_daemon::focus_monitor=debug
 
+# Belt-and-suspenders cleanup for the optional "hide_physical_sink" setting
+# (GH #67): ExecStopPost runs after the service stops for any reason,
+# including crash/SIGKILL, so the physical sink is never left hidden if the
+# daemon dies before it can remove the lease itself (see
+# daemon/engine/src/sink_visibility.rs and
+# packaging/wireplumber/sink-visibility.lua). "-" makes it non-fatal when
+# the lease is already gone (the normal shutdown path removes it itself).
+ExecStopPost=-rm -f %t/lam-sink-visibility.lease
+
 [Install]
 WantedBy=default.target
