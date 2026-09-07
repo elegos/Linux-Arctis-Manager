@@ -109,6 +109,12 @@ jobs:
           VERSION_RAW=$(cat VERSION)
           VERSION=$(echo "$VERSION_RAW" | sed 's/-/~/g')
           RELEASE=1
+          # container job runs as root (--user root) while the workspace
+          # dir was checked out under the runner's own uid - git's
+          # ownership guard then refuses to read it at all ("detected
+          # dubious ownership") until it's explicitly trusted (confirmed
+          # via a real run).
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           # HEAD, not github.sha: this job is a reusable workflow_call, and
           # on a manual workflow_dispatch run github.sha is the branch the
           # run was dispatched from, not inputs.ref - HEAD is always what
