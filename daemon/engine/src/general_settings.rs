@@ -11,6 +11,8 @@ pub struct GeneralSettings {
     pub redirect_audio_on_disconnect: bool,
     #[serde(default)]
     pub redirect_audio_on_disconnect_device: Option<String>,
+    #[serde(default)]
+    pub hide_physical_sink: bool,
 }
 
 impl GeneralSettings {
@@ -34,6 +36,7 @@ impl GeneralSettings {
             "redirect_audio_on_connect": self.redirect_audio_on_connect,
             "redirect_audio_on_disconnect": self.redirect_audio_on_disconnect,
             "redirect_audio_on_disconnect_device": self.redirect_audio_on_disconnect_device,
+            "hide_physical_sink": self.hide_physical_sink,
         })
     }
 
@@ -54,6 +57,13 @@ impl GeneralSettings {
                 "default_value": null,
                 "options_source": "pulse_audio_devices",
                 "options_mapping": {"value": "id", "label": "description"}
+            },
+            "hide_physical_sink": {
+                "type": "toggle",
+                "default_value": false,
+                "available": crate::sink_visibility::wireplumber_available(),
+                "unavailable_reason": "wireplumber_required",
+                "values": {"on": true, "off": false, "on_label": "on", "off_label": "off"}
             }
         })
     }
@@ -64,6 +74,7 @@ impl GeneralSettings {
             "redirect_audio_on_connect"
                 | "redirect_audio_on_disconnect"
                 | "redirect_audio_on_disconnect_device"
+                | "hide_physical_sink"
         )
     }
 
@@ -99,6 +110,14 @@ impl GeneralSettings {
                     false
                 }
             }
+            "hide_physical_sink" => {
+                if let Some(b) = json_val.as_bool() {
+                    self.hide_physical_sink = b;
+                    true
+                } else {
+                    false
+                }
+            }
             _ => false,
         }
     }
@@ -116,6 +135,7 @@ mod tests {
         assert!(!g.redirect_audio_on_connect);
         assert!(!g.redirect_audio_on_disconnect);
         assert!(g.redirect_audio_on_disconnect_device.is_none());
+        assert!(!g.hide_physical_sink);
     }
 
     #[test]
@@ -124,6 +144,7 @@ mod tests {
             redirect_audio_on_connect: true,
             redirect_audio_on_disconnect: false,
             redirect_audio_on_disconnect_device: Some("alsa_output.pci-test".to_owned()),
+            hide_physical_sink: true,
         };
         let j = g.to_json();
         assert!(j["redirect_audio_on_connect"].as_bool() == Some(true));
@@ -132,6 +153,7 @@ mod tests {
             j["redirect_audio_on_disconnect_device"],
             "alsa_output.pci-test"
         );
+        assert!(j["hide_physical_sink"].as_bool() == Some(true));
     }
 
     #[test]
@@ -142,7 +164,7 @@ mod tests {
     }
 
     #[test]
-    fn settings_config_has_three_fields_with_correct_types() {
+    fn settings_config_has_four_fields_with_correct_types() {
         let sc = GeneralSettings::settings_config_json();
         assert_eq!(sc["redirect_audio_on_connect"]["type"], "toggle");
         assert_eq!(sc["redirect_audio_on_disconnect"]["type"], "toggle");
@@ -151,6 +173,9 @@ mod tests {
             sc["redirect_audio_on_disconnect_device"]["options_source"],
             "pulse_audio_devices"
         );
+        assert_eq!(sc["hide_physical_sink"]["type"], "toggle");
+        assert_eq!(sc["hide_physical_sink"]["unavailable_reason"], "wireplumber_required");
+        assert!(sc["hide_physical_sink"]["available"].is_boolean());
     }
 
     #[test]
@@ -164,6 +189,7 @@ mod tests {
         assert!(GeneralSettings::is_general_field(
             "redirect_audio_on_disconnect_device"
         ));
+        assert!(GeneralSettings::is_general_field("hide_physical_sink"));
         assert!(!GeneralSettings::is_general_field("volume"));
         assert!(!GeneralSettings::is_general_field("unknown"));
     }
@@ -175,6 +201,15 @@ mod tests {
         assert!(g.redirect_audio_on_connect);
         assert!(g.set_field("redirect_audio_on_connect", "false"));
         assert!(!g.redirect_audio_on_connect);
+    }
+
+    #[test]
+    fn set_field_hide_physical_sink_toggle_on_off() {
+        let mut g = GeneralSettings::default();
+        assert!(g.set_field("hide_physical_sink", "true"));
+        assert!(g.hide_physical_sink);
+        assert!(g.set_field("hide_physical_sink", "false"));
+        assert!(!g.hide_physical_sink);
     }
 
     #[test]
@@ -219,6 +254,7 @@ mod tests {
             redirect_audio_on_connect: true,
             redirect_audio_on_disconnect: true,
             redirect_audio_on_disconnect_device: Some("alsa_output.test".to_owned()),
+            hide_physical_sink: true,
         };
         original.save_to_file(&path).unwrap();
         let loaded = GeneralSettings::load_from_file(&path);
@@ -228,6 +264,7 @@ mod tests {
             loaded.redirect_audio_on_disconnect_device.as_deref(),
             Some("alsa_output.test")
         );
+        assert!(loaded.hide_physical_sink);
     }
 
     #[test]

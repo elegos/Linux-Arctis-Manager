@@ -130,6 +130,8 @@ struct SettingsInterface {
     state: Arc<Mutex<AppState>>,
     signal_tx: broadcast::Sender<SignalEvent>,
     settings_base_dir: std::path::PathBuf,
+    audio_shared: Arc<Mutex<Option<AudioSetup>>>,
+    visibility_shared: Arc<Mutex<Option<crate::sink_visibility::LeaseGuard>>>,
 }
 
 #[interface(name = "name.giacomofurlan.ArctisManager.Next.Settings")]
@@ -162,6 +164,25 @@ impl SettingsInterface {
                 build_settings_json(&s)
             };
             let _ = self.signal_tx.send(SE::SettingsChanged { json });
+
+            // React immediately rather than waiting for the next connect/
+            // disconnect event, so toggling this while a device is already
+            // connected takes effect right away.
+            if setting == "hide_physical_sink" {
+                if value == "true" {
+                    if let Some(sink) = self.audio_shared.lock().await.as_ref() {
+                        crate::maybe_start_hiding(
+                            &self.state,
+                            &self.visibility_shared,
+                            sink.physical_sink.clone(),
+                        )
+                        .await;
+                    }
+                } else if let Some(refresher) = self.visibility_shared.lock().await.take() {
+                    refresher.stop().await;
+                }
+            }
+
             return true;
         }
 
@@ -1843,6 +1864,7 @@ pub async fn start_dbus_service(
     signal_tx: broadcast::Sender<SignalEvent>,
     settings_base_dir: std::path::PathBuf,
     audio_shared: Arc<Mutex<Option<AudioSetup>>>,
+    visibility_shared: Arc<Mutex<Option<crate::sink_visibility::LeaseGuard>>>,
     nc_runtime: Arc<Mutex<NcRuntime>>,
     mic_router: Arc<Mutex<MicRouterState>>,
     vc_runtime: Arc<Mutex<VcLadspaRuntime>>,
@@ -1878,6 +1900,8 @@ pub async fn start_dbus_service(
                 state: Arc::clone(&state),
                 signal_tx: signal_tx.clone(),
                 settings_base_dir: settings_base_dir.clone(),
+                audio_shared: Arc::clone(&audio_shared),
+                visibility_shared: Arc::clone(&visibility_shared),
             },
         )?
         .serve_at(
@@ -2695,6 +2719,7 @@ mod tests {
                 redirect_audio_on_connect: true,
                 redirect_audio_on_disconnect: false,
                 redirect_audio_on_disconnect_device: Some("alsa_output.test".to_owned()),
+                hide_physical_sink: false,
             },
             general_settings_path: PathBuf::from("/tmp/gs.yaml"),
         };
@@ -2705,7 +2730,7 @@ mod tests {
             json["general"]["redirect_audio_on_disconnect_device"],
             "alsa_output.test"
         );
-        // settings_config must include the 3 general fields
+        // settings_config must include the 4 general fields
         assert_eq!(
             json["settings_config"]["redirect_audio_on_connect"]["type"],
             "toggle"
@@ -2713,6 +2738,10 @@ mod tests {
         assert_eq!(
             json["settings_config"]["redirect_audio_on_disconnect_device"]["type"],
             "select"
+        );
+        assert_eq!(
+            json["settings_config"]["hide_physical_sink"]["type"],
+            "toggle"
         );
     }
 
