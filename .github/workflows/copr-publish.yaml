@@ -176,7 +176,14 @@ jobs:
           printf '[copr-cli]\nlogin = %s\nusername = %s\ntoken = %s\ncopr_url = %s\n' \
               "$COPR_LOGIN" "$COPR_USERNAME" "$COPR_TOKEN" "$COPR_URL" > ~/.config/copr
           chmod 600 ~/.config/copr
-          copr-cli build "${{ inputs.copr-project }}" "$HOME"/rpmbuild/SRPMS/*.src.rpm
+          # Both the Rust build (cargo fetching crates.io for lam-daemon's
+          # deps) and the Python venv build (pip fetching PyPI) need real
+          # internet access during %build - COPR's project-level chroot
+          # default is network-disabled (confirmed via a real failed build:
+          # "Could not resolve host: index.crates.io"), so it must be
+          # switched on per-build here rather than relying on a project
+          # setting.
+          copr-cli build --enable-net on "${{ inputs.copr-project }}" "$HOME"/rpmbuild/SRPMS/*.src.rpm
 
       - name: Take the GitHub Release out of draft
         if: ${{ inputs.finalize-release }}
