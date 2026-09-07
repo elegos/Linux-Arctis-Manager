@@ -14,6 +14,7 @@ mod mic_router;
 mod nc_config;
 mod nc_manager;
 mod rvc_live_chain;
+mod sink_visibility;
 mod state;
 mod stream_monitor;
 mod vc;
@@ -274,6 +275,7 @@ async fn run_device(
     app_state: Arc<Mutex<AppState>>,
     signal_tx: broadcast::Sender<SignalEvent>,
     audio_shared: Arc<Mutex<Option<audio::AudioSetup>>>,
+    visibility_shared: Arc<Mutex<Option<sink_visibility::LeaseGuard>>>,
 ) {
     let path_str = info.hidraw_path.to_string_lossy().to_string();
     info!("monitoring {path_str} (PID={:#06x})", info.pid);
@@ -425,7 +427,10 @@ async fn run_device(
                         if let (Some(game), Some(chat)) = chatmix_from_events(&init_events) {
                             audio::set_chatmix(game, chat).await;
                         }
+                        let sink_name = setup.physical_sink.clone();
                         *guard = Some(setup);
+                        drop(guard);
+                        maybe_start_hiding(&app_state, &visibility_shared, sink_name).await;
                     }
                     Err(e) => warn!("audio setup failed for {path_str}: {e}"),
                 }
@@ -505,6 +510,7 @@ async fn run_device(
             signal_tx.clone(),
             info.hidraw_path.clone(),
             Arc::clone(&audio_shared),
+            Arc::clone(&visibility_shared),
         ));
 
         // If a distinct sync interface is open, keep draining it for the
@@ -532,6 +538,9 @@ async fn run_device(
         // Tear down any sinks still alive (e.g. hidraw EOF while headset was on).
         if let Some(setup) = audio_shared.lock().await.take() {
             audio::teardown_sinks(setup).await;
+        }
+        if let Some(refresher) = visibility_shared.lock().await.take() {
+            refresher.stop().await;
         }
 
         tokio::time::sleep(Duration::from_secs(1)).await;
@@ -661,6 +670,7 @@ async fn forward_events(
     signal_tx: broadcast::Sender<SignalEvent>,
     hidraw_path: PathBuf,
     audio_for_task: Arc<Mutex<Option<audio::AudioSetup>>>,
+    visibility_for_task: Arc<Mutex<Option<sink_visibility::LeaseGuard>>>,
 ) {
     // Edge-detect state: the device re-emits full status (including
     // radio_connection_status and chatmix_*) on every periodic poll,
@@ -712,6 +722,9 @@ async fn forward_events(
                         info!("headset wireless off: removing virtual sinks");
                         audio::teardown_sinks(s).await;
                     }
+                    if let Some(refresher) = visibility_for_task.lock().await.take() {
+                        refresher.stop().await;
+                    }
                     // Redirect to user-chosen sink on wireless disconnect.
                     let (do_redirect, target) = {
                         let s = state_for_events.lock().await;
@@ -733,7 +746,14 @@ async fn forward_events(
                         match audio::setup_sinks().await {
                             Ok(s) => {
                                 info!("headset wireless on: virtual sinks created");
+                                let sink_name = s.physical_sink.clone();
                                 *audio_for_task.lock().await = Some(s);
+                                maybe_start_hiding(
+                                    &state_for_events,
+                                    &visibility_for_task,
+                                    sink_name,
+                                )
+                                .await;
 
                                 // Redirect default sink to Arctis_Media on
                                 // wireless (re)connect, mirroring the
@@ -778,6 +798,26 @@ async fn forward_events(
                 }
             }
         }
+    }
+}
+
+/// Starts the sink-visibility lease refresher for `sink_name` if the
+/// `hide_physical_sink` setting is currently on and nothing is refreshing
+/// yet. Shared between the cold-start/reconnect call sites in this file and
+/// the settings-toggle handler in `dbus.rs` (same crate, so this private fn
+/// is reachable from that child module without needing `pub`).
+async fn maybe_start_hiding(
+    app_state: &Arc<Mutex<AppState>>,
+    visibility_shared: &Arc<Mutex<Option<sink_visibility::LeaseGuard>>>,
+    sink_name: String,
+) {
+    let enabled = app_state.lock().await.general_settings.hide_physical_sink;
+    if !enabled {
+        return;
+    }
+    let mut guard = visibility_shared.lock().await;
+    if guard.is_none() {
+        *guard = Some(sink_visibility::LeaseGuard::start(sink_name));
     }
 }
 
@@ -892,6 +932,12 @@ async fn main() {
     // cleared on disconnect.  Shared with the EQ D-Bus interface for routing.
     let audio_shared: Arc<Mutex<Option<audio::AudioSetup>>> = Arc::new(Mutex::new(None));
 
+    // Set only while the physical-sink-hiding setting is on AND a device is
+    // connected with sinks set up; see `sink_visibility` for why this is a
+    // lease-refresh task rather than a toggled second service.
+    let visibility_shared: Arc<Mutex<Option<sink_visibility::LeaseGuard>>> =
+        Arc::new(Mutex::new(None));
+
     // NC, VC, and mic-router shared state.
     let nc_runtime: Arc<Mutex<nc_manager::NcRuntime>> =
         Arc::new(Mutex::new(nc_manager::NcRuntime::new()));
@@ -909,6 +955,7 @@ async fn main() {
         signal_tx.clone(),
         user_settings_base_dir(),
         Arc::clone(&audio_shared),
+        Arc::clone(&visibility_shared),
         Arc::clone(&nc_runtime),
         Arc::clone(&mic_router),
         Arc::clone(&vc_runtime),
@@ -946,6 +993,7 @@ async fn main() {
         app_state,
         signal_tx,
         audio_shared,
+        visibility_shared,
         nc_runtime,
         vc_runtime,
         rvc_live_runtime,
@@ -1041,6 +1089,7 @@ async fn run_main_loop(
     app_state: Arc<Mutex<AppState>>,
     signal_tx: broadcast::Sender<SignalEvent>,
     audio_shared: Arc<Mutex<Option<audio::AudioSetup>>>,
+    visibility_shared: Arc<Mutex<Option<sink_visibility::LeaseGuard>>>,
     nc_runtime: Arc<Mutex<nc_manager::NcRuntime>>,
     vc_runtime: Arc<Mutex<vc_ladspa_chain::VcLadspaRuntime>>,
     rvc_live_runtime: Arc<Mutex<rvc_live_chain::RvcLiveRuntime>>,
@@ -1098,8 +1147,9 @@ async fn run_main_loop(
             let state = Arc::clone(&app_state);
             let stx = signal_tx.clone();
             let aud = Arc::clone(&audio_shared);
+            let vis = Arc::clone(&visibility_shared);
             let (pid, iface_num) = (dev.pid, dev.interface_num);
-            let handle = tokio::spawn(run_device(dev, cfg, sock, state, stx, aud));
+            let handle = tokio::spawn(run_device(dev, cfg, sock, state, stx, aud, vis));
             tasks.insert(path, (pid, iface_num, handle));
         } else {
             info!(
@@ -1117,6 +1167,7 @@ async fn run_main_loop(
         .ok();
 
     let aud_on_remove = Arc::clone(&audio_shared);
+    let vis_on_remove = Arc::clone(&visibility_shared);
 
     tokio::select! {
         res = hotplug::watch(vec![], tx) => {
@@ -1222,8 +1273,9 @@ async fn run_main_loop(
                             let state = Arc::clone(&app_state);
                             let stx = signal_tx.clone();
                             let aud = Arc::clone(&audio_shared);
+                            let vis = Arc::clone(&visibility_shared);
                             let (pid, iface_num) = (dev.pid, dev.interface_num);
-                            let handle = tokio::spawn(run_device(dev, cfg, sock, state, stx, aud));
+                            let handle = tokio::spawn(run_device(dev, cfg, sock, state, stx, aud, vis));
                             tasks.insert(path, (pid, iface_num, handle));
                         } else {
                             info!(
@@ -1245,6 +1297,9 @@ async fn run_main_loop(
                         if let Some(setup) = aud_on_remove.lock().await.take() {
                             info!("dongle removed: removing virtual audio sinks");
                             audio::teardown_sinks(setup).await;
+                        }
+                        if let Some(refresher) = vis_on_remove.lock().await.take() {
+                            refresher.stop().await;
                         }
                         mic_router::teardown(&mut *mic_router.lock().await).await;
                         nc_manager::teardown_nc(&mut *nc_runtime.lock().await).await;
@@ -1272,6 +1327,9 @@ async fn run_main_loop(
     if let Some(setup) = audio_shared.lock().await.take() {
         info!("daemon exit: removing virtual audio sinks");
         audio::teardown_sinks(setup).await;
+    }
+    if let Some(refresher) = visibility_shared.lock().await.take() {
+        refresher.stop().await;
     }
     mic_router::teardown(&mut *mic_router.lock().await).await;
     nc_manager::teardown_nc(&mut *nc_runtime.lock().await).await;
