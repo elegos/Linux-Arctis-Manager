@@ -126,8 +126,15 @@ pub enum SignalEvent {
 
 /// Convert an `EventValue` into a `{"value": ..., "type": "..."}` JSON object.
 /// `display_type` overrides the raw Rust type string when present (e.g. `"percentage"`,
-/// `"on_off"`), so the GUI receives the hint it expects.
-pub fn event_value_to_json(ev: &EventValue, display_type: Option<&str>) -> JsonValue {
+/// `"on_off"`), so the GUI receives the hint it expects. `role` (e.g.
+/// `"battery_headset"`, `"chatmix_game"`), when present, is added as a
+/// `"role"` key so clients can find well-known fields without hardcoding
+/// each device's own raw field name.
+pub fn event_value_to_json(
+    ev: &EventValue,
+    display_type: Option<&str>,
+    role: Option<&str>,
+) -> JsonValue {
     let mut j = match ev {
         EventValue::Field(FieldValue::U8(v)) => {
             serde_json::json!({"value": v, "type": "uint8"})
@@ -159,7 +166,7 @@ pub fn event_value_to_json(ev: &EventValue, display_type: Option<&str>) -> JsonV
         EventValue::Field(FieldValue::Array(v)) => {
             let arr: Vec<JsonValue> = v
                 .iter()
-                .map(|fv| event_value_to_json(&EventValue::Field(fv.clone()), None))
+                .map(|fv| event_value_to_json(&EventValue::Field(fv.clone()), None, None))
                 .collect();
             serde_json::json!({"value": arr, "type": "array"})
         }
@@ -169,6 +176,9 @@ pub fn event_value_to_json(ev: &EventValue, display_type: Option<&str>) -> JsonV
     };
     if let Some(dt) = display_type {
         j["type"] = JsonValue::String(dt.to_string());
+    }
+    if let Some(role) = role {
+        j["role"] = JsonValue::String(role.to_string());
     }
     j
 }
@@ -195,28 +205,52 @@ mod tests {
 
     #[test]
     fn event_value_to_json_u8() {
-        let j = event_value_to_json(&EventValue::Field(FieldValue::U8(42)), None);
+        let j = event_value_to_json(&EventValue::Field(FieldValue::U8(42)), None, None);
         assert_eq!(j["value"], 42);
         assert_eq!(j["type"], "uint8");
     }
 
     #[test]
     fn event_value_to_json_str() {
-        let j = event_value_to_json(&EventValue::Str("CONNECTED".to_string()), None);
+        let j = event_value_to_json(&EventValue::Str("CONNECTED".to_string()), None, None);
         assert_eq!(j["value"], "CONNECTED");
         assert_eq!(j["type"], "label");
     }
 
     #[test]
     fn event_value_to_json_display_type_override() {
-        let j = event_value_to_json(&EventValue::Field(FieldValue::U8(75)), Some("percentage"));
+        let j = event_value_to_json(
+            &EventValue::Field(FieldValue::U8(75)),
+            Some("percentage"),
+            None,
+        );
         assert_eq!(j["value"], 75);
         assert_eq!(j["type"], "percentage");
     }
 
     #[test]
+    fn event_value_to_json_includes_role_when_present() {
+        let j = event_value_to_json(
+            &EventValue::Field(FieldValue::U8(80)),
+            Some("percentage"),
+            Some("battery_headset"),
+        );
+        assert_eq!(j["role"], "battery_headset");
+    }
+
+    #[test]
+    fn event_value_to_json_omits_role_when_absent() {
+        let j = event_value_to_json(
+            &EventValue::Field(FieldValue::U8(80)),
+            Some("percentage"),
+            None,
+        );
+        assert!(j.get("role").is_none());
+    }
+
+    #[test]
     fn event_value_to_json_on_off_override() {
-        let j = event_value_to_json(&EventValue::Field(FieldValue::U8(0)), Some("on_off"));
+        let j = event_value_to_json(&EventValue::Field(FieldValue::U8(0)), Some("on_off"), None);
         assert_eq!(j["value"], 0);
         assert_eq!(j["type"], "on_off");
     }

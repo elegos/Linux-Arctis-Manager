@@ -18,6 +18,7 @@
 import St from 'gi://St';
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
+import Clutter from 'gi://Clutter';
 
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -49,10 +50,22 @@ export default class ArctisManagerExtension extends Extension {
         this._optionLists = {};
 
         this._indicator = new PanelMenu.Button(0.0, this.metadata.name, false);
-        this._indicator.add_child(new St.Icon({
+
+        const indicatorBox = new St.BoxLayout();
+        indicatorBox.add_child(new St.Icon({
             icon_name: 'arctis-manager-symbolic',
             style_class: 'system-status-icon',
         }));
+        // Glanceable battery %/chatmix, updated by _updateIndicatorLabel().
+        // GNOME panel buttons have no native hover-tooltip idiom (unlike
+        // Plasma's Plasmoid.toolTipSubText or Qt's QSystemTrayIcon tooltip),
+        // so a visible label next to the icon is the idiomatic equivalent.
+        this._indicatorLabel = new St.Label({
+            y_align: Clutter.ActorAlign.CENTER,
+            visible: false,
+        });
+        indicatorBox.add_child(this._indicatorLabel);
+        this._indicator.add_child(indicatorBox);
 
         this._statusSection = new PopupMenu.PopupMenuSection();
         this._settingsSection = new PopupMenu.PopupMenuSection();
@@ -144,6 +157,7 @@ export default class ArctisManagerExtension extends Extension {
 
     _renderStatusUnsafe() {
         this._statusSection.removeAll();
+        this._updateIndicatorLabel();
 
         const categories = Object.keys(this._status || {});
         if (categories.length === 0) {
@@ -176,6 +190,38 @@ export default class ArctisManagerExtension extends Extension {
                     this._infoRow(`${I18n.translate('status', key)}: ${display}`));
             }
         }
+    }
+
+    // Raw field names for "the headset battery"/"the chatmix balance" vary
+    // a lot per device (headset_batt_level, battery, battery_level,
+    // battery_status, ...) — the daemon tags well-known fields with a
+    // stable `role` instead (see ascii_bar.py's module doc).
+    _statusByRole() {
+        const byRole = {};
+        for (const category of Object.values(this._status || {})) {
+            for (const field of Object.values(category || {})) {
+                if (field && field.role)
+                    byRole[field.role] = field.value;
+            }
+        }
+        return byRole;
+    }
+
+    _updateIndicatorLabel() {
+        const byRole = this._statusByRole();
+        const parts = [];
+
+        const battery = byRole.battery_headset ?? byRole.battery_left;
+        if (battery !== undefined && battery !== null)
+            parts.push(`${Math.round(battery)}%`);
+
+        const game = byRole.chatmix_game;
+        const chat = byRole.chatmix_chat;
+        if (game !== undefined && game !== null && chat !== undefined && chat !== null)
+            parts.push(Format.chatMixBar(Format.chatMixBalance(game, chat)));
+
+        this._indicatorLabel.text = parts.join(' ');
+        this._indicatorLabel.visible = parts.length > 0;
     }
 
     _infoRow(text, bold = false) {
@@ -387,6 +433,7 @@ export default class ArctisManagerExtension extends Extension {
 
         this._indicator?.destroy();
         this._indicator = null;
+        this._indicatorLabel = null;
 
         this._openAppItem = null;
         this._statusSection = null;

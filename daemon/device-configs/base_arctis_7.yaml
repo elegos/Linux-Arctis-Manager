@@ -172,11 +172,12 @@ sync_read:
       - {emit: connection_changed, field: connection, transform: arctis_7_connection_to_label}
   - struct: battery_status
     maps:
-      - {emit: battery_changed, field: battery, display_type: percentage}
+      - {emit: battery_changed, field: battery, display_type: percentage, role: battery_headset}
   - struct: game_chat_status
     maps:
       - emit: chatmix_changed
         fields: [game, chat]
+        roles: [chatmix_game, chatmix_chat]
   - struct: mic_status
     maps:
       - {emit: mic_muted_changed, field: mic_muted, display_type: on_off}

@@ -254,8 +254,8 @@ sync_events:
   0x45:
     emit: chatmix_changed
     fields:
-      - {name: chatmix_game, byte: 2}
-      - {name: chatmix_chat, byte: 3}
+      - {name: chatmix_game, byte: 2, role: chatmix_game}
+      - {name: chatmix_chat, byte: 3, role: chatmix_chat}
 
   0x47:
     emit: stream_mix_changed
@@ -288,6 +288,7 @@ sync_read:
         fields: [stream_main, stream_aux, stream_mic]
       - emit: chatmix_changed
         fields: [chatmix_game, chatmix_chat]
+        roles: [chatmix_game, chatmix_chat]
 
   - struct: ux_settings
     maps:

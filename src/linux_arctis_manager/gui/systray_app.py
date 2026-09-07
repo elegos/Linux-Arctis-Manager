@@ -6,6 +6,7 @@ from PySide6.QtCore import Signal, Slot
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
+from linux_arctis_manager.gui.ascii_bar import battery_bar, chatmix_balance, chatmix_bar
 from linux_arctis_manager.gui.base_app import QBaseDesktopApp
 from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
 from linux_arctis_manager.gui.main_app import QMainApp
@@ -63,6 +64,7 @@ class QSystrayApp(QBaseDesktopApp):
 
         self.last_device_status = status
         self.menu_setup()
+        self.tray_icon.setToolTip(self._build_tooltip())
 
     def on_new_settings(self, settings: dict) -> None:
         self._settings_config = settings.get('settings_config', {})
@@ -74,6 +76,56 @@ class QSystrayApp(QBaseDesktopApp):
         self.dbus_wrapper.start()
 
         self.app.exec()
+
+    def _find_by_role(self, role: str) -> dict[str, str|int] | None:
+        # Raw field names for "the headset battery"/"the chatmix balance"
+        # vary a lot per device (headset_batt_level, battery, battery_level,
+        # battery_status, ...) — the daemon tags well-known fields with a
+        # stable `role` instead, which is what this looks up.
+        for status_obj in self.last_device_status.values():
+            for field in status_obj.values():
+                if field.get('role') == role:
+                    return field
+        return None
+
+    def _build_tooltip(self) -> str:
+        # QSystemTrayIcon's tooltip is plain text (no rich-text table like the
+        # Plasma widget's toolTipSubText gets), so exact pixel alignment isn't
+        # possible in a proportional font — padding every label to the same
+        # character width is the best available approximation.
+        rows: list[tuple[str, str]] = []
+
+        headset = self._find_by_role('battery_headset')
+        if headset is not None:
+            val = int(headset['value'])
+            rows.append((I18n.translate('status', 'role_battery_headset'), f'{battery_bar(val)} {val}%'))
+        else:
+            # No single headset battery (e.g. GameBuds earbuds) — show
+            # whichever of the two per-earbud roles the device reports.
+            for role in ('battery_left', 'battery_right'):
+                field = self._find_by_role(role)
+                if field is not None:
+                    val = int(field['value'])
+                    rows.append((I18n.translate('status', f'role_{role}'), f'{battery_bar(val)} {val}%'))
+
+        for role in ('battery_case', 'battery_dock'):
+            field = self._find_by_role(role)
+            if field is not None:
+                val = int(field['value'])
+                rows.append((I18n.translate('status', f'role_{role}'), f'{battery_bar(val)} {val}%'))
+
+        game = self._find_by_role('chatmix_game')
+        chat = self._find_by_role('chatmix_chat')
+        if game is not None and chat is not None:
+            balance = chatmix_balance(float(game['value']), float(chat['value']))
+            rows.append((I18n.translate('status', 'role_chatmix'), chatmix_bar(balance)))
+
+        lines = ['Arctis Manager']
+        if rows:
+            width = max(len(label) for label, _ in rows)
+            lines.extend(f'{label.ljust(width)}: {rest}' for label, rest in rows)
+
+        return '\n'.join(lines)
 
     def menu_setup(self) -> None:
         self.menu.clear()

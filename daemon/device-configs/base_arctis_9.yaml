@@ -157,6 +157,7 @@ sync_read:
       - {emit: mic_muted_changed,  field: mic_mute,   display_type: on_off}
       - emit: chatmix_changed
         fields: [game_gain, chat_gain]
+        roles: [chatmix_game, chatmix_chat]
 
 lifecycle:
   shutdown:

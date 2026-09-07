@@ -36,13 +36,13 @@ sync_events:
   0x45:
     emit: chatmix_changed
     fields:
-      - {name: game_chatmix_level, byte: 2}
-      - {name: chat_chatmix_level, byte: 3}
+      - {name: game_chatmix_level, byte: 2, role: chatmix_game}
+      - {name: chat_chatmix_level, byte: 3, role: chatmix_chat}
 
   0xB7:
     emit: battery_changed
     fields:
-      - {name: battery_level, byte: 2, transform: battery_level_to_percent, display_type: percentage}
+      - {name: battery_level, byte: 2, transform: battery_level_to_percent, display_type: percentage, role: battery_headset}
 
   0xB9:
     emit: connection_changed
@@ -58,10 +58,11 @@ sync_read:
   - struct: headset_status
     maps:
       - {emit: connection_changed, field: connection_status, transform: connection_status_to_label}
-      - {emit: battery_changed,    field: battery_level,      transform: battery_level_to_percent, display_type: percentage}
+      - {emit: battery_changed,    field: battery_level,      transform: battery_level_to_percent, display_type: percentage, role: battery_headset}
       - {emit: charging_changed,   field: charging_status,    transform: charging_status_to_label}
       - emit: chatmix_changed
         fields: [game_chatmix_level, chat_chatmix_level]
+        roles: [chatmix_game, chatmix_chat]
 
 device:
   name: "SteelSeries Arctis 7+"

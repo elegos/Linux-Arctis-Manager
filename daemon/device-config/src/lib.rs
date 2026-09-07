@@ -251,6 +251,14 @@ pub struct SyncEventField {
     /// Rust type string in the emitted status JSON so the GUI renders correctly.
     #[serde(default)]
     pub display_type: Option<String>,
+    /// Stable, device-agnostic field identity (e.g. `battery_headset`,
+    /// `chatmix_game`) for clients that need to find "the battery" or "the
+    /// chatmix balance" without knowing each device's own raw field name —
+    /// those names vary a lot (`headset_batt_level`, `battery`,
+    /// `battery_level`, `battery_status`, ... all mean the same thing on
+    /// different devices). Optional: most fields have no well-known role.
+    #[serde(default)]
+    pub role: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -286,6 +294,18 @@ pub struct SyncReadMap {
     /// D-Bus display hint applied to all fields in this map: `percentage`, `on_off`, `label`.
     #[serde(default)]
     pub display_type: Option<String>,
+    /// Stable, device-agnostic identity for the single `field` (see
+    /// `SyncEventField::role`).
+    #[serde(default)]
+    pub role: Option<String>,
+    /// One role per entry of `fields`, positional (unlike `display_type`,
+    /// role can't be shared across the list: e.g. `fields: [headset_batt_level,
+    /// charger_batt_level]` needs `battery_headset` for the first and
+    /// `battery_dock` for the second). Omit entries with no known role by
+    /// leaving this shorter than `fields`, or `null`-padding — either way,
+    /// only positions with a non-null string get tagged.
+    #[serde(default)]
+    pub roles: Option<Vec<Option<String>>>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -1672,6 +1692,163 @@ mod nova_yaml_tests {
                         );
                     }
                 }
+            }
+        }
+        assert!(checked > 0, "expected at least one device config to check");
+    }
+
+    /// Regression guard: a device that declares `battery`/`chatmix` in
+    /// `capabilities:` must actually tag the corresponding field(s) with
+    /// `role:` somewhere in `sync_events`/`sync_read` — the whole point of
+    /// `role` is that clients (tray tooltip, Plasma widget, GNOME
+    /// extension) find "the battery"/"the chatmix balance" this way instead
+    /// of hardcoding one device family's raw field name (which vary a lot:
+    /// `headset_batt_level` vs. `battery` vs. `battery_level` vs.
+    /// `battery_status`, ...). A capability declared without its role would
+    /// silently make that device invisible to those glance views. `chatmix`
+    /// needs both `chatmix_game` AND `chatmix_chat` — devices never expose
+    /// chatmix as a single balance field, always two independent levels.
+    #[test]
+    fn declared_capabilities_have_matching_roles() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("device-configs");
+        if !dir.exists() {
+            return; // skip when not present (CI without device-configs)
+        }
+        let mut checked = 0;
+        for entry in std::fs::read_dir(&dir).expect("read device-configs dir") {
+            let path = entry.expect("dir entry").path();
+            let is_base = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("base_"));
+            if is_base || path.extension().and_then(|e| e.to_str()) != Some("yaml") {
+                continue;
+            }
+            let cfg = load(&path, &[dir.as_path()])
+                .unwrap_or_else(|e| panic!("{} failed to parse: {e}", path.display()));
+            checked += 1;
+
+            let caps = cfg
+                .device
+                .as_ref()
+                .and_then(|d| d.capabilities.clone())
+                .unwrap_or_default();
+            if !caps.iter().any(|c| c == "battery" || c == "chatmix") {
+                continue;
+            }
+
+            let by_name = collect_field_roles(&cfg);
+            let roles: std::collections::HashSet<&str> =
+                by_name.values().map(String::as_str).collect();
+
+            if caps.iter().any(|c| c == "battery") {
+                assert!(
+                    roles.iter().any(|r| r.starts_with("battery_")),
+                    "{}: declares 'battery' capability but no field carries a battery_* role",
+                    path.display()
+                );
+            }
+            if caps.iter().any(|c| c == "chatmix") {
+                assert!(
+                    roles.contains("chatmix_game") && roles.contains("chatmix_chat"),
+                    "{}: declares 'chatmix' capability but is missing chatmix_game/chatmix_chat roles \
+                     (found: {:?})",
+                    path.display(),
+                    roles
+                );
+            }
+        }
+        assert!(checked > 0, "expected at least one device config to check");
+    }
+
+    /// `field_name -> role` for every field in `sync_events`/`sync_read`
+    /// that declares one. Shared by the two role-related regression guards
+    /// below.
+    fn collect_field_roles(cfg: &crate::DeviceConfig) -> HashMap<String, String> {
+        let mut roles = HashMap::new();
+        if let Some(sync_events) = &cfg.sync_events {
+            for def in sync_events.values() {
+                for f in def.fields.iter().flatten() {
+                    if let Some(r) = &f.role {
+                        roles.insert(f.name.clone(), r.clone());
+                    }
+                }
+            }
+        }
+        if let Some(sync_read) = &cfg.sync_read {
+            for entry in sync_read {
+                for map in &entry.maps {
+                    if let (Some(name), Some(r)) = (&map.field, &map.role) {
+                        roles.insert(name.clone(), r.clone());
+                    }
+                    if let Some(names) = &map.fields {
+                        for (name, r) in names.iter().zip(map.roles.iter().flatten()) {
+                            if let Some(r) = r {
+                                roles.insert(name.clone(), r.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        roles
+    }
+
+    /// Regression guard: a field tagged with `role:` must actually be
+    /// reachable through `GetStatus` — i.e. either the device declares no
+    /// `representation:` at all (in which case `build_status_json`'s
+    /// fallback dumps every field, nothing hidden) or the field's name is
+    /// listed somewhere in `representation:`. `build_status_json`
+    /// (`engine/src/dbus.rs`) copies only fields that appear there; a role
+    /// tag on a field `representation:` omits is silently invisible to
+    /// every client that reads `GetStatus` by role, defeating the whole
+    /// point of tagging it. Caught for real on `nova_pro_wireless.yaml`:
+    /// `chatmix_game`/`chatmix_chat` were role-tagged and decoded correctly
+    /// but never listed in that device's explicit `representation:` block.
+    #[test]
+    fn role_tagged_fields_are_visible_through_representation() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("device-configs");
+        if !dir.exists() {
+            return; // skip when not present (CI without device-configs)
+        }
+        let mut checked = 0;
+        for entry in std::fs::read_dir(&dir).expect("read device-configs dir") {
+            let path = entry.expect("dir entry").path();
+            let is_base = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("base_"));
+            if is_base || path.extension().and_then(|e| e.to_str()) != Some("yaml") {
+                continue;
+            }
+            let cfg = load(&path, &[dir.as_path()])
+                .unwrap_or_else(|e| panic!("{} failed to parse: {e}", path.display()));
+            checked += 1;
+
+            let Some(representation) = &cfg.representation else {
+                continue; // no filter: every field reaches GetStatus, nothing to check
+            };
+            let visible: std::collections::HashSet<&str> = representation
+                .values()
+                .flatten()
+                .map(String::as_str)
+                .collect();
+
+            for (field_name, role) in collect_field_roles(&cfg) {
+                assert!(
+                    visible.contains(field_name.as_str()),
+                    "{}: field '{}' has role '{}' but isn't listed in any `representation:` \
+                     category, so GetStatus never exposes it — add it to `representation:`",
+                    path.display(),
+                    field_name,
+                    role
+                );
             }
         }
         assert!(checked > 0, "expected at least one device config to check");

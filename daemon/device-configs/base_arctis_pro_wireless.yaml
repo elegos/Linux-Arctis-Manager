@@ -205,7 +205,7 @@ sync_read:
         fields: [band_100, band_300, band_900, band_2500, band_8000]
   - struct: battery_status
     maps:
-      - {emit: battery_changed, field: battery_level, display_type: percentage}
+      - {emit: battery_changed, field: battery_level, display_type: percentage, role: battery_headset}
 
 lifecycle:
   init:
