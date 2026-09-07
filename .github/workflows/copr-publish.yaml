@@ -69,6 +69,15 @@ jobs:
       options: --user root
 
     steps:
+      # Without a real `git` binary in the container, actions/checkout falls
+      # back to downloading a tarball via the REST API instead of a real
+      # `git clone` - that gets the files but no `.git` dir, which then
+      # breaks `git log HEAD` below (confirmed via a real run: "fatal: not a
+      # git repository"). Must run before the checkout step, not alongside
+      # the other dnf installs further down.
+      - name: Install git
+        run: dnf install -y git
+
       - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.ref }}
@@ -93,7 +102,7 @@ jobs:
       - name: Build SRPM with a %changelog entry from the release notes
         run: |
           set -e
-          dnf install -y rpm-build rpmdevtools tar gzip python3 git
+          dnf install -y rpm-build rpmdevtools tar gzip python3
           rpmdev-setuptree
 
           PKGNAME=linux-arctis-manager
