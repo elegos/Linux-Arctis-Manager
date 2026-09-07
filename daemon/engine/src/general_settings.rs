@@ -174,7 +174,10 @@ mod tests {
             "pulse_audio_devices"
         );
         assert_eq!(sc["hide_physical_sink"]["type"], "toggle");
-        assert_eq!(sc["hide_physical_sink"]["unavailable_reason"], "wireplumber_required");
+        assert_eq!(
+            sc["hide_physical_sink"]["unavailable_reason"],
+            "wireplumber_required"
+        );
         assert!(sc["hide_physical_sink"]["available"].is_boolean());
     }
 
