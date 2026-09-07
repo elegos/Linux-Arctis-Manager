@@ -41,6 +41,10 @@ pub struct EmitEvent {
     /// Per-field display hint for the D-Bus status JSON (`percentage`, `on_off`, `label`).
     /// Present only when the YAML declares `display_type` on the field.
     pub display_types: HashMap<String, String>,
+    /// Per-field stable role (`battery_headset`, `chatmix_game`, ...) for the
+    /// D-Bus status JSON. Present only when the YAML declares `role` on the
+    /// field.
+    pub roles: HashMap<String, String>,
 }
 
 /// An engine-internal call to invoke after field extraction.
@@ -167,6 +171,7 @@ impl<'a> SyncDispatcher<'a> {
 
         let mut fields = HashMap::new();
         let mut display_types = HashMap::new();
+        let mut roles = HashMap::new();
         for f in entry.fields.iter().flatten() {
             let byte_idx = f.byte as usize;
             if byte_idx >= report.len() {
@@ -185,12 +190,16 @@ impl<'a> SyncDispatcher<'a> {
             if let Some(dt) = &f.display_type {
                 display_types.insert(f.name.clone(), dt.clone());
             }
+            if let Some(role) = &f.role {
+                roles.insert(f.name.clone(), role.clone());
+            }
         }
 
         Ok(Some(EmitEvent {
             signal,
             fields,
             display_types,
+            roles,
         }))
     }
 
@@ -487,6 +496,32 @@ sync_events:
             Some("percentage")
         );
         assert!(!emit.display_types.contains_key("charger_batt_level"));
+    }
+
+    #[test]
+    fn role_propagated_from_field_def() {
+        let c = cfg(r#"
+sync_events:
+  0xB7:
+    emit: battery_changed
+    fields:
+      - {name: headset_batt_level, byte: 2, role: battery_headset}
+      - {name: charger_batt_level, byte: 3, role: battery_dock}
+      - {name: charging_status, byte: 4}
+"#);
+        let d = SyncDispatcher::new(&c);
+        let report = [0x06u8, 0xB7, 75, 50, 0x00];
+        let result = d.dispatch(&report).unwrap().unwrap();
+        let emit = result.emit.unwrap();
+        assert_eq!(
+            emit.roles.get("headset_batt_level").map(String::as_str),
+            Some("battery_headset")
+        );
+        assert_eq!(
+            emit.roles.get("charger_batt_level").map(String::as_str),
+            Some("battery_dock")
+        );
+        assert!(!emit.roles.contains_key("charging_status"));
     }
 
     #[test]

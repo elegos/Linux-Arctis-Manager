@@ -126,7 +126,7 @@ sync_read:
   - struct: headset_status
     maps:
       - {emit: connection_changed, field: connection_status, transform: arctis_1_wireless_connection_to_label}
-      - {emit: battery_changed,    field: battery_status,    display_type: percentage}
+      - {emit: battery_changed,    field: battery_status,    display_type: percentage, role: battery_headset}
       - {emit: mic_muted_changed,  field: mic_mute_status,   display_type: on_off}
 
 lifecycle:

@@ -117,10 +117,28 @@ impl<'a> SyncReader<'a> {
                 }
             }
 
+            let mut roles = HashMap::new();
+            if let Some(name) = &map.field {
+                if let Some(role) = &map.role {
+                    roles.insert(name.clone(), role.clone());
+                }
+            } else if let Some(names) = &map.fields {
+                // Positional: roles[i] (if present and non-null) applies to
+                // fields[i] — unlike display_type, a shared list can mix
+                // fields with different roles (e.g. battery_headset +
+                // battery_dock in the same `fields:` list).
+                for (name, role) in names.iter().zip(map.roles.iter().flatten()) {
+                    if let Some(role) = role {
+                        roles.insert(name.clone(), role.clone());
+                    }
+                }
+            }
+
             events.push(EmitEvent {
                 signal: map.emit.clone(),
                 fields: event_fields,
                 display_types,
+                roles,
             });
         }
         Ok(events)
@@ -195,6 +213,85 @@ sync_read:
             events[0].fields["eq_preset"],
             EventValue::Field(FieldValue::U8(3))
         );
+    }
+
+    #[test]
+    fn single_field_role_propagated() {
+        let c = cfg(r#"
+sync_read:
+  - struct: audio_settings
+    maps:
+      - {emit: selected_eq_preset, field: eq_preset, role: eq_active_preset}
+"#);
+        let r = SyncReader::new(&c);
+        let entry = &r.entries()[0];
+        let f = fields(&[("eq_preset", FieldValue::U8(3))]);
+        let events = r.map_entry(entry, &f).unwrap();
+        assert_eq!(
+            events[0].roles.get("eq_preset").map(String::as_str),
+            Some("eq_active_preset")
+        );
+    }
+
+    #[test]
+    fn multi_field_roles_are_positional_and_can_differ() {
+        // roles[i] applies to fields[i] — unlike display_type, which is
+        // shared across the whole list, role must be able to differ (e.g.
+        // battery_headset vs. battery_dock in the same emit).
+        let c = cfg(r#"
+sync_read:
+  - struct: wireless_settings
+    maps:
+      - emit: battery_changed
+        fields: [headset_batt_level, charger_batt_level]
+        roles: [battery_headset, battery_dock]
+        display_type: percentage
+"#);
+        let r = SyncReader::new(&c);
+        let entry = &r.entries()[0];
+        let f = fields(&[
+            ("headset_batt_level", FieldValue::U8(80)),
+            ("charger_batt_level", FieldValue::U8(60)),
+        ]);
+        let events = r.map_entry(entry, &f).unwrap();
+        assert_eq!(
+            events[0]
+                .roles
+                .get("headset_batt_level")
+                .map(String::as_str),
+            Some("battery_headset")
+        );
+        assert_eq!(
+            events[0]
+                .roles
+                .get("charger_batt_level")
+                .map(String::as_str),
+            Some("battery_dock")
+        );
+    }
+
+    #[test]
+    fn multi_field_roles_can_be_partial() {
+        // A `null` (or missing trailing) entry in `roles` leaves that
+        // position untagged without disturbing the others.
+        let c = cfg(r#"
+sync_read:
+  - struct: wireless_settings
+    maps:
+      - emit: chatmix_changed
+        fields: [chatmix_game, chatmix_chat, unrelated_field]
+        roles: [chatmix_game, chatmix_chat]
+"#);
+        let r = SyncReader::new(&c);
+        let entry = &r.entries()[0];
+        let f = fields(&[
+            ("chatmix_game", FieldValue::U8(30)),
+            ("chatmix_chat", FieldValue::U8(70)),
+            ("unrelated_field", FieldValue::U8(1)),
+        ]);
+        let events = r.map_entry(entry, &f).unwrap();
+        assert_eq!(events[0].roles.len(), 2);
+        assert!(!events[0].roles.contains_key("unrelated_field"));
     }
 
     #[test]

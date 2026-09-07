@@ -110,14 +110,15 @@ Returns boolean (true: setting saved, false: setting not found / not saved)
 - **Response format**: JSON
 - **Specs**:
 
-Returns an object with the series of configured status values, in the mapped values as defined in **YAML's device.status_parse.[status_name] types** and categorized in **YAML's device.status.representation**.
+Returns an object with the series of configured status values, categorized per **the device's `representation` block** in `daemon/device-configs/*.yaml`. Each field's raw value is looked up from that same device's `sync_events`/`sync_read` definitions, with `display_type` (and, for a handful of well-known fields, `role` — see below) applied as declared there.
 
 If no device is connected, an empty object will return.
 
-Each setting has two attributes:
+Each setting has two required attributes, plus one optional one:
 
 - `value`: the (parsed, but not translated) value
-- `type`: "label" in case of string, or the relative type, as defined in `device.status_parse.[status].type`
+- `type`: "label" in case of string, or the display type declared as `display_type` on the field in `daemon/device-configs/*.yaml` (falls back to the raw Rust type, e.g. `uint8`, when the field declares none)
+- `role` (optional): a stable, device-agnostic identity for a handful of well-known concepts whose *raw* field name varies a lot per device family — currently `battery_headset`, `battery_dock`, `battery_left`, `battery_right`, `battery_case`, `chatmix_game`, `chatmix_chat`. Present only on fields the device config explicitly tags; a client that wants "the headset battery" regardless of which device is connected should scan for `role == "battery_headset"` rather than hardcoding a field name like `headset_battery_charge` — that name is specific to one device family among several.
 
 ```json
 {
@@ -126,9 +127,10 @@ Each setting has two attributes:
             "value": "online",
             "type": "label"
         },
-        "headset_battery_charge": {
+        "headset_batt_level": {
             "value": 87,
-            "type": "percentage"
+            "type": "percentage",
+            "role": "battery_headset"
         },
         "noise_cancelling": {
             "value": "off",

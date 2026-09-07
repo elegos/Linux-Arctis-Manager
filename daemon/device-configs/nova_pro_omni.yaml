@@ -108,7 +108,7 @@ sync_read:
       - {emit: muted_mic_brightness_changed,       field: muted_mic_brightness}
       - {emit: inactivity_timer_changed,           field: inactivity_timer,       transform: timer_enum_to_minutes}
       - {emit: connection_changed,                 field: radio_connection_status, transform: connection_status_to_label}
-      - {emit: battery_changed,                    field: headset_batt_level,     display_type: percentage}
+      - {emit: battery_changed,                    field: headset_batt_level,     display_type: percentage, role: battery_headset}
       - {emit: active_noise_cancellation_changed,  field: active_noise_cancellation}
 
   - struct: ux_settings

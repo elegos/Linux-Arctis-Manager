@@ -347,8 +347,8 @@ sync_events:
   0xB7:
     emit: battery_changed
     fields:
-      - {name: left_battery_level, byte: 2, display_type: percentage}
-      - {name: right_battery_level, byte: 3, display_type: percentage}
+      - {name: left_battery_level, byte: 2, display_type: percentage, role: battery_left}
+      - {name: right_battery_level, byte: 3, display_type: percentage, role: battery_right}
 
   0x23:
     emit: volume_bt_changed
@@ -417,6 +417,7 @@ sync_read:
         fields: [left_connect_status, right_connect_status]
       - emit: battery_changed
         fields: [left_battery_level, right_battery_level]
+        roles: [battery_left, battery_right]
         display_type: percentage
       - {emit: transparency_changed, field: transparency_level, transform: transparency_fw_to_ui}
       - {emit: anc_changed, field: anc_level}

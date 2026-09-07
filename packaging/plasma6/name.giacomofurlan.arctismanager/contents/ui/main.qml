@@ -7,6 +7,7 @@ import org.kde.plasma.workspace.dbus as DBus
 import org.kde.plasma.plasma5support as Plasma5Support
 
 import "../code/dbus.js" as Dbus
+import "../code/format.js" as Format
 import "../code/i18n.js" as I18n
 
 PlasmoidItem {
@@ -42,12 +43,76 @@ PlasmoidItem {
         return values
     }
 
+    // Raw field names for "the headset battery"/"the chatmix balance" vary
+    // a lot per device (headset_batt_level, battery, battery_level,
+    // battery_status, ...) — the daemon tags well-known fields with a
+    // stable `role` instead (see ascii_bar.py's module doc), keyed here by
+    // that role rather than by field name.
+    readonly property var statusByRole: {
+        var byRole = {}
+        Object.keys(root.status).forEach(function (category) {
+            Object.keys(root.status[category] || {}).forEach(function (k) {
+                var field = root.status[category][k]
+                if (field && field.role) byRole[field.role] = field.value
+            })
+        })
+        return byRole
+    }
+
     // "-symbolic" gets Kirigami/Plasma's automatic panel recoloring
     // (light icon on a dark panel, dark on light) — the plain
     // "arctis-manager" name is a fixed-color icon meant for the app
     // launcher/window, not the tray.
+    // Rendered as an HTML <table> (see tooltipBody) rather than padded plain
+    // text: labels vary a lot in length ("Battery" vs. "Charging Stand
+    // Battery"), and padding with spaces can't line up the bars that follow
+    // them in a proportional font — only an actual table column can.
+    readonly property string tooltipBody: {
+        if (!root.i18nReady) return ""
+        var byRole = root.statusByRole
+        var rows = []
+
+        function pushBattery(role) {
+            var v = byRole[role]
+            if (v !== undefined && v !== null)
+                rows.push([I18n.translate("status", "role_" + role), Format.batteryBar(v), v + "%"])
+        }
+
+        if (byRole.battery_headset !== undefined && byRole.battery_headset !== null) {
+            pushBattery("battery_headset")
+        } else {
+            // No single headset battery (e.g. GameBuds earbuds) — show
+            // whichever of the two per-earbud roles the device reports.
+            pushBattery("battery_left")
+            pushBattery("battery_right")
+        }
+        pushBattery("battery_case")
+        pushBattery("battery_dock")
+
+        var game = byRole.chatmix_game
+        var chat = byRole.chatmix_chat
+        if (game !== undefined && game !== null && chat !== undefined && chat !== null) {
+            var balance = Format.chatMixBalance(game, chat)
+            rows.push([I18n.translate("status", "role_chatmix"), Format.chatMixBar(balance), ""])
+        }
+
+        if (rows.length === 0) return ""
+
+        var html = "<table cellspacing=\"0\" cellpadding=\"0\">"
+        for (var i = 0; i < rows.length; i++) {
+            html += "<tr><td>" + rows[i][0] + ":&nbsp;&nbsp;</td>"
+                + "<td><tt>" + rows[i][1] + "</tt></td>"
+                + "<td>&nbsp;" + rows[i][2] + "</td></tr>"
+        }
+        html += "</table>"
+        return html
+    }
+
     Plasmoid.icon: "arctis-manager-symbolic"
     Plasmoid.title: root.i18nReady ? I18n.translate("ui", "app_name") : ""
+    toolTipMainText: Plasmoid.title
+    toolTipSubText: root.tooltipBody
+    toolTipTextFormat: Text.RichText
 
     Component.onCompleted: {
         var lang = (Qt.locale().name || "en_US").split("_")[0]
@@ -79,11 +144,17 @@ PlasmoidItem {
 
     Timer {
         // Signal-driven updates below make this a fallback, not the primary
-        // path — but still needed: it's what refreshes on open
-        // (triggeredOnStart) and covers anything a missed/dropped D-Bus
-        // signal would otherwise leave stale.
+        // path — but still needed: it covers anything a missed/dropped
+        // D-Bus signal would otherwise leave stale. Used to be gated on
+        // `root.expanded` (only the full status list/quick-settings view
+        // needed fresh data, the collapsed icon's tooltip was a static
+        // "Arctis Manager" string) — but the compact icon's own tooltip is
+        // now live content too (battery/chatmix), and Plasma's systray host
+        // doesn't reliably deliver D-Bus signals to a collapsed item's QML
+        // engine, so it needs the same periodic refresh regardless of
+        // whether the popup is open.
         interval: Plasmoid.configuration.refreshIntervalMs
-        running: root.expanded
+        running: true
         repeat: true
         triggeredOnStart: true
         onTriggered: root.refresh()
