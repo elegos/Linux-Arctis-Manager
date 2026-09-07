@@ -41,6 +41,8 @@ The response has three sections:
 
 The clients shouldn't hard-core the settings, but read them and parse them depending on the `settings_config` section.
 
+Any setting's entry may also carry `available` (boolean, defaults to `true`) and `unavailable_reason` (an i18n key, present only when `available` is `false`) when whether it can be used depends on something outside the daemon's own config — e.g. `hide_physical_sink` (General settings) is only `available` when WirePlumber is detected on the system. Clients should grey out / disable the control and show `unavailable_reason` as a tooltip when `available` is `false`, rather than hiding the setting outright.
+
 ```json
 {
     "general": {

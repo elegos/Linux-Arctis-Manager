@@ -30,6 +30,7 @@ flowchart TB
     Helper["lam-hidraw-helper<br/>setcap binary, ~100 LOC<br/>peer auth + VID allowlist"]
     Hidraw[("/dev/hidraw*<br/>(kernel)")]
     PipeWire[("PipeWire<br/>pactl / pw-cli / filter-chain")]
+    WirePlumber["WirePlumber (optional)<br/>sink-visibility.lua<br/>always installed, inert unless lease file exists"]
 
     GUI -->|D-Bus session bus| DBus
     CLI -->|D-Bus session bus| DBus
@@ -45,10 +46,14 @@ flowchart TB
     Helper -->|open| Hidraw
 
     Audio -->|spawn / control| PipeWire
+    Audio -.->|create/remove lease file<br/>(hide_physical_sink setting)| WirePlumber
 ```
 
 > [!NOTE]
 > The voice changer module is omitted here for brevity — see [`voice-changing-feature.md`](voice-changing-feature.md) for its own architecture.
+
+> [!NOTE]
+> **Optional physical-sink hiding** (GH #67): the `hide_physical_sink` General setting hides the physical Arctis sink from the desktop shell's own quick-settings output picker (`plasmashell` on KDE, `gnome-shell` on GNOME — see `QUICK_PANEL_BINARIES` in the script) while `Arctis_Media`/`Arctis_Chat` are active, deliberately leaving the full audio control panel (a separate process/PipeWire client, e.g. `systemsettings`/`gnome-control-center`) and `pactl`/`pw-cli` with normal visibility, so the user can always regain full control there. WirePlumber enforces per-client object permissions via a policy that must stay loaded inside its own process and react to every client connecting — a daemon-toggled helper process/service cannot do this, since it would only affect clients that already existed at the moment it ran. So `packaging/wireplumber/sink-visibility.lua` is installed once, registered as an always-loaded WirePlumber component via `51-lam-sink-visibility.conf` (WirePlumber 0.5+ only loads scripts explicitly declared this way — it does not scan for arbitrary `.lua` files), and stays inert unless a lease file exists (`sink_visibility::LeaseGuard`, `daemon/engine/src/sink_visibility.rs`, created while the setting is on and a device is connected). The script watches the lease reactively via WirePlumber's own `file-monitor-api` plugin rather than polling. Crash safety — never leaving the sink hidden forever if the daemon dies — is handled by `lam-daemon.service`'s `ExecStopPost=`, which removes the lease file unconditionally whenever the unit stops for any reason, including a crash; `LeaseGuard` itself only has to handle the orderly-shutdown path. The setting is greyed out in the GUI (`available: false` in `settings_config`, see [`dbus.md`](dbus.md)) when WirePlumber isn't detected on the system.
 
 ## Privilege Model
 

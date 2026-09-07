@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Per-application EQ and Noise Cancellation overrides, including switching by focused window on Hyprland, Sway, and X11.
 - EQ presets (10-band and 15-band) with a curve editor.
 - Audio output can be redirected automatically on headset connect/disconnect.
+- Optional "Hide Physical Sink" General setting: hides the underlying physical Arctis sink from the desktop shell's quick-settings output picker (Plasma/GNOME) while the virtual `Arctis_Media`/`Arctis_Chat` sinks are active, backed by an always-installed WirePlumber policy script. The full audio control panel and `pactl`/`pw-cli` keep normal visibility, so the physical device stays reachable if something needs it directly. Greyed out with a tooltip when WirePlumber isn't installed; no effect on the `pactl`/`pw-cli`-only audio path when it is.
 - Device settings now persist across daemon restarts.
 - GUI shows the daemon version and upgrades/starts the background service automatically.
 - Rust daemon (v3): rewrite of the background service, with support for the entire device lineup (Nova 5, Arctis 7+, Nova Pro Wired/Wireless/Omni, Nova Elite, Nova 7, Nova 7 Gen2, Nova 3/3X/4/4X, Arctis 7, Arctis 1 Wireless, Arctis 5, Arctis 9, Arctis Pro/Pro Wireless/Pro GameDAC, Arctis GameBuds) — see `docs/device_compatibility.md` for the full capability matrix.
