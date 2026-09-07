@@ -38,8 +38,29 @@ Source0:        %{name}-%{version}.tar.gz
 # with unvendored dependencies.
 BuildRequires:  cargo
 BuildRequires:  rust
+
+# Fedora 45+ (and rawhide) default `python3` to 3.15, which PySide6 has no
+# published wheel for yet (confirmed via a real COPR build failure: "Could
+# not find a version that satisfies the requirement pyside6>=6.10.1...
+# Requires-Python >=3.9,<3.15" on every release up to the latest). Force
+# the parallel-installable python3.14 stack there instead until PySide6
+# catches up; F43/44 keep the distro's own python3 (3.13/3.14, already
+# compatible). python3_bin (below) feeds Makefile's PYTHON3 override so the
+# venv is actually built with the right interpreter, not just BuildRequires'd -
+# and Requires below has to track the same interpreter, since the venv's
+# own python3.X shared-lib dependency is excluded from rpm's automatic
+# dependency generator (see __requires_exclude_from above) and won't be
+# picked up any other way.
+%if 0%{?fedora} >= 45
+BuildRequires:  python3.14
+BuildRequires:  python3.14-devel
+%global python3_bin %{_bindir}/python3.14
+%else
 BuildRequires:  python3
 BuildRequires:  python3-pip
+%global python3_bin %{_bindir}/python3
+%endif
+
 BuildRequires:  systemd-devel
 BuildRequires:  openssl-devel
 BuildRequires:  libcap
@@ -47,7 +68,11 @@ BuildRequires:  libcap
 # schema (see %install and %files gnome-extension below).
 BuildRequires:  glib2
 
+%if 0%{?fedora} >= 45
+Requires:       python3.14
+%else
 Requires:       python3
+%endif
 Requires:       libcap
 Requires:       hicolor-icon-theme
 
@@ -121,13 +146,13 @@ GNOME Shell 45+ (ES-module extensions) only.
 %autosetup -n %{name}-%{version}
 
 %build
-make build PREFIX=/usr
+make build PREFIX=/usr PYTHON3=%{python3_bin}
 
 %install
 # LIBDIR: the Makefile defaults to $(PREFIX)/lib (correct for Arch/Debian,
 # which don't split lib/lib64); Fedora's own convention is %{_libdir}
 # (/usr/lib64 on x86_64), which %files below actually references.
-make install DESTDIR=%{buildroot} PREFIX=/usr LIBDIR=%{_libdir}
+make install DESTDIR=%{buildroot} PREFIX=/usr LIBDIR=%{_libdir} PYTHON3=%{python3_bin}
 
 %post
 # setcap cannot be applied during %%install (buildroot is not the live fs).
