@@ -82,6 +82,27 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
 
+      # inputs.ref can be an old tag that predates these pipeline scripts
+      # (e.g. v3.0.0-alpha7, tagged before COPR publishing existed) - a real
+      # run confirmed rpmbuild's %changelog step fails with "No such file
+      # or directory" when the tagged tree doesn't have them yet. Always use
+      # the scripts from the commit actually running this workflow instead
+      # of whatever the tagged release tree happened to contain.
+      - name: Overlay this workflow's own pipeline scripts
+        uses: actions/checkout@v5
+        with:
+          path: _pipeline-scripts
+          sparse-checkout: |
+            .github/scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Use current pipeline scripts instead of the tag's
+        run: |
+          set -e
+          rm -rf .github/scripts
+          mv _pipeline-scripts/.github/scripts .github/scripts
+          rm -rf _pipeline-scripts
+
       # The maintainer-edited GitHub Release draft body is the authoritative
       # changelog text for this release (see docs/release-pipeline.md,
       # "Changelog handling") - not CHANGELOG.md directly, since the
