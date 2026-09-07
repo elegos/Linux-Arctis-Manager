@@ -4,12 +4,22 @@ An open-source replacement for SteelSeries GG, to manage your Arctis headset on 
 
 [![GitHub Release](https://img.shields.io/github/v/release/elegos/Linux-Arctis-Manager?label=Latest%20Release&color=brightgreen&logo=github&logoColor=white)](https://github.com/elegos/Linux-Arctis-Manager/releases)
 [![AUR Version](https://img.shields.io/aur/version/linux-arctis-manager?label=AUR%20Package&logo=arch-linux&logoColor=white&color=1793d1)](https://aur.archlinux.org/packages/linux-arctis-manager)
-[![Copr build status](https://copr.fedorainfracloud.org/coprs/elegos/linux-arctis-manager/package/linux-arctis-manager/status_image/last_build.png)](https://copr.fedorainfracloud.org/coprs/elegos/linux-arctis-manager/package/linux-arctis-manager/)
-[![Copr build status (testing)](https://copr.fedorainfracloud.org/coprs/elegos/linux-arctis-manager-testing/package/linux-arctis-manager/status_image/last_build.png)](https://copr.fedorainfracloud.org/coprs/elegos/linux-arctis-manager-testing/package/linux-arctis-manager/)
 [![Python](https://img.shields.io/python/required-version-toml?tomlFilePath=https://raw.githubusercontent.com/elegos/Linux-Arctis-Manager/develop/pyproject.toml&logo=python&logoColor=white&label=Python)](https://www.python.org/)
 [![Release build](https://img.shields.io/github/actions/workflow/status/elegos/Linux-Arctis-Manager/release.yaml?event=push&label=Release%20build&logo=github&logoColor=white)](https://github.com/elegos/Linux-Arctis-Manager/actions/workflows/release.yaml)
 [![Discord](https://img.shields.io/badge/Discord-join-7289DA?logo=discord&logoColor=white)](https://discord.gg/FXfvUXWXt4)
 [![Fluxer](https://img.shields.io/badge/Fluxer-join-5d5cfe?logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIzLjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCI+PHBhdGggZD0iTTQgOC41YzIuNjYtMi42NiA1LjMzLTIuNjYgOCAwczUuMzMgMi42NiA4IDAiLz48cGF0aCBkPSJNNCAxNS41YzIuNjYtMi42NiA1LjMzLTIuNjYgOCAwczUuMzMgMi42NiA4IDAiLz48L3N2Zz4=)](https://chat.giacomofurlan.name/invite/f8vnlZGp)
+
+## Repositories 💿
+
+### Stable
+
+[![Copr build status](https://copr.fedorainfracloud.org/coprs/elegos/linux-arctis-manager/package/linux-arctis-manager/status_image/last_build.png)](https://copr.fedorainfracloud.org/coprs/elegos/linux-arctis-manager/package/linux-arctis-manager/)
+
+### Testing
+
+[![Copr build status (testing)](https://copr.fedorainfracloud.org/coprs/elegos/linux-arctis-manager-testing/package/linux-arctis-manager/status_image/last_build.png)](https://copr.fedorainfracloud.org/coprs/elegos/linux-arctis-manager-testing/package/linux-arctis-manager/)
+
+## Want to support? 🙏
 
 <a href="https://www.paypal.com/donate/?hosted_button_id=W68BN982DMU9U"><img alt="Paypal donation" src="docs/images/paypal-donate-blue.svg" height="72"></a>
 
