@@ -51,6 +51,24 @@ GNOME_EXT_ID        := arctis-manager@giacomofurlan.name
 GNOME_EXT_SRC_DIR   := packaging/gnome-shell/$(GNOME_EXT_ID)
 GNOME_EXT_DEST_DIR  := $(DATADIR)/gnome-shell/extensions/$(GNOME_EXT_ID)
 
+# Optional WirePlumber policy script backing the "hide_physical_sink"
+# General setting (GH #67) — see daemon/engine/src/sink_visibility.rs and
+# the script itself for why this must be an always-loaded script rather
+# than something toggled at runtime. Harmless to install unconditionally:
+# it's a no-op unless the setting is on and a device is connected, and does
+# nothing at all if WirePlumber itself isn't installed.
+#
+# The script lives under wireplumber's own script search path (same as its
+# built-in scripts, e.g. client/access-default.lua) in a "lam" subdirectory
+# of our own, and is registered as an always-loaded component via a small
+# wireplumber.conf.d/ drop-in — WirePlumber does NOT scan main.lua.d for
+# arbitrary scripts on its own (that was the 0.4.x layout; 0.5+ only loads
+# scripts explicitly declared as `wireplumber.components` entries).
+WIREPLUMBER_SCRIPT      := packaging/wireplumber/sink-visibility.lua
+WIREPLUMBER_SCRIPTS_DIR := $(DATADIR)/wireplumber/scripts/lam
+WIREPLUMBER_CONF        := packaging/wireplumber/51-lam-sink-visibility.conf
+WIREPLUMBER_CONF_DIR    := $(DATADIR)/wireplumber/wireplumber.conf.d
+
 # ── Build tools ────────────────────────────────────────────────────────────────
 CARGO            ?= cargo
 UV               ?= uv
@@ -280,6 +298,9 @@ install-core: build generate-services install-python
 	install -dm755 $(DESTDIR)$(ICON_DIR)
 	install -Dm644 $(ICON_SRC) $(DESTDIR)$(ICON_DIR)/arctis-manager.svg
 	install -Dm644 $(ICON_SRC) $(DESTDIR)$(ICON_DIR)/arctis-manager-symbolic.svg
+	# Optional WirePlumber policy script for "hide_physical_sink"
+	install -Dm644 $(WIREPLUMBER_SCRIPT) $(DESTDIR)$(WIREPLUMBER_SCRIPTS_DIR)/sink-visibility.lua
+	install -Dm644 $(WIREPLUMBER_CONF) $(DESTDIR)$(WIREPLUMBER_CONF_DIR)/51-lam-sink-visibility.conf
 ifndef DESTDIR
 	# Apply DAC capability to the installed helper binary.
 	# Must run after the final copy; packaging tools handle this in post-install hooks.
@@ -304,6 +325,8 @@ uninstall:
 	rm -f $(addprefix $(DESTDIR)$(DESKTOP_DIR)/,$(notdir $(DESKTOP_FILES)))
 	rm -f $(DESTDIR)$(ICON_DIR)/arctis-manager.svg
 	rm -f $(DESTDIR)$(ICON_DIR)/arctis-manager-symbolic.svg
+	rm -f $(DESTDIR)$(WIREPLUMBER_SCRIPTS_DIR)/sink-visibility.lua
+	rm -f $(DESTDIR)$(WIREPLUMBER_CONF_DIR)/51-lam-sink-visibility.conf
 	rm -rf $(DESTDIR)$(DEVICE_CONFIGS_DIR)
 	rm -rf $(DESTDIR)$(LANG_DIR)
 	rm -rf $(DESTDIR)$(PLASMOID_DEST_DIR)
