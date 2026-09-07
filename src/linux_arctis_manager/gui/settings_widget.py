@@ -196,4 +196,8 @@ class QSettingsWidget(QWidget):
             main_layout.addWidget(QLabel(I18n.get_instance().translate('settings', config.name)))
             main_layout.addWidget(widget)
 
+        main_widget.setEnabled(config.available)
+        if not config.available and config.unavailable_reason:
+            main_widget.setToolTip(I18n.get_instance().translate('settings', config.unavailable_reason))
+
         return main_widget if widget else None

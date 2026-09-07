@@ -52,20 +52,37 @@ class ConfigSetting(JsonSerializable):
     type: SettingType
     default_value: int|str|None
     update_sequence: list[int|Literal['value']]
+    available: bool
+    unavailable_reason: str | None
 
     _js_exclude_fields: ClassVar[list[str]] = ['name', 'update_sequence']
 
-    def __init__(self, name: str, type: SettingType|str, default_value: int|str|None, update_sequence: list[int|Literal['value']] | None = None, **kwargs: Any):
+    def __init__(
+        self,
+        name: str,
+        type: SettingType|str,
+        default_value: int|str|None,
+        update_sequence: list[int|Literal['value']] | None = None,
+        available: bool = True,
+        unavailable_reason: str | None = None,
+        **kwargs: Any,
+    ):
         self.name = name
         self.type = type if isinstance(type, SettingType) else SettingType(type)
         self.default_value = default_value
         self.update_sequence = update_sequence if update_sequence is not None else []
+        # Explicit named params (not left to arrive via **kwargs) so every
+        # ConfigSetting has both attributes even for settings whose daemon
+        # payload predates or omits them — settings_widget.py's get_widget()
+        # relies on that to grey out an unavailable toggle.
+        self.available = available
+        self.unavailable_reason = unavailable_reason
 
         for key, value in kwargs.items():
             setattr(self, key, value)
 
     def get_kwargs(self) -> dict[str, Any]:
-        return { k: v for k, v in self.__dict__.items() if k not in ['name', 'type', 'default_value', 'update_sequence'] }
+        return { k: v for k, v in self.__dict__.items() if k not in ['name', 'type', 'default_value', 'update_sequence', 'available', 'unavailable_reason'] }
 
     def to_dict(self) -> dict[str, Any]:
         return { **super().to_dict(), **self.get_kwargs() }
