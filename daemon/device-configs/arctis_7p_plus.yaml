@@ -50,6 +50,15 @@ device:
 
   # See arctis_7_plus.yaml for the command_interface/sync_interface note —
   # same family, same v2-vs-spec interface discrepancy.
+  #
+  # unnumbered_reports: true — CONFIRMED (2026-09-16, GH #71) against real
+  # hardware: a hid-recorder capture on the command interface caught a valid
+  # 0xB0 status reply (`b0 03 02 03 ...` — PAIRED_CONNECTED, 50% battery,
+  # DISCHARGING) with no leading report_id byte, matching the descriptor's
+  # complete absence of a Report ID tag. Without this flag the engine
+  # expects a synthetic 0x00 first, never matches the reply, and
+  # device_init loops "headset not ready" forever even though the headset
+  # answers fine and audio already works over PipeWire.
   variants:
     - product_id: 0x2212
       name: "Arctis 7P+"
@@ -62,6 +71,7 @@ device:
       interface: 3
     sync_interface:
       interface: 3
+    unnumbered_reports: true
 
   capabilities:
     - battery
