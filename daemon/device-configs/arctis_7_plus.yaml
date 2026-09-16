@@ -76,6 +76,16 @@ device:
   # declares. Trusting v2 fully here (command AND sync both on 3) rather than
   # the spec's "5", since on this family the two sources disagree even on
   # which interface pushes events. Wants confirming on real hardware.
+  #
+  # unnumbered_reports: true — INFERRED, not independently captured on this
+  # exact variant. Sibling PID 0x2212 (arctis_7p_plus.yaml, same family, same
+  # HID descriptor shape/usage-page scheme) was confirmed via a real
+  # hidraw capture (GH #71): the command interface's 0xB0 status reply
+  # starts with the command byte directly, no leading report_id byte,
+  # matching its descriptor's total absence of a Report ID tag. Same
+  # low-risk reasoning as nova_7.yaml's speculative application: every
+  # struct's report_id is a hard `constant: 0x00` check, so a wrong guess
+  # here fails loud on the next field rather than silently misdecoding.
   variants:
     - product_id: 0x220E
       name: "Arctis 7+"
@@ -91,6 +101,7 @@ device:
       interface: 3
     sync_interface:
       interface: 3
+    unnumbered_reports: true
 
   capabilities:
     - battery
