@@ -140,8 +140,32 @@ fn vid_pid(dev: &Device) -> Option<(u16, u16)> {
     None
 }
 
+/// Read the USB interface number for `dev`.
+///
+/// Prefers the udev-computed `ID_USB_INTERFACE_NUM` property, but some
+/// systems don't populate it (e.g. udev's `usb_id` builtin not having run
+/// for that device), which silently degrades multi-interface headsets to
+/// PID-only matching and starts one `run_device` task per interface instead
+/// of one. Fall back to reading `bInterfaceNumber` straight from the parent
+/// USB interface's sysfs attribute, which the kernel always exposes
+/// regardless of udev rules.
 fn usb_interface_num(dev: &Device) -> Option<u8> {
-    let s = dev.property_value("ID_USB_INTERFACE_NUM")?.to_str()?;
+    if let Some(s) = dev
+        .property_value("ID_USB_INTERFACE_NUM")
+        .and_then(|s| s.to_str())
+    {
+        if let Some(n) = parse_hex_interface_num(s) {
+            return Some(n);
+        }
+    }
+    let iface_dev = dev
+        .parent_with_subsystem_devtype("usb", "usb_interface")
+        .ok()??;
+    let s = iface_dev.attribute_value("bInterfaceNumber")?.to_str()?;
+    parse_hex_interface_num(s)
+}
+
+fn parse_hex_interface_num(s: &str) -> Option<u8> {
     u8::from_str_radix(s.trim(), 16).ok()
 }
 
@@ -174,5 +198,23 @@ mod tests {
     fn scan_existing_runs_without_error() {
         // No hardware required; only verifies the enumeration path doesn't panic.
         assert!(scan_existing(&[]).is_ok());
+    }
+
+    #[test]
+    fn parse_hex_interface_num_reads_two_digit_hex() {
+        assert_eq!(parse_hex_interface_num("07"), Some(7));
+        assert_eq!(parse_hex_interface_num("0a"), Some(10));
+        assert_eq!(parse_hex_interface_num("ff"), Some(255));
+    }
+
+    #[test]
+    fn parse_hex_interface_num_trims_whitespace() {
+        assert_eq!(parse_hex_interface_num(" 07 \n"), Some(7));
+    }
+
+    #[test]
+    fn parse_hex_interface_num_rejects_non_hex() {
+        assert_eq!(parse_hex_interface_num("zz"), None);
+        assert_eq!(parse_hex_interface_num(""), None);
     }
 }
