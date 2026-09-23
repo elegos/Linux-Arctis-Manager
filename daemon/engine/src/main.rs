@@ -719,15 +719,7 @@ async fn forward_events(
             last_radio_status = Some(status.clone());
             if changed {
                 if status.contains("NOT_CONNECTED") || status == "DISCONNECTED" {
-                    let setup = audio_for_task.lock().await.take();
-                    if let Some(s) = setup {
-                        info!("headset wireless off: removing virtual sinks");
-                        audio::teardown_sinks(s).await;
-                    }
-                    if let Some(refresher) = visibility_for_task.lock().await.take() {
-                        refresher.stop().await;
-                    }
-                    // Redirect to user-chosen sink on wireless disconnect.
+                    // Read redirect settings before touching sinks.
                     let (do_redirect, target) = {
                         let s = state_for_events.lock().await;
                         (
@@ -737,10 +729,21 @@ async fn forward_events(
                                 .clone(),
                         )
                     };
+                    // Set default and move active streams BEFORE removing virtual sinks
+                    // so playback is not interrupted on wireless disconnect.
                     if do_redirect {
                         if let Some(ref sink) = target {
                             audio::set_default_sink(sink).await;
+                            audio::move_virtual_sink_inputs_to(sink).await;
                         }
+                    }
+                    let setup = audio_for_task.lock().await.take();
+                    if let Some(s) = setup {
+                        info!("headset wireless off: removing virtual sinks");
+                        audio::teardown_sinks(s).await;
+                    }
+                    if let Some(refresher) = visibility_for_task.lock().await.take() {
+                        refresher.stop().await;
                     }
                 } else if status == "PAIRED_CONNECTED" || status == "CONNECTED" {
                     let needs = audio_for_task.lock().await.is_none();
