@@ -345,6 +345,64 @@ pub async fn set_chatmix(game: u8, chat: u8) {
     }
 }
 
+/// Move all sink inputs attached to `source_sink` to `target_sink` (best-effort).
+async fn move_sink_inputs_from(source_sink: &str, target_sink: &str) {
+    let sink_idx = match pactl(&["list", "short", "sinks"]).await {
+        Ok(out) => out.lines().find_map(|l| {
+            let mut cols = l.split('\t');
+            let idx = cols.next()?;
+            let name = cols.next()?;
+            if name == source_sink {
+                idx.parse::<u32>().ok()
+            } else {
+                None
+            }
+        }),
+        Err(e) => {
+            warn!("audio: list sinks: {e}");
+            return;
+        }
+    };
+    let Some(sink_idx) = sink_idx else { return };
+
+    let inputs: Vec<u32> = match pactl(&["list", "short", "sink-inputs"]).await {
+        Ok(out) => out
+            .lines()
+            .filter_map(|l| {
+                let mut cols = l.split('\t');
+                let input_idx = cols.next()?.parse::<u32>().ok()?;
+                let attached = cols.next()?.parse::<u32>().ok()?;
+                if attached == sink_idx {
+                    Some(input_idx)
+                } else {
+                    None
+                }
+            })
+            .collect(),
+        Err(e) => {
+            warn!("audio: list sink-inputs: {e}");
+            return;
+        }
+    };
+
+    for input_idx in inputs {
+        let idx_str = input_idx.to_string();
+        if let Err(e) = pactl(&["move-sink-input", &idx_str, target_sink]).await {
+            warn!("audio: move-sink-input {input_idx} → {target_sink}: {e}");
+        } else {
+            info!("audio: moved sink-input {input_idx} → {target_sink}");
+        }
+    }
+}
+
+/// Move all sink inputs from both Arctis virtual sinks to `target_sink`.
+/// Call this before `teardown_sinks` so active streams survive wireless disconnect.
+pub async fn move_virtual_sink_inputs_to(target_sink: &str) {
+    for source in [MEDIA_SINK, CHAT_SINK] {
+        move_sink_inputs_from(source, target_sink).await;
+    }
+}
+
 /// Unload all modules created by `setup_sinks`.
 pub async fn teardown_sinks(setup: AudioSetup) {
     for id in [
