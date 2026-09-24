@@ -8,6 +8,11 @@ on:
     branches:
       - '**'
   pull_request:
+  schedule:
+    # Weekly CVE sweep: dependency audits run regardless of code changes.
+    # bandit/semgrep are skipped on schedule (source-only tools, no value
+    # without a diff) via `if: github.event_name != 'schedule'`.
+    - cron: '0 6 * * 1'  # every Monday at 06:00 UTC
 
 # All jobs use continue-on-error: true — findings are surfaced as annotations
 # and (when permissions allow) uploaded to the GitHub Security tab, but never
@@ -59,6 +64,7 @@ jobs:
   # ── bandit: Python security lint ──────────────────────────────────────────
   bandit:
     name: bandit (Python)
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     continue-on-error: true
     permissions:
@@ -97,6 +103,7 @@ jobs:
   # ── semgrep: pattern-based cross-language SAST ────────────────────────────
   semgrep:
     name: semgrep
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     continue-on-error: true
     permissions:
