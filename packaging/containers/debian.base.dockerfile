@@ -16,9 +16,11 @@ RUN apt-get update && \
         python3 \
         python3-venv \
         python3-pip \
+        build-essential \
         debhelper \
         devscripts \
         libcap2-bin \
+        libglib2.0-bin \
         git && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
