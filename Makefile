@@ -325,14 +325,15 @@ uninstall:
 	rm -f $(addprefix $(DESTDIR)$(DESKTOP_DIR)/,$(notdir $(DESKTOP_FILES)))
 	rm -f $(DESTDIR)$(ICON_DIR)/arctis-manager.svg
 	rm -f $(DESTDIR)$(ICON_DIR)/arctis-manager-symbolic.svg
-	rm -f $(DESTDIR)$(WIREPLUMBER_SCRIPTS_DIR)/sink-visibility.lua
 	rm -f $(DESTDIR)$(WIREPLUMBER_CONF_DIR)/51-lam-sink-visibility.conf
+	rm -rf $(DESTDIR)$(WIREPLUMBER_SCRIPTS_DIR)
 	rm -rf $(DESTDIR)$(DEVICE_CONFIGS_DIR)
 	rm -rf $(DESTDIR)$(LANG_DIR)
 	rm -rf $(DESTDIR)$(PLASMOID_DEST_DIR)
 	rm -rf $(DESTDIR)$(GNOME_EXT_DEST_DIR)
 	rm -rf $(DESTDIR)$(LIBDIR)/linux-arctis-manager
 	-systemctl --user daemon-reload 2>/dev/null
+	-systemctl --user restart wireplumber 2>/dev/null
 
 # ── Service management (non-root, for direct installs) ─────────────────────────
 enable:
