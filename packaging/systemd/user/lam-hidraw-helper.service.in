@@ -1,6 +1,6 @@
 [Unit]
 Description=Linux Arctis Manager — HID access helper
-Documentation=https://github.com/Mic92/linux-arctis-manager
+Documentation=https://github.com/elegos/Linux-Arctis-Manager
 Before=lam-daemon.service
 
 [Service]
