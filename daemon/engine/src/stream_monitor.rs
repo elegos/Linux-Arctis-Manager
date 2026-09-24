@@ -105,6 +105,16 @@ async fn check_and_apply(
     app_state: &Arc<Mutex<AppState>>,
     active: &mut HashMap<Channel, Option<String>>,
 ) {
+    // Guard: spawning pactl list clients generates new "client" subscribe events,
+    // which re-enter this function — a self-feeding loop. Skip the pactl call
+    // entirely when no channel has any overrides to check.
+    let has_overrides = [&settings.media, &settings.chat]
+        .iter()
+        .any(|ch| !ch.app_overrides.is_empty());
+    if !has_overrides {
+        return;
+    }
+
     let clients = list_pw_clients().await;
     let hw_ctx = {
         let st = app_state.lock().await;
