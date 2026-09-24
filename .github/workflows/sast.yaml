@@ -135,3 +135,38 @@ jobs:
         with:
           sarif_file: semgrep.sarif
           category: semgrep
+
+  # ── pip-audit: Python dependency CVE scan ─────────────────────────────────
+  pip-audit:
+    name: pip-audit (PyPI)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Run pip-audit
+        # pip-audit exits non-zero when vulnerabilities are found; || true keeps
+        # the step green so the SARIF conversion always runs.
+        run: uv run pip-audit --format json --output pip-audit.json || true
+
+      - name: Convert pip-audit JSON to SARIF
+        run: python3 .github/scripts/pip_audit_to_sarif.py < pip-audit.json > pip-audit.sarif
+
+      - name: Upload SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: pip-audit.sarif
+          category: pip-audit
