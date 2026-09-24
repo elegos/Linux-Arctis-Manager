@@ -303,7 +303,7 @@ async fn ensure_sink(
         idx
     };
 
-    let lb_args = format!("source={name}.monitor sink={physical} latency_msec=1");
+    let lb_args = format!("source={name}.monitor sink={physical}");
     let lb_idx = load_module("module-loopback", &lb_args)
         .await
         .ok_or_else(|| AudioError::Pactl(format!("module-loopback for {name}")))?;
