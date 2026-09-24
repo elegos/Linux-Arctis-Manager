@@ -29,7 +29,8 @@ build-backend = "uv_build"
 dev = [
     "basedpyright>=1.39.2",
     "pip-audit>=2.9.0",
-    "pytest>=9.0.2",
+    "pygments>=2.20.0",
+    "pytest>=9.0.3",
     "pytest-cov>=7.1.0",
     "ruff>=0.14.0",
 ]
