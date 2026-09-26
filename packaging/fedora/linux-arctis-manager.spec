@@ -67,6 +67,7 @@ BuildRequires:  libcap
 # glib-compile-schemas, for the GNOME Shell extension's bundled GSettings
 # schema (see %install and %files gnome-extension below).
 BuildRequires:  glib2
+BuildRequires:  pulseaudio-libs-devel
 
 %if 0%{?fedora} >= 45
 Requires:       python3.14
@@ -74,6 +75,7 @@ Requires:       python3.14
 Requires:       python3
 %endif
 Requires:       libcap
+Requires:       pulseaudio-libs
 Requires:       hicolor-icon-theme
 
 # Only needed for the AI voice changer's one-shot .pth -> ONNX voice-model

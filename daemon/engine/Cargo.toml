@@ -34,6 +34,7 @@ flate2 = { workspace = true }
 realfft = { workspace = true }
 ort = { workspace = true }
 libloading = { workspace = true }
+libpulse-binding = { workspace = true }
 rand = { workspace = true }
 rand_distr = { workspace = true }
 rubato = { workspace = true }
