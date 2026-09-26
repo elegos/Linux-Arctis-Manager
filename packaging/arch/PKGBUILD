@@ -6,7 +6,7 @@ pkgrel=1
 arch=('x86_64')
 url="https://github.com/elegos/Linux-Arctis-Manager"
 license=('MIT')
-makedepends=('rust' 'cargo' 'python' 'glib2')
+makedepends=('rust' 'cargo' 'python' 'glib2' 'libpulse')
 # Update tag and sha256sum for each release.
 source=("$pkgbase-$pkgver.tar.gz::https://github.com/elegos/Linux-Arctis-Manager/archive/refs/tags/v${pkgver}.tar.gz")
 sha256sums=('SKIP')
@@ -18,7 +18,7 @@ build() {
 
 package_linux-arctis-manager() {
     pkgdesc="SteelSeries Arctis manager for Linux — replaces SteelSeries GG with a native daemon and Qt6 GUI"
-    depends=('python' 'libcap' 'openssl' 'systemd-libs' 'hicolor-icon-theme')
+    depends=('python' 'libcap' 'openssl' 'systemd-libs' 'hicolor-icon-theme' 'libpulse')
     # python-pytorch: only for the AI voice changer's one-shot .pth -> ONNX
     # conversion tool (E10-S6a/S7); optdepends is informational only on Arch
     # (pacman never auto-installs it), so runtime detection with a

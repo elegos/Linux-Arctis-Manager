@@ -84,6 +84,9 @@ ort = { version = "2.0.0-rc.13", default-features = false, features = [
 # directly too so the RVC engine can preload a pip-installed cuDNN itself
 # (see vc/inference/engine.rs::preload_cudnn) — added in E10-S6a.
 libloading = "0.9"
+# PulseAudio/PipeWire client API — used by stream_monitor for persistent
+# context-based client introspection (avoids self-feeding pactl subprocess loop)
+libpulse-binding = { version = "2", default-features = false }
 # internal crates
 device-config = { path = "device-config" }
 hid-transport = { path = "hid-transport" }
