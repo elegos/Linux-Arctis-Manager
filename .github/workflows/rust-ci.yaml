@@ -31,8 +31,9 @@ jobs:
           workspaces: daemon
 
       # hidapi (linux-native) and tokio-udev both require libudev at link time.
+      # libpulse-dev is required for the libpulse-binding link-time dependency.
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev libhidapi-dev
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev libhidapi-dev libpulse-dev
 
       - name: Check formatting
         run: cargo fmt --all -- --check
