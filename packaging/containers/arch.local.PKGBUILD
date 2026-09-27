@@ -11,7 +11,7 @@ pkgrel=1
 arch=('x86_64')
 url="https://github.com/elegos/Linux-Arctis-Manager"
 license=('MIT')
-makedepends=('rust' 'cargo' 'python' 'glib2')
+makedepends=('rust' 'cargo' 'python' 'glib2' 'libpulse')
 
 # No source array — the Dockerfile has already placed the tree at /home/builder/source
 source=()
@@ -24,7 +24,7 @@ build() {
 
 package_linux-arctis-manager() {
     pkgdesc="SteelSeries Arctis manager for Linux — native daemon and Qt6 GUI"
-    depends=('python' 'libcap' 'openssl' 'systemd-libs')
+    depends=('python' 'libcap' 'openssl' 'systemd-libs' 'libpulse')
     provides=('linux-arctis-manager')
     conflicts=('linux-arctis-manager-git')
     install=lam.install
