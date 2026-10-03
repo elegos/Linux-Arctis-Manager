@@ -7,6 +7,9 @@ device:
   name: Friendly name # for example: SteelSeries Arctis Nova Pro Wireless
   vendor_id: 0x1038 # Should always be 0x1038, but double check via lsusb
   product_ids: [0x1234] # At least one identifier. Multiple identifiers might apply for different SKUs
+  audio_product_ids: [0x1235] # OPTIONAL. Product identifiers of the USB audio device, if it differs from the HID one
+                              # (for example the Arctis Pro Wireless: 0x1290 HID, 0x1294 audio). Defaults to product_ids.
+                              # If the audio device exposes a separate "chat" output, the Chat virtual sink is routed to it.
   command_padding: # This defines the command's message length and the filler. Typically 64 bytes zero-padded.
     length: 64
     position: end
@@ -24,6 +27,8 @@ device:
     # ...
     - [0x06, 0xc3, 'settings.wireless_mode']      # Can accept also values from the settings (settings.NAME_OF_THE_SETTING)
     - ['status.request']                          # Can accept the special 'status.request' to send device.status.request's value
+  settings_save_sequence: [0x90, 0xaa] # OPTIONAL. Command sent after each setting update (e.g. to persist it on the device)
+
   status:
     request: 0x06b0 # Message to be sent to request the device's status
     response_mapping: # A list of objects having
@@ -42,6 +47,15 @@ device:
         bluetooth_power_status: 0x04
         bluetooth_connection: 0x05
         # ...
+    poll:                # OPTIONAL. For devices whose responses carry no header (e.g. Arctis Pro Wireless).
+                         # If defined, each request is sent in turn (about once per second) and the next
+                         # response is attributed to it; `request` is then only used by 'status.request' in device_init.
+      - request: 0x41aa
+        response_mapping:  # The status' name and its position in the response, as above (no starts_with)
+          headset_power_status: 0x00
+      - request: 0x40aa
+        response_mapping:
+          headset_battery_charge: 0x00
     representation:      # Categorization and ordering
       category1:         # Translation in [status] section of language file
         - station_volume # List of settings that apply to the category

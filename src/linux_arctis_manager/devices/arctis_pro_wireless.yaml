@@ -1,0 +1,85 @@
+# SteelSeries Arctis Pro Wireless (base station + headset)
+# Protocol from HeadsetControl (lib/devices/steelseries_arctis_pro_wireless.hpp).
+#
+# The base station shows up as two USB devices:
+#   - 1038:1290: HID control (interface 0: IN-only interrupt endpoint, 32 bytes reports, no report IDs)
+#   - 1038:1294: USB audio (stereo-game and mono-chat outputs, mixed in hardware by the ChatMix dial)
+# Responses carry no header, so the status is polled request by request (see status.poll).
+device:
+  name: SteelSeries Arctis Pro Wireless
+  vendor_id: 0x1038
+  product_ids:
+    - 0x1290
+  audio_product_ids:
+    - 0x1294
+  command_padding:
+    length: 32
+    position: end
+    filler: 0x00
+
+  command_interface_index: [0, 0] # No OUT endpoint: SET_REPORT on endpoint 0x00, wIndex 0 (interface 0)
+  listen_interface_indexes: [0]
+
+  device_init:
+    - [0x39, 0xaa, 'settings.mic_side_tone']
+    - [0x3c, 0xaa, 'settings.pm_shutdown']
+
+  settings_save_sequence: [0x90, 0xaa] # Persist the settings on the base station
+
+  status:
+    request: 0x41aa
+    response_mapping: []
+    poll:
+      - request: 0x41aa # Headset connection
+        response_mapping:
+          headset_power_status: 0x00
+      - request: 0x40aa # Headset battery
+        response_mapping:
+          headset_battery_charge: 0x00
+
+    representation:
+      headset:
+        - headset_power_status
+        - headset_battery_charge
+      mic:
+        - mic_side_tone
+      power_management:
+        - pm_shutdown
+
+  online_status:
+    status_variable: headset_power_status
+    online_value: online
+
+  settings:
+    microphone:
+      mic_side_tone:
+        type: slider
+        min: 0x00
+        max: 0x09
+        step: 1
+        min_label: off
+        max_label: high
+        default: 0x00
+        update_sequence: [0x39, 0xaa, 'value']
+    power_management:
+      pm_shutdown: # In 10 minutes units
+        type: discrete_map
+        values_mapping:
+          0x00: never
+          0x01: 10_minutes
+          0x03: 30_minutes
+          0x06: 60_minutes
+          0x09: 90_minutes
+        default: 0x03 # 30 minutes
+        update_sequence: [0x3c, 0xaa, 'value']
+
+  status_parse:
+    headset_power_status:
+      type: int_str_mapping
+      values:
+        0x02: offline
+        0x04: online
+    headset_battery_charge:
+      type: percentage
+      perc_min: 0
+      perc_max: 4

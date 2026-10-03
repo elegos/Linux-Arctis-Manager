@@ -316,3 +316,28 @@ def test_parsed_status_calls_correct_parser():
     })
     config = DeviceConfiguration(raw)
     assert parsed_status({'battery': 5}, config) == {'battery': 50}
+
+
+def test_config_parse_arctis_pro_wireless():
+    config_path = Path(__file__).parent.parent.parent / 'src' / 'linux_arctis_manager' / 'devices' / 'arctis_pro_wireless.yaml'
+    config = DeviceConfiguration(YAML(typ='safe').load(config_path))
+
+    assert config.product_ids == [0x1290]
+    assert config.audio_product_ids == [0x1294]
+    assert config.command_interface_index == [0, 0]
+    assert config.listen_interface_indexes == [0]
+    assert config.settings_save_sequence == [0x90, 0xaa]
+
+    assert config.status is not None
+    assert [p.request for p in config.status.poll] == [0x41aa, 0x40aa]
+    assert config.status.poll[0].response_mapping.get_status_values([0x04, 0x00]) == {'headset_power_status': 0x04}
+    assert config.status.poll[1].response_mapping.get_status_values([0x02, 0x00]) == {'headset_battery_charge': 0x02}
+
+
+def test_audio_product_ids_default_to_product_ids():
+    config_path = Path(__file__).parent.parent.parent / 'src' / 'linux_arctis_manager' / 'devices' / 'nova_pro_wireless.yaml'
+    config = DeviceConfiguration(YAML(typ='safe').load(config_path))
+
+    assert config.audio_product_ids == config.product_ids
+    assert config.settings_save_sequence is None
+    assert config.status is not None and config.status.poll == []

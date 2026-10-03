@@ -1,6 +1,6 @@
 import inspect
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, ClassVar, Literal
 
@@ -94,10 +94,24 @@ class ConfigPadding:
         self.position = PaddingPosition(self.position)
 
 @dataclass
+class ConfigStatusPoll:
+    '''
+    A request/response pair, for devices whose responses carry no header
+    (the response is attributed to the request that was just sent).
+    '''
+    request: int
+    response_mapping: ConfigStatusResponseMapping
+
+    def __post_init__(self):
+        raw_mapping: dict[str, int] = self.response_mapping # pyright: ignore[reportAssignmentType]
+        self.response_mapping = ConfigStatusResponseMapping(starts_with=0, **raw_mapping)
+
+@dataclass
 class ConfigStatus:
     request: int
     response_mapping: list[ConfigStatusResponseMapping]
     representation: dict[str, list[str]]
+    poll: list[ConfigStatusPoll] = field(default_factory=list)
 
     def __post_init__(self):
         raw_mappings: list[dict[str, int]] = self.response_mapping # pyright: ignore[reportAssignmentType]
@@ -106,6 +120,9 @@ class ConfigStatus:
             starts_with=mapping.get('starts_with', 0),
             **{k: v for k, v in mapping.items() if k != 'starts_with'},
         ) for mapping in raw_mappings]
+
+        raw_poll: list[dict[str, Any]] = self.poll # pyright: ignore[reportAssignmentType]
+        self.poll = [ConfigStatusPoll(**p) if isinstance(p, dict) else p for p in raw_poll]
 
 @dataclass
 class OnlineStatusConfig:
@@ -116,11 +133,13 @@ class DeviceConfiguration:
     name: str
     vendor_id: int
     product_ids: list[int]
+    audio_product_ids: list[int]
     product_string: str | None
     command_interface_index: tuple[int, int]
     listen_interface_indexes: list[int]
     command_padding: ConfigPadding
     device_init: list[list[int|str]] | None
+    settings_save_sequence: list[int] | None
     status: ConfigStatus | None
     status_parse: dict[str, ConfigStatusParser]
     online_status: OnlineStatusConfig | None
@@ -134,6 +153,8 @@ class DeviceConfiguration:
         self.name = raw_config.get('name', '')
         self.vendor_id = raw_config.get('vendor_id', 0)
         self.product_ids = raw_config.get('product_ids', [])
+        # Some devices expose audio on a different USB device than the HID one (e.g. Arctis Pro Wireless)
+        self.audio_product_ids = raw_config.get('audio_product_ids', self.product_ids)
         self.product_string = raw_config.get('product_string', None)
         self.command_interface_index = raw_config.get('command_interface_index', (-1, -1))
         self.listen_interface_indexes = raw_config.get('listen_interface_indexes', [])
@@ -158,6 +179,9 @@ class DeviceConfiguration:
         else:
             raise ValueError("Invalid configuration: 'device.command_padding' must be specified")
 
+        # OPTIONAL: command sent after each setting update (e.g. to persist it on the device)
+        self.settings_save_sequence = raw_config.get('settings_save_sequence', None)
+
         raw_device_init = raw_config.get('device_init', None)
         if raw_device_init is not None:
             self.device_init = raw_device_init
@@ -168,6 +192,7 @@ class DeviceConfiguration:
                 request=raw_status.get('request', 0),
                 response_mapping=raw_status.get('response_mapping', []),
                 representation=raw_status.get('representation', {}),
+                poll=raw_status.get('poll', []),
             )
         
         raw_status_parse: dict[str, dict[str, Any]] = raw_config.get('status_parse', {})

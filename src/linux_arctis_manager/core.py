@@ -144,6 +144,55 @@ class CoreEngine:
             pass
         
     
+    async def poll_device_status(self):
+        '''
+        For devices whose responses carry no header (e.g. Arctis Pro Wireless):
+        send each status.poll request in turn and attribute the next response to it.
+        '''
+        if self.usb_device is None or self.device_config is None or self.device_config.status is None:
+            return
+
+        command_endpoint = self.get_command_endpoint_address()
+        endpoint, max_packet_size = self.guess_interface_endpoint('in', self.device_config.listen_interface_indexes[0])
+        if not endpoint:
+            self.logger.warning(f'Failed to find listen interface endpoint for device: {self.usb_device.idProduct:04x}:{self.usb_device.idVendor:04x}')
+            await asyncio.sleep(1.0)
+            return
+
+        def read(timeout: int) -> list[int] | None:
+            try:
+                return list(self.usb_device.read(endpoint, max_packet_size, timeout))  # pyright: ignore[reportOptionalMemberAccess]
+            except usb.core.USBError as e:
+                if e.errno in _UNRECOVERABLE_USB_ERRNOS:
+                    raise
+                if e.errno not in [16, 110]:  # 16 (busy), 110 (timeout)
+                    self.logger.warning('USB error: %s', e)
+                return None
+
+        try:
+            for poll in self.device_config.status.poll:
+                # Drop late responses to a previous request, so they're not attributed to this one
+                for _ in range(4):
+                    if await asyncio.to_thread(read, 10) is None:
+                        break
+
+                self.send_command([poll.request], command_endpoint, self.device_config.command_interface_index[1])
+                response = await asyncio.to_thread(read, 500)
+                if response is None:
+                    continue
+
+                self.logger.debug(f'Response to 0x{poll.request:x}: {response}')
+                if self.device_status is None:
+                    self.device_status = self.new_device_status()
+                self.device_status.update(poll.response_mapping.get_status_values(response))
+
+            self.manage_mix_change()
+        except AttributeError:
+            # If the device disconnects, self.usb_device might be None and generate the error
+            pass
+
+        await asyncio.sleep(1.0)
+
     async def loop(self):
         _retry = False
         while not self._stopping:
@@ -153,11 +202,14 @@ class CoreEngine:
 
             listen_coroutines: list[asyncio.Task] = []
             try:
-                if self.device_config is not None:
-                    listen_coroutines = [asyncio.create_task(self.listen_endpoint_loop(interface_id)) for interface_id in self.device_config.listen_interface_indexes]
+                if self.device_config is not None and self.device_config.status is not None and self.device_config.status.poll:
+                    await self.poll_device_status()
+                else:
+                    if self.device_config is not None:
+                        listen_coroutines = [asyncio.create_task(self.listen_endpoint_loop(interface_id)) for interface_id in self.device_config.listen_interface_indexes]
 
-                self.request_device_status()
-                await asyncio.gather(*listen_coroutines)
+                    self.request_device_status()
+                    await asyncio.gather(*listen_coroutines)
                 _retry = False
             except usb.core.USBError as e:
                 for task in listen_coroutines:
@@ -289,9 +341,9 @@ class CoreEngine:
         from linux_arctis_manager.settings import EQSettings
         eq_settings = EQSettings.load()
         eq_config = eq_settings.to_eq_config()
-        physical_name = self.pa_audio_manager.get_physical_sink_name(
-            self.usb_device.idVendor, self.usb_device.idProduct)
-        if not physical_name:
+        physical_names = self.pa_audio_manager.get_physical_sink_names(
+            self.usb_device.idVendor, self.device_config.audio_product_ids)
+        if not physical_names:
             self.logger.error('reapply_eq: physical sink not found')
             return
         if self.eq_manager is None:
@@ -299,10 +351,10 @@ class CoreEngine:
         # Gains on an already-active channel are pushed live to the running
         # sink (see EQManager.reapply()); only a channel whose sink actually
         # changed needs its loopback cable rerouted.
-        new_targets, changed_channels = self.eq_manager.reapply(physical_name, eq_config)
+        new_targets, changed_channels = self.eq_manager.reapply(physical_names, eq_config)
         for null_sink, output, channel in (
-            (PULSE_MEDIA_NODE_NAME, new_targets.get('media', physical_name), 'media'),
-            (PULSE_CHAT_NODE_NAME,  new_targets.get('chat',  physical_name), 'chat'),
+            (PULSE_MEDIA_NODE_NAME, new_targets.get('media', physical_names['media']), 'media'),
+            (PULSE_CHAT_NODE_NAME,  new_targets.get('chat',  physical_names['chat']), 'chat'),
         ):
             if channel not in changed_channels:
                 continue
@@ -414,7 +466,7 @@ class CoreEngine:
             self.teardown()
             return
 
-        self.pa_audio_manager.wait_for_physical_device(self.usb_device.idVendor, self.usb_device.idProduct)
+        self.pa_audio_manager.wait_for_physical_device(self.usb_device.idVendor, self.device_config.audio_product_ids)
 
         # Set up software EQ (non-fatal: if mbeq_1197 is unavailable we log and continue)
         from linux_arctis_manager.eq_manager import EQManager
@@ -426,17 +478,17 @@ class CoreEngine:
         if self.eq_manager is None:
             self.eq_manager = EQManager()
 
-        physical_name = self.pa_audio_manager.get_physical_sink_name(
-            self.usb_device.idVendor, self.usb_device.idProduct
+        physical_names = self.pa_audio_manager.get_physical_sink_names(
+            self.usb_device.idVendor, self.device_config.audio_product_ids
         )
         eq_targets: dict[str, str] = {}
-        if physical_name:
-            eq_targets = self.eq_manager.setup(physical_name, eq_config)
+        if physical_names:
+            eq_targets = self.eq_manager.setup(physical_names, eq_config)
 
         self.pa_audio_manager.sinks_setup(
             self.device_config.name,
             self.device_config.vendor_id,
-            self.device_config.product_ids,
+            self.device_config.audio_product_ids,
             media_output=eq_targets.get('media'),
             chat_output=eq_targets.get('chat'),
         )
@@ -544,6 +596,8 @@ class CoreEngine:
 
         endpoint = self.get_command_endpoint_address()
         self.send_command(config.get_update_sequence(value), endpoint, self.device_config.command_interface_index[1])
+        if self.device_config.settings_save_sequence:
+            self.send_command(self.device_config.settings_save_sequence, endpoint, self.device_config.command_interface_index[1])
 
 
     def send_command(self, command: list[int], endpoint: int, control_interface_index: int = 0) -> None:
@@ -586,13 +640,17 @@ class CoreEngine:
                 raise
             self.logger.warning("Error sending command: %s", e)
 
+    @staticmethod
+    def _claimed_interfaces(config: DeviceConfiguration) -> list[int]:
+        # A command interface of 0 means "use endpoint 0x00" (control transfers): nothing to claim for it.
+        # Listen interfaces are always claimed, including interface 0.
+        command_interface = [config.command_interface_index[0]] if config.command_interface_index[0] != 0x00 else []
+        return list(set([*command_interface, *config.listen_interface_indexes]))
+
     def kernel_detach(self, usb_device: TypedDevice, config: DeviceConfiguration) -> None:
         self.logger.info(f"Detaching kernel driver for device: {usb_device.idVendor:04x}:{usb_device.idProduct:04x} ({config.name})")
 
-        interfaces = list(set([config.command_interface_index[0], *config.listen_interface_indexes]))
-        for interface in interfaces:
-            if interface == 0x00:
-                continue
+        for interface in self._claimed_interfaces(config):
             if usb_device.is_kernel_driver_active(interface):
                 self.logger.info(f"Kernel driver active on interface {interface}, detaching...")
                 usb_device.detach_kernel_driver(interface)
@@ -605,10 +663,7 @@ class CoreEngine:
     def kernel_attach(self, usb_device: TypedDevice, config: DeviceConfiguration) -> None:
         self.logger.info(f"Re-attaching kernel driver for device: {usb_device.idProduct:04x}:{usb_device.idVendor:04x} ({config.name})")
 
-        interfaces = list(set([config.command_interface_index[0], *config.listen_interface_indexes]))
-        for interface in interfaces:
-            if interface == 0x00:
-                continue
+        for interface in self._claimed_interfaces(config):
             if not usb_device.is_kernel_driver_active(interface):
                 self.logger.info(f"Kernel driver inactive on interface {interface}, re-attaching...")
                 usb_device.attach_kernel_driver(interface)
