@@ -341,9 +341,9 @@ class CoreEngine:
         from linux_arctis_manager.settings import EQSettings
         eq_settings = EQSettings.load()
         eq_config = eq_settings.to_eq_config()
-        physical_name = self.pa_audio_manager.get_physical_sink_name(
+        physical_names = self.pa_audio_manager.get_physical_sink_names(
             self.usb_device.idVendor, self.device_config.audio_product_ids)
-        if not physical_name:
+        if not physical_names:
             self.logger.error('reapply_eq: physical sink not found')
             return
         if self.eq_manager is None:
@@ -351,10 +351,10 @@ class CoreEngine:
         # Gains on an already-active channel are pushed live to the running
         # sink (see EQManager.reapply()); only a channel whose sink actually
         # changed needs its loopback cable rerouted.
-        new_targets, changed_channels = self.eq_manager.reapply(physical_name, eq_config)
+        new_targets, changed_channels = self.eq_manager.reapply(physical_names, eq_config)
         for null_sink, output, channel in (
-            (PULSE_MEDIA_NODE_NAME, new_targets.get('media', physical_name), 'media'),
-            (PULSE_CHAT_NODE_NAME,  new_targets.get('chat',  physical_name), 'chat'),
+            (PULSE_MEDIA_NODE_NAME, new_targets.get('media', physical_names['media']), 'media'),
+            (PULSE_CHAT_NODE_NAME,  new_targets.get('chat',  physical_names['chat']), 'chat'),
         ):
             if channel not in changed_channels:
                 continue
@@ -478,12 +478,12 @@ class CoreEngine:
         if self.eq_manager is None:
             self.eq_manager = EQManager()
 
-        physical_name = self.pa_audio_manager.get_physical_sink_name(
+        physical_names = self.pa_audio_manager.get_physical_sink_names(
             self.usb_device.idVendor, self.device_config.audio_product_ids
         )
         eq_targets: dict[str, str] = {}
-        if physical_name:
-            eq_targets = self.eq_manager.setup(physical_name, eq_config)
+        if physical_names:
+            eq_targets = self.eq_manager.setup(physical_names, eq_config)
 
         self.pa_audio_manager.sinks_setup(
             self.device_config.name,

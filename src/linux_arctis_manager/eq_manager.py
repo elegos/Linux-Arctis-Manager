@@ -139,19 +139,25 @@ class EQManager:
     # Initial setup (called once when the headset connects)
     # ------------------------------------------------------------------
 
-    def setup(self, physical_sink_name: str, config: EQConfig) -> dict[str, str]:
+    @staticmethod
+    def _physical_for(physical_sink_name: str | dict[str, str], channel: str) -> str:
+        """physical_sink_name is either one sink for all channels, or {channel: sink}
+        for devices with per-channel hardware outputs (e.g. game/chat)."""
+        return physical_sink_name[channel] if isinstance(physical_sink_name, dict) else physical_sink_name
+
+    def setup(self, physical_sink_name: str | dict[str, str], config: EQConfig) -> dict[str, str]:
         """Create LADSPA EQ sinks for initial device setup.
 
         Returns {channel: sink_name} — the targets for the null-sink loopbacks.
         """
         self._config = config
-        targets: dict[str, str] = {'media': physical_sink_name, 'chat': physical_sink_name}
+        targets: dict[str, str] = {ch: self._physical_for(physical_sink_name, ch) for ch in ('media', 'chat')}
 
         for channel, cfg in [('media', config.media), ('chat', config.chat)]:
             if not cfg.enabled or cfg.preset is None:
                 continue
             name = self._next_sink_name(channel)
-            if self._create_ladspa_sink(channel, name, physical_sink_name, cfg.preset.to_ladspa_controls()):
+            if self._create_ladspa_sink(channel, name, targets[channel], cfg.preset.to_ladspa_controls()):
                 targets[channel] = name
 
         return targets
@@ -160,7 +166,7 @@ class EQManager:
     # Live EQ update (called on every preset / gain change)
     # ------------------------------------------------------------------
 
-    def reapply(self, physical_sink_name: str, config: EQConfig) -> tuple[dict[str, str], set[str]]:
+    def reapply(self, physical_sink_name: str | dict[str, str], config: EQConfig) -> tuple[dict[str, str], set[str]]:
         """Apply new EQ settings, updating gains in place where possible.
 
         Returns (targets, changed_channels): targets is {channel: sink_name}
@@ -188,7 +194,9 @@ class EQManager:
         new_targets: dict[str, str] = {}
         changed_channels: set[str] = set()
 
+        all_channels_physical = physical_sink_name
         for channel, cfg in [('media', config.media), ('chat', config.chat)]:
+            physical_sink_name = self._physical_for(all_channels_physical, channel)
             old_idx = self._active_modules.get(channel)
             old_name = self._active_names.get(channel)
             previous_target = old_name or physical_sink_name
