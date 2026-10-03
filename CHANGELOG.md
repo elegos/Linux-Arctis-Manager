@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- SteelSeries Arctis Pro Wireless support (`1038:1290`): headset connection and battery status, sidetone and auto-off settings. The Chat virtual sink is routed to the base station's hardware chat output, so the ChatMix dial keeps working.
+- Device configuration: optional `status.poll` (request/response polling for devices whose responses carry no header), `audio_product_ids` (USB audio device differing from the HID one) and `settings_save_sequence` (command sent after each setting update).
 - Software EQ via PulseAudio LADSPA (`mbeq_1197` from `swh-plugins`): per-channel (media and chat) equaliser with simple (10-band) and advanced (15-band) modes, ±12 dB gain range per band.
 - EQ presets saved as YAML in `~/.config/arctis_manager/eq_presets/`. EQ settings (enabled, mode, preset, per-app rules) saved in `~/.config/arctis_manager/eq_settings.yaml`.
 - Per-application EQ overrides: route a specific running application, executable, or Steam game to a custom EQ preset on a chosen channel. The "Add override" dialog shows currently registered audio clients (including paused apps) for stream matching, a file browser for executable selection, and deduplicates Steam games that appear across multiple library folders.
