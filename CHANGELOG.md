@@ -37,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Fixed
 
+- Enabling EQ on a channel while the service is running no longer silently bypasses it: the new EQ sink is registered asynchronously by PipeWire, so rerouting the channel to it could fail with `sink '…_EQ_internal_N' not found`, leaving the channel connected straight to the headset until the service restarted.
+- On devices with separate hardware game/chat outputs, the chat EQ now feeds the chat output instead of the game one.
 - Switching EQ presets, gains, or toggling EQ on/off no longer interrupts audio playback in apps such as Spotify, and no longer piles up dozens of unused PipeWire sinks over a session. Previously, every EQ change loaded a fresh LADSPA module and left the old one behind (idle, to avoid a PipeWire sink-removal event resetting playback streams). Changes are now pushed live to the existing LADSPA node instead, so the same sink and module are reused for the whole session — nothing to leak, nothing to reset.
 - Internal EQ and noise-cancellation virtual devices are now clearly labelled (e.g. `Arctis Media EQ (internal)`) instead of showing truncated or garbled names in system sound settings.
 - RVC voice changer: fixed a range of real-time synthesis artifacts — periodic clicking, dropped/garbled syllables at the start of phrases and after pauses, unintelligible isolated short words, and inconsistent output when repeating the same phrase. These were caused by issues specific to streaming (window-by-window) synthesis: hard cuts between overlapping synthesis windows, silence handling that fed the model artificial padding, and per-window randomness in the synthesizer.
