@@ -20,6 +20,7 @@ def _make_config(
     config.name = name
     config.vendor_id = vendor_id
     config.product_ids = product_ids if product_ids is not None else [0x1234]
+    config.audio_product_ids = config.product_ids
     config.product_string = product_string
     config.settings = {}
     return config
@@ -277,3 +278,68 @@ def test_on_disconnected_no_product_string_falls_back_to_vid_pid():
         engine.on_device_disconnected(0x1038, 0x12e0)
 
     mock_teardown.assert_called_once()
+
+
+# --- Arctis Pro Wireless style devices (polled status, interface 0 listen) ---
+
+def _load_device_config(file_name: str) -> DeviceConfiguration:
+    from pathlib import Path
+
+    from ruamel.yaml import YAML
+    path = Path(__file__).parent.parent.parent / 'src' / 'linux_arctis_manager' / 'devices' / file_name
+    return DeviceConfiguration(YAML(typ='safe').load(path))
+
+
+def test_claimed_interfaces_includes_listen_interface_zero():
+    config = _load_device_config('arctis_pro_wireless.yaml')
+    assert CoreEngine._claimed_interfaces(config) == [0]
+
+
+def test_claimed_interfaces_skips_control_endpoint_command_interface():
+    config = _load_device_config('arctis_7_plus.yaml')
+    assert CoreEngine._claimed_interfaces(config) == [3]
+
+
+def test_poll_device_status_attributes_each_response_to_its_request():
+    import asyncio
+
+    from linux_arctis_manager.utils import ObservableDict
+
+    config = _load_device_config('arctis_pro_wireless.yaml')
+    engine = _make_engine(configs=[config])
+    engine.device_config = config
+    engine.device_status = ObservableDict()
+    engine.usb_device = MagicMock()
+    engine.guess_interface_endpoint = MagicMock(return_value=(0x81, 32))
+    engine.get_command_endpoint_address = MagicMock(return_value=0x00)
+    engine.manage_mix_change = MagicMock()
+
+    pending: list[list[int]] = []
+    responses = {0x41: [0x04] + [0] * 31, 0x40: [0x03] + [0] * 31}
+
+    def send_command(command, endpoint, control_interface_index=0):
+        pending.append(responses[command[0] >> 8])
+
+    def read(endpoint, size, timeout):
+        if not pending:
+            raise usb.core.USBError('timeout', errno=110)
+        return pending.pop(0)
+
+    engine.send_command = MagicMock(side_effect=send_command)
+    engine.usb_device.read = MagicMock(side_effect=read)
+
+    with patch('linux_arctis_manager.core.asyncio.sleep', new=_noop_sleep):
+        asyncio.run(engine.poll_device_status())
+
+    assert [c.args[0] for c in engine.send_command.call_args_list] == [[0x41aa], [0x40aa]]
+    assert engine.device_status['headset_power_status'] == 0x04
+    assert engine.device_status['headset_battery_charge'] == 0x03
+
+    from linux_arctis_manager.config import parsed_status
+    parsed = parsed_status(engine.device_status.to_dict(), config)
+    assert parsed['headset_power_status'] == 'online'
+    assert parsed['headset_battery_charge'] == 75
+
+
+async def _noop_sleep(*_args):
+    return None

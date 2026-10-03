@@ -58,6 +58,9 @@ class PulseAudioManager:
             return product_id_attr in [f'0x{pid:04x}' for pid in lst]
 
         physical = [s for s in sinks if s.proplist.get('device.vendor.id', '') == f'0x{vendor_id:04x}' and check_prod_id(s.proplist.get('device.product.id', ''))]
+        # Devices with hardware game/chat outputs (e.g. Arctis Pro Wireless) expose a separate chat sink:
+        # keep it last, so that physical[0] is always the main (game/media) output.
+        physical.sort(key=self._is_chat_sink)
         virtual = [s for s in sinks if s.proplist.get('node.name', '') in (PULSE_MEDIA_NODE_NAME, PULSE_CHAT_NODE_NAME)]
 
         if mode == ONLY_PHYSICAL:
@@ -68,6 +71,10 @@ class PulseAudioManager:
             sinks = physical + virtual
 
         return sinks
+
+    @staticmethod
+    def _is_chat_sink(sink: TypedPulseSinkInfo) -> bool:
+        return 'chat' in sink.proplist.get('device.profile.name', '')
 
     def create_virtual_sink(self, name: str, description: str, sink_output: str) -> None:
         sink = next((s for s in self.get_arctis_sinks(ONLY_VIRTUAL) if s.proplist.get('node.name', '') == name), None)
@@ -115,9 +122,9 @@ class PulseAudioManager:
             if module.argument and name in module.argument:
                 self.pulse.module_unload(module.index)
     
-    def wait_for_physical_device(self, vendor_id: int, product_id: int, attempts: int = 10) -> bool:
-        vendor_id_hex = f'0x{vendor_id:04x}'
-        product_id_hex = f'0x{product_id:04x}'
+    def wait_for_physical_device(self, vendor_id: int, product_id: int|list[int], attempts: int = 10) -> bool:
+        product_ids = product_id if isinstance(product_id, list) else [product_id]
+        product_ids_str = '|'.join(f'{pid:04x}' for pid in product_ids)
 
         while attempts > 0:
             if next((s for s in self.get_arctis_sinks(ONLY_PHYSICAL, vendor_id=vendor_id, product_id=product_id)), None):
@@ -126,7 +133,7 @@ class PulseAudioManager:
             attempts -= 1
             time.sleep(1)
         
-        self.logger.error(f'Failed to find SteelSeries Arctis device {vendor_id:04x}:{product_id:04x} after {attempts} attempts')
+        self.logger.error(f'Failed to find SteelSeries Arctis device {vendor_id:04x}:{product_ids_str} after {attempts} attempts')
 
         return False
 
@@ -179,8 +186,12 @@ class PulseAudioManager:
             return
 
         physical_name = real_sink[0].name
+        # Route the chat channel to the hardware chat output, if any (unless chat EQ is in between)
+        hw_chat_name = next((s.name for s in real_sink if self._is_chat_sink(s)), physical_name)
+        if chat_output is None or chat_output == physical_name:
+            chat_output = hw_chat_name
         self.create_virtual_sink(PULSE_MEDIA_NODE_NAME, f'{device_name} Media', media_output or physical_name)
-        self.create_virtual_sink(PULSE_CHAT_NODE_NAME, f'{device_name} Chat', chat_output or physical_name)
+        self.create_virtual_sink(PULSE_CHAT_NODE_NAME, f'{device_name} Chat', chat_output)
 
     def update_virtual_sink_loopback(self, sink_name: str, new_output: str) -> None:
         """Redirect the loopback output to new_output via sink_input_move.

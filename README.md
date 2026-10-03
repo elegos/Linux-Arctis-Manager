@@ -25,7 +25,7 @@ An open-source replacement for SteelSeries GG, to manage your Arctis headset on 
 | Arctis 3 Console Edition | ❌ | ❌ | ❓ |
 | Arctis 7 / 7 2019 / Pro 2019 / Pro GameDAC | ❌ | ❌ | `1260`, `12ad`, `1252`, `1280` |
 | Arctis 9 | ❌ | ❌ | `12c2` |
-| Arctis Pro Wireless | ❌ | ❌ | `1290` |
+| Arctis Pro Wireless | ➖ | ✅ | `1290` (HID), `1294` (audio) |
 | Arctis Nova 3 | ❌ | ❌ | `12ec` |
 | Arctis Nova 3P Wireless / 3X Wireless | ❌ | ❌ | `2269`, `226d` |
 | Arctis Nova 5 | ➖ | ✅ | `2232`, `2253`, `2264` |
