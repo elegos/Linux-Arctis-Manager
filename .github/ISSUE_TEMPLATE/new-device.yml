@@ -1,0 +1,42 @@
+name: New device request
+description: Your SteelSeries headset is not in the support table yet.
+title: "[device] "
+labels: ["new-device", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the [compatibility matrix](https://github.com/elegos/Linux-Arctis-Manager/blob/develop/docs/device_compatibility.md) first.
+        If your headset is missing, we usually just need its hardware IDs and descriptors to get started.
+  - type: input
+    id: model
+    attributes:
+      label: Exact product name
+      placeholder: "SteelSeries Arctis Nova 3 Wireless"
+    validations:
+      required: true
+  - type: textarea
+    id: devices
+    attributes:
+      label: Output of `lam-cli tools arctis-devices`
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: bundle
+    attributes:
+      label: Debug bundle
+      description: Run `scripts/collect-debug-info.sh` with the headset connected and attach the `.tar.gz` (it contains the HID descriptors).
+    validations:
+      required: true
+  - type: textarea
+    id: features
+    attributes:
+      label: Features the headset has
+      description: Battery, ChatMix dial, mic mute, sidetone, ANC/transparency, EQ presets, RGB, Bluetooth, base station OLED...
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Can you help test?
+      options:
+        - label: I can test builds and run captures on the real hardware.

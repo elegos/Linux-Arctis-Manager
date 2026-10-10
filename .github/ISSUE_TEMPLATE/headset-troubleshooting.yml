@@ -1,0 +1,81 @@
+name: Headset not working properly
+description: Not detected, no audio routing, settings not applying, wrong battery, daemon crash...
+title: "[headset] "
+labels: ["device", "needs-debug-bundle"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This form is built around the **debug bundle** - without it we can rarely tell what is going on.
+
+        1. Plug in / power on the headset and reproduce the problem.
+        2. Run `scripts/collect-debug-info.sh` (from a checkout, or `curl -fsSLO https://raw.githubusercontent.com/elegos/Linux-Arctis-Manager/develop/scripts/collect-debug-info.sh`).
+        3. Attach the `.tar.gz` it prints (nothing is uploaded by the script).
+
+        We may ask you to run it again with an opt-in capture. **Review those before attaching**: `--usb-capture` records the whole USB bus, so another device on the same bus appears in it too.
+  - type: input
+    id: model
+    attributes:
+      label: Headset model and connection
+      placeholder: "Arctis Nova Pro Wireless, via USB base station"
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: Firmware version (if known)
+  - type: dropdown
+    id: symptom
+    attributes:
+      label: What is wrong?
+      options:
+        - Headset not detected
+        - Detected, but "headset not ready" / stuck initialising
+        - No audio devices / wrong routing (ChatMix, sinks)
+        - A setting does not apply (EQ, sidetone, ANC, LEDs, ...)
+        - Wrong or missing battery level
+        - Daemon or GUI crashes
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: What happened, and what did you expect?
+      description: Steps to reproduce; what changed recently (update, new kernel, new firmware).
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Linux Arctis Manager version
+      description: "Shown in the GUI, or in the first line the daemon logs: `journalctl --user -u lam-daemon.service | grep -m1 'lam-daemon '`."
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How was it installed?
+      options:
+        - install.sh (user-level, ~/.local)
+        - AUR
+        - Fedora COPR
+        - .deb / .rpm from a release
+        - Built from source
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: bundle
+    attributes:
+      label: Debug bundle
+      description: Drag and drop the `lam-debug-info-*.tar.gz` here. Mention if it includes a `--usb-capture` / `--hidraw-capture` and that you reviewed it.
+    validations:
+      required: true
+  - type: checkboxes
+    id: tried
+    attributes:
+      label: Already tried
+      options:
+        - label: Restarted the services (`systemctl --user restart lam-hidraw-helper.service lam-daemon.service`).
+        - label: Unplugged and re-plugged the headset / base station.

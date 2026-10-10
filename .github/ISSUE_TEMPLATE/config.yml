@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or chat
+    url: https://discord.gg/FXfvUXWXt4
+    about: Quick questions, "is my headset supported?", general help (Discord; also on Fluxer, see the README).
+  - name: Supported devices
+    url: https://github.com/elegos/Linux-Arctis-Manager/blob/develop/docs/device_compatibility.md
+    about: Check the compatibility matrix before opening a "new device" request.

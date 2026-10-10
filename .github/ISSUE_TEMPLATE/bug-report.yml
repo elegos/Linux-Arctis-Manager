@@ -1,0 +1,54 @@
+name: Bug report
+description: Something other than headset detection or the installer is broken (GUI, tray, Plasma/GNOME widget, voice changer, EQ...).
+title: "[bug] "
+labels: ["bug", "needs-triage"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you saw, what you expected.
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - GUI
+        - System tray
+        - KDE Plasma widget
+        - GNOME Shell extension
+        - Daemon (lam-daemon)
+        - Equalizer
+        - Voice changer / noise cancelling
+        - Sink hiding / audio routing
+        - lam-cli
+        - Packaging (AUR / COPR / .deb / .rpm)
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Linux Arctis Manager version
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Distribution, desktop environment and session type
+      placeholder: "Fedora 44, KDE Plasma 6, Wayland"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: "`journalctl --user -u lam-daemon.service -n 100 --no-pager` for daemon problems; the terminal output of `lam-gui` for GUI ones."
+      render: text
+  - type: textarea
+    id: bundle
+    attributes:
+      label: Debug bundle (optional, helpful for anything involving the headset)
+      description: Output of `scripts/collect-debug-info.sh`.
