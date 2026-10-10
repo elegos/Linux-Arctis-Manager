@@ -3,7 +3,6 @@
 An open-source replacement for SteelSeries GG, to manage your Arctis headset on Linux!
 
 [![GitHub Release](https://img.shields.io/github/v/release/elegos/Linux-Arctis-Manager?label=Latest%20Release&color=brightgreen&logo=github&logoColor=white)](https://github.com/elegos/Linux-Arctis-Manager/releases)
-[![AUR Version](https://img.shields.io/aur/version/linux-arctis-manager?label=AUR%20Package&logo=arch-linux&logoColor=white&color=1793d1)](https://aur.archlinux.org/packages/linux-arctis-manager)
 [![Python](https://img.shields.io/python/required-version-toml?tomlFilePath=https://raw.githubusercontent.com/elegos/Linux-Arctis-Manager/develop/pyproject.toml&logo=python&logoColor=white&label=Python)](https://www.python.org/)
 [![Release build](https://img.shields.io/github/actions/workflow/status/elegos/Linux-Arctis-Manager/release.yaml?event=push&label=Release%20build&logo=github&logoColor=white)](https://github.com/elegos/Linux-Arctis-Manager/actions/workflows/release.yaml)
 [![Discord](https://img.shields.io/badge/Discord-join-7289DA?logo=discord&logoColor=white)](https://discord.gg/FXfvUXWXt4)
@@ -14,6 +13,7 @@ An open-source replacement for SteelSeries GG, to manage your Arctis headset on 
 ### Stable
 
 [![Copr build status](https://copr.fedorainfracloud.org/coprs/elegos/linux-arctis-manager/package/linux-arctis-manager/status_image/last_build.png)](https://copr.fedorainfracloud.org/coprs/elegos/linux-arctis-manager/package/linux-arctis-manager/)
+[![AUR Version](https://img.shields.io/aur/version/linux-arctis-manager?label=AUR%20Package&logo=arch-linux&logoColor=white&color=1793d1)](https://aur.archlinux.org/packages/linux-arctis-manager)
 
 ### Testing
 
@@ -34,41 +34,41 @@ An open-source replacement for SteelSeries GG, to manage your Arctis headset on 
 
 Cross-checked against SteelSeries' own device specs, not just the previous v2 list — see [`docs/device_compatibility.md`](docs/device_compatibility.md) for the auto-generated, per-capability, per-PID breakdown of everything below marked ✅.
 
-| Device | Supported | Notes |
-|---|:---:|---|
-| Arctis 1 Wireless (+ Xbox, + Cyberpunk 2077 Edition) | ✅ | Hardware EQ is adjustable, just not firmware-computed — the daemon calculates the filter curve itself and streams it to the AV6X02 DSP chip. |
-| Arctis 5 (+ 2018, Dota 2 Edition, PUBG 2018 Edition) | ✅ | No connection-status or battery readout — the raw protocol reads those over a two-step exchange this project's HID layer doesn't support yet. Mic volume is also not exposed: the vendor spec's own description of that setting is ambiguous. |
-| Arctis 7 (+ 2019 refresh) | ✅ | Hardware EQ is adjustable on both revisions, just not firmware-computed — same AV6X02 chip/mechanism as Arctis 1 Wireless. |
-| Arctis 7+ / Destiny 2 Edition | ✅ | — |
-| Arctis 7X+ (Xbox) | ✅ | — |
-| Arctis 7P+ (PlayStation) | ✅ | — |
-| Arctis 9 | ✅ | Hardware EQ isn't adjustable — its register format is entirely undocumented, unlike Arctis 7/1 Wireless/5. Software EQ via PipeWire is the substitute. |
-| Arctis 9X | ❌ | Uses a transport (AVNERA/LIGHTXIO) this project's engine doesn't implement yet. |
-| Arctis Pro (wired, standalone) | ✅ | Shares Arctis 5's entire control plane — same chip, same protocol, just a different PID. |
-| Arctis Pro GameDAC | ✅ | RGB lighting, OLED bitmap content, and DTS Headphone:X v2 spatial audio aren't exposed — out of scope, same as every other device. EQ gain units are unconfirmed (no dB-per-unit formula anywhere in the vendor spec). Mic volume and the per-band live EQ push only refresh on reconnect — the DSL's live-update path only reads a single byte per field. |
-| Arctis Pro Wireless | ✅ | Live updates from the base station's own OLED menu/dial aren't reflected until reconnect — the raw protocol's push-event report isn't documented well enough to wire up safely. |
-| Arctis Nova 3 (wired) | ✅ | — |
-| Arctis Nova 3 / 3X Wireless | ✅ | — |
-| Arctis Nova 4 / 4X | ✅ | — |
-| Arctis Nova 5 / 5X / 5X White | ✅ | — |
-| Arctis Nova 7 / 7X / WoW / Diablo IV (original firmware) | ✅ | — |
-| Arctis Nova 7 / 7X / 7P Gen 2 (native hardware *or* Gen 2 upgrade firmware) | ✅ | — |
-| Arctis Nova 7P (original firmware) | ✅ | — |
-| Arctis Nova Elite (+ SNG SKU) | ✅ | — |
-| Arctis Nova Pro (wired, GameDAC Gen 2, incl. v2 / Xbox) | ✅ | — |
-| Arctis Nova Pro Omni | ✅ | — |
-| Arctis Nova Pro Wireless (+ X, + X White) | ✅ | — |
-| Arctis GameBuds (+ X) | ✅ | Button remapping isn't exposed — no per-gesture-action UI/capability exists in this project yet. The 2.4G/BT parametric EQ has two independent 10-band profiles, both adjustable. |
-| Arctis GameBuds Case (+ X) | ✅ | Battery/charging status and lid-open/closed only — the case has no audio settings of its own. |
+| Device                                                                      | Supported | Notes                                                                                                                                                                                                                                                                                                                                                      |
+| --------------------------------------------------------------------------- | :-------: | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Arctis 1 Wireless (+ Xbox, + Cyberpunk 2077 Edition)                        |     ✅     | Hardware EQ is adjustable, just not firmware-computed — the daemon calculates the filter curve itself and streams it to the AV6X02 DSP chip.                                                                                                                                                                                                               |
+| Arctis 5 (+ 2018, Dota 2 Edition, PUBG 2018 Edition)                        |     ✅     | No connection-status or battery readout — the raw protocol reads those over a two-step exchange this project's HID layer doesn't support yet. Mic volume is also not exposed: the vendor spec's own description of that setting is ambiguous.                                                                                                              |
+| Arctis 7 (+ 2019 refresh)                                                   |     ✅     | Hardware EQ is adjustable on both revisions, just not firmware-computed — same AV6X02 chip/mechanism as Arctis 1 Wireless.                                                                                                                                                                                                                                 |
+| Arctis 7+ / Destiny 2 Edition                                               |     ✅     | —                                                                                                                                                                                                                                                                                                                                                          |
+| Arctis 7X+ (Xbox)                                                           |     ✅     | —                                                                                                                                                                                                                                                                                                                                                          |
+| Arctis 7P+ (PlayStation)                                                    |     ✅     | —                                                                                                                                                                                                                                                                                                                                                          |
+| Arctis 9                                                                    |     ✅     | Hardware EQ isn't adjustable — its register format is entirely undocumented, unlike Arctis 7/1 Wireless/5. Software EQ via PipeWire is the substitute.                                                                                                                                                                                                     |
+| Arctis 9X                                                                   |     ❌     | Uses a transport (AVNERA/LIGHTXIO) this project's engine doesn't implement yet.                                                                                                                                                                                                                                                                            |
+| Arctis Pro (wired, standalone)                                              |     ✅     | Shares Arctis 5's entire control plane — same chip, same protocol, just a different PID.                                                                                                                                                                                                                                                                   |
+| Arctis Pro GameDAC                                                          |     ✅     | RGB lighting, OLED bitmap content, and DTS Headphone:X v2 spatial audio aren't exposed — out of scope, same as every other device. EQ gain units are unconfirmed (no dB-per-unit formula anywhere in the vendor spec). Mic volume and the per-band live EQ push only refresh on reconnect — the DSL's live-update path only reads a single byte per field. |
+| Arctis Pro Wireless                                                         |     ✅     | Live updates from the base station's own OLED menu/dial aren't reflected until reconnect — the raw protocol's push-event report isn't documented well enough to wire up safely.                                                                                                                                                                            |
+| Arctis Nova 3 (wired)                                                       |     ✅     | —                                                                                                                                                                                                                                                                                                                                                          |
+| Arctis Nova 3 / 3X Wireless                                                 |     ✅     | —                                                                                                                                                                                                                                                                                                                                                          |
+| Arctis Nova 4 / 4X                                                          |     ✅     | —                                                                                                                                                                                                                                                                                                                                                          |
+| Arctis Nova 5 / 5X / 5X White                                               |     ✅     | —                                                                                                                                                                                                                                                                                                                                                          |
+| Arctis Nova 7 / 7X / WoW / Diablo IV (original firmware)                    |     ✅     | —                                                                                                                                                                                                                                                                                                                                                          |
+| Arctis Nova 7 / 7X / 7P Gen 2 (native hardware *or* Gen 2 upgrade firmware) |     ✅     | —                                                                                                                                                                                                                                                                                                                                                          |
+| Arctis Nova 7P (original firmware)                                          |     ✅     | —                                                                                                                                                                                                                                                                                                                                                          |
+| Arctis Nova Elite (+ SNG SKU)                                               |     ✅     | —                                                                                                                                                                                                                                                                                                                                                          |
+| Arctis Nova Pro (wired, GameDAC Gen 2, incl. v2 / Xbox)                     |     ✅     | —                                                                                                                                                                                                                                                                                                                                                          |
+| Arctis Nova Pro Omni                                                        |     ✅     | —                                                                                                                                                                                                                                                                                                                                                          |
+| Arctis Nova Pro Wireless (+ X, + X White)                                   |     ✅     | —                                                                                                                                                                                                                                                                                                                                                          |
+| Arctis GameBuds (+ X)                                                       |     ✅     | Button remapping isn't exposed — no per-gesture-action UI/capability exists in this project yet. The 2.4G/BT parametric EQ has two independent 10-band profiles, both adjustable.                                                                                                                                                                          |
+| Arctis GameBuds Case (+ X)                                                  |     ✅     | Battery/charging status and lid-open/closed only — the case has no audio settings of its own.                                                                                                                                                                                                                                                              |
 
 > **Note:** software EQ (10/15-band, applied via PipeWire regardless of what the headset itself supports) is always available as a substitute for hardware EQ. "No hardware EQ" above only means that headset's own onboard curve isn't adjustable — not that EQ itself is unavailable.
 
 ### Legend
 
-| Symbol | Description |
-| :---: | --- |
-| ✅ | Supported by the v3 (Rust) daemon today |
-| ❌ | Not ported yet |
+| Symbol | Description                             |
+| :----: | --------------------------------------- |
+|   ✅    | Supported by the v3 (Rust) daemon today |
+|   ❌    | Not ported yet                          |
 
 ## ⌨️ Components
 
