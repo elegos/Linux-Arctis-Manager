@@ -55,18 +55,23 @@ jobs:
           # the preflight's own error output if missing; these are the
           # tools. libpulse + libudev are what the daemon links against.
           case "${{ matrix.family }}" in
-            arch) pacman -Sy --noconfirm --needed openssh libcap libpulse systemd-libs openssl coreutils tar ;;
-            rpm)  dnf install -y openssh libcap pulseaudio-libs systemd-libs openssl-libs tar findutils ;;
+            arch) pacman -Sy --noconfirm --needed openssh libcap libpulse systemd-libs openssl coreutils tar sudo ;;
+            rpm)  dnf install -y openssh libcap pulseaudio-libs systemd-libs openssl-libs tar findutils sudo ;;
             deb)  apt-get update
                   DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-                    openssh-client libcap2-bin libpulse0 libudev1 tar findutils ca-certificates
+                    openssh-client libcap2-bin libpulse0 libudev1 tar findutils ca-certificates sudo
                   # libssl3 was renamed libssl3t64 in the 64-bit time_t transition
                   apt-get install -y --no-install-recommends libssl3t64 || apt-get install -y --no-install-recommends libssl3 ;;
           esac
 
+      # The installer deliberately refuses to run as root (it installs into
+      # $HOME), and CI containers run as root: use an ordinary user.
       - name: Installer verification + preflight
         shell: bash
-        run: tests/installer/dry-run.sh /tarball/*.tar.gz
+        run: |
+          set -e
+          useradd -m tester
+          su -s /bin/bash tester -c 'tests/installer/dry-run.sh /tarball/*.tar.gz'
 
   # Installs the artifact from build-pkg on a *fresh* instance of the same
   # image via the distro's own package manager — this is the step that
