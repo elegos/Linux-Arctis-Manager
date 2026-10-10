@@ -5,25 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.0.0]
+## [3.0.0-beta1]
 
 ### Added
 
-- User-level installer (`install.sh`): installs signed prebuilt binaries under `~/.local` (works on SteamOS), upgrades, uninstalls, and verifies prerequisites before changing anything. `LAM_DATADIR` can now override the data directory at run time.
+- User-level installer (`install.sh`) for SteamOS and any other distro: installs prebuilt binaries under `~/.local` with one command, checks prerequisites before changing anything, asks for confirmation at every security-relevant step, and supports upgrade (only the changed dependencies are downloaded), `--pre-release`, `--version`, `--dry-run`, `--diagnose` and `uninstall`.
+- Release tarballs are now signed (SSH signature over `SHA256SUMS`); the key fingerprint and manual verification steps are in the README.
+- Optional "Hide Physical Sink" General setting: hides the physical Arctis sink from the desktop's quick-settings output picker while the virtual `Arctis_Media`/`Arctis_Chat` sinks are active (needs WirePlumber; greyed out with an explanation otherwise).
+- At-a-glance battery and chat/game mix bars in the tray tooltip, the Plasma widget and the GNOME extension, hidden on devices that don't report them.
 - GitHub issue forms for installer problems, headset troubleshooting, new devices and general bugs.
+
+### Changed
+
+- Unavailable settings are greyed out in the GUI, with a tooltip explaining why.
+- Application stream monitoring uses a persistent PipeWire/PulseAudio connection instead of repeatedly spawning `pactl`.
+- Audio loopbacks no longer force a fixed latency, letting PipeWire align them with the driver.
+- Uninstalling now also removes the WirePlumber policy script and restarts WirePlumber.
+- CI: weekly CVE audit of the Python dependencies; Fedora COPR install/uninstall documented in the README.
+
+### Fixed
+
+- Arctis 7+ family headsets (7+, 7P+, 7X+, 7+ Destiny 2) no longer get stuck on "headset not ready" (GH #71).
+- A multi-interface headset (e.g. Arctis Nova 7 Gen 2) no longer starts one worker per hidraw interface when udev omits the interface number (GH #72).
+- Active streams are moved off the virtual sinks before they are torn down when a wireless headset disconnects (GH #73).
+- `pipewire-pulse` no longer spins at 100% CPU because of the loopback latency setting, and the stream monitor no longer feeds on its own events when no per-app overrides exist.
+- The systemd unit templates pointed to a wrong `Documentation` URL.
+
+## [3.0.0-alpha7]
+
+### Added
+
 - AI Voice Changer (RVC): real-time voice conversion with a guided calibration wizard, model management (HuggingFace search/download or local files), and auto-tune.
 - Noise Cancellation panel with presets and full manual control.
 - Hardware EQ support for the Nova Pro family, with a per-channel backend selector (Auto / Software / Hardware).
 - Per-application EQ and Noise Cancellation overrides, including switching by focused window on Hyprland, Sway, and X11.
 - EQ presets (10-band and 15-band) with a curve editor.
 - Audio output can be redirected automatically on headset connect/disconnect.
-- Optional "Hide Physical Sink" General setting: hides the underlying physical Arctis sink from the desktop shell's quick-settings output picker (Plasma/GNOME) while the virtual `Arctis_Media`/`Arctis_Chat` sinks are active, backed by an always-installed WirePlumber policy script. The full audio control panel and `pactl`/`pw-cli` keep normal visibility, so the physical device stays reachable if something needs it directly. Greyed out with a tooltip when WirePlumber isn't installed; no effect on the `pactl`/`pw-cli`-only audio path when it is.
 - Device settings now persist across daemon restarts.
 - GUI shows the daemon version and upgrades/starts the background service automatically.
 - Rust daemon (v3): rewrite of the background service, with support for the entire device lineup (Nova 5, Arctis 7+, Nova Pro Wired/Wireless/Omni, Nova Elite, Nova 7, Nova 7 Gen2, Nova 3/3X/4/4X, Arctis 7, Arctis 1 Wireless, Arctis 5, Arctis 9, Arctis Pro/Pro Wireless/Pro GameDAC, Arctis GameBuds) — see `docs/device_compatibility.md` for the full capability matrix.
 - KDE Plasma 6 widget (plasmoid): status and a configurable set of quick-access controls in the Plasma panel, positioned by Plasma itself, plus a button to open the main app window. Ships as its own `linux-arctis-manager-plasma-widget` package (Fedora subpackage, Debian binary package, Arch split package) across the same build matrix as the main package.
 - GNOME Shell extension (45+): same status + configurable quick settings + open-main-app button, in the top panel. Ships as its own `linux-arctis-manager-gnome-extension` package, same build matrix as the Plasma widget.
-- At-a-glance battery (headset, charge stand, or GameBuds' left/right/case) and chat/game mix, shown as compact ASCII bars: in the fallback tray icon's tooltip, the Plasma widget's native tooltip, and next to the icon in the GNOME extension's panel indicator. Backed by a new daemon-side `role` tag on `GetStatus` fields (see `docs/dbus.md`) so all three UIs find "the battery"/"the chatmix" without hardcoding any one device family's raw field name — those names differ a lot across the lineup (`headset_batt_level` vs. `battery` vs. `battery_level` vs. `battery_status`, etc.). Hidden automatically on devices/states that don't report the field (wired headsets, no hardware chatmix).
 
 ### Changed
 
@@ -63,8 +85,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Arctis Nova 7 family (Gen 1, Gen 2, and Gen 2-firmware-on-Gen-1-hardware; e.g. PID `0x22A1`, Nova 7P) could get stuck logging "headset not ready, waiting for wireless event" forever, even with the headset genuinely on, paired, and playing audio: the device's unsolicited/wireless-connection-changed notifications arrive on a distinct HID interface (5) from its command channel (3) — confirmed against the decoded vendor spec (identical across all 15 Nova 7 family TX variants, no per-SKU exception) and a real bug report's hidraw capture — but the daemon only ever listened on the command interface. The engine now opens a device's declared `sync_interface` as a second hidraw connection whenever it differs from `command_interface`, forwarding its reports into the same status/D-Bus pipeline; this is generic support, not Nova 7-specific — the same fix also silently activates already-correct `sync_interface` config that was previously parsed but never used on Nova 4, Nova 5, Nova 3 Wireless, both Arctis GameBuds variants, Arctis 9, and Arctis Pro Wireless. The separate Arctis 7+ family shows the same raw-spec-vs-v2 discrepancy but wasn't changed — no equivalent real-hardware confirmation yet.
 - Arctis Nova 7 family, second half of the same hang: even once the interface above woke it up, `device_init` still never succeeded, because the command interface's own replies were being silently discarded too. Root cause: this HID interface has no Report ID in its descriptor, and Linux's hidraw needs a synthetic leading report-id byte on writes regardless (`hidraw_write` always treats the first byte as a report id to strip) but never adds one back on reads — so every real reply arrived one byte short of what the engine expected, every time, forever. Confirmed with a real `hid-recorder` capture on a bug reporter's own hardware (a second, independent reader on the same hidraw node running alongside the stuck daemon) and decoded field-by-field against the byte shift — every value sane (paired/connected, 100% battery, discharging). Devices can now declare `hid.unnumbered_reports: true` to have the engine synthesize the missing byte back onto every read, transparently, so no struct or byte-offset elsewhere in that device's config needs to account for the asymmetry. Applied to the whole Nova 7 family; the Gen 1/7P instances are inferred by same-hardware-family analogy rather than independently captured, but fail loud (not silently) if that inference is ever wrong, so it's safe to ship ahead of separate confirmation.
 - Arctis Nova 7 family: once connected, the hardware chatmix dial had no effect on audio at all, even though the same bug reporter's `hid-recorder` capture proved the device was sending correct, live `0x45` chatmix events on the wire. The engine's live audio-rebalancing and virtual-sink wireless-connect/disconnect lifecycle only ever look at fields literally named `chatmix_game`/`chatmix_chat`/`radio_connection_status` in the device's reported status (the convention already used by the Nova Pro Wireless/Omni and Nova Elite configs), but this family's `headset_status` struct instead called them `game_chatmix_level`/`chat_chatmix_level`/`connection_status` — so every value reached the status map under a key nothing was ever looking for. Renamed to match the shared convention across all three Nova 7 device files; an audit found the identical mismatch, same field names, also present (independently of this bug report, no per-family confirmation needed — it's a pure string-match bug, not a protocol one) on Nova 4, Nova 5, and Arctis Nova 3 Wireless, fixed the same way in the same pass.
-- Arctis 7P+ (and, by the same inference already used for Nova 7 Gen 1, the rest of the Arctis 7+ family — 7+, 7+ Destiny 2, 7X+) could get stuck logging "headset not ready, waiting for wireless event" forever despite the headset being genuinely paired, connected, and already playing audio over PipeWire — the same missing-Report-ID hang previously fixed for the Nova 7 family (`hid.unnumbered_reports`), not yet applied here. Confirmed via a real `hid-recorder` capture (GH #71): the command interface's `0xB0` status reply arrived correctly (paired/connected, 50% battery, discharging) but starting with the command byte directly, no leading report-id byte, which the engine was silently failing to match against the expected framing. `unnumbered_reports: true` is now set for the whole family; only the 7P+ instance is independently captured, the other three are inferred by same-descriptor-shape analogy but fail loud rather than silently if ever wrong.
-- A multi-interface headset (confirmed on an Arctis Nova 7 Gen 2, GH #72) could spawn one `run_device` task per hidraw interface instead of one, with every non-command interface stuck logging "headset not ready" forever: on some systems udev never populates `ID_USB_INTERFACE_NUM` for hidraw devices, and interface-number matching silently degraded to PID-only, treating every interface as a plausible command channel. `usb_interface_num` now falls back to reading `bInterfaceNumber` straight from the parent USB interface's sysfs attribute when the udev property is missing — always present, independent of which udev rules happened to run.
 
 ## [2.4.1]
 
