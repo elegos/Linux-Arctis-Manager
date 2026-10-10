@@ -52,6 +52,9 @@ use state::{AppState, DeviceCommand, DeviceEntry, SignalEvent};
 
 /// System-level data directory baked in at compile time via `LAM_DATADIR`.
 /// `None` when building without `make install` (dev builds, unit tests).
+/// The `LAM_DATADIR` environment variable, when set at run time, takes
+/// precedence (see `resolve_system_datadir`) so a relocatable, prebuilt
+/// binary can be pointed at wherever it was unpacked.
 const SYSTEM_DATADIR: Option<&str> = option_env!("LAM_DATADIR");
 
 /// Load `*.yaml` files from every directory in `dirs`.
@@ -178,9 +181,23 @@ pub fn user_config_dir() -> PathBuf {
         .join("arctis_manager/devices")
 }
 
-/// Return the system-level config directory compiled in at build time, if any.
+/// Pick the system data directory: a non-empty run-time `LAM_DATADIR` wins
+/// over the compile-time value.
+fn resolve_system_datadir(
+    runtime: Option<std::ffi::OsString>,
+    baked: Option<&str>,
+) -> Option<PathBuf> {
+    runtime
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| baked.map(PathBuf::from))
+}
+
+/// Return the system-level config directory (run-time `LAM_DATADIR`, else
+/// the one compiled in at build time), if any.
 pub fn system_config_dir() -> Option<PathBuf> {
-    SYSTEM_DATADIR.map(|d| PathBuf::from(d).join("devices"))
+    resolve_system_datadir(std::env::var_os("LAM_DATADIR"), SYSTEM_DATADIR)
+        .map(|d| d.join("devices"))
 }
 
 /// Build the ordered list of config search directories.
@@ -1346,6 +1363,22 @@ async fn run_main_loop(
 mod tests {
     use super::*;
     use device_config::{DeviceSection, DeviceVariant};
+
+    #[test]
+    fn runtime_datadir_overrides_baked_one() {
+        let got = resolve_system_datadir(
+            Some("/home/u/.local/share/lam".into()),
+            Some("/usr/share/lam"),
+        );
+        assert_eq!(got, Some(PathBuf::from("/home/u/.local/share/lam")));
+    }
+
+    #[test]
+    fn empty_runtime_datadir_falls_back_to_baked() {
+        let got = resolve_system_datadir(Some("".into()), Some("/usr/share/lam"));
+        assert_eq!(got, Some(PathBuf::from("/usr/share/lam")));
+        assert_eq!(resolve_system_datadir(None, None), None);
+    }
 
     fn config_with_variants(variants: Vec<DeviceVariant>) -> Arc<DeviceConfig> {
         Arc::new(DeviceConfig {
