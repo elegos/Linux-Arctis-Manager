@@ -333,3 +333,26 @@ target before trusting the channel:
   removes dependent shell packages and `-lang`, per the fix already made).
 - Confirm the published changelog entry (`apt show`, `rpm -q --changelog`)
   matches what was written in the GitHub Release draft, not a stale placeholder.
+
+## 9. User-level tarball and release signing
+
+Besides the distro packages, each tag ships a prebuilt tarball per architecture/target
+(`lam-<version>-<arch>-<target>.tar.gz`, built by `build-tarball.yaml` on the oldest supported
+glibc), plus `SHA256SUMS` and `SHA256SUMS.sig`, and `install.sh` itself. `scripts/install.sh`
+verifies the signature with `ssh-keygen -Y verify` against the public key embedded in the
+script (`SIGNING_PUBKEY`) and the tarball against the signed checksum, before extracting or
+running anything.
+
+One-time setup of the signing key:
+
+1. `ssh-keygen -t ed25519 -f lam-release -C lam-release` (set a passphrase). Keep the private
+   key offline/backed up.
+2. Put `cut -d' ' -f1,2 lam-release.pub` into `SIGNING_PUBKEY` in `scripts/install.sh` and
+   publish the fingerprint (`ssh-keygen -lf lam-release.pub`) in the README / your profile.
+3. GitHub -> Settings -> Environments -> new environment `release-signing`, with yourself as
+   required reviewer. Add secrets `LAM_RELEASE_SIGNING_KEY` (the whole private key file) and
+   `LAM_RELEASE_SIGNING_KEY_PASSPHRASE` to that environment.
+4. Without the secret the `sign-tarball` job only warns and ships an unsigned `SHA256SUMS`
+   (the installer then refuses to install that release).
+
+Key rotation = new key pair + new `SIGNING_PUBKEY` in a new `install.sh` release.

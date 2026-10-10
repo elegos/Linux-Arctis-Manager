@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- User-level installer (`install.sh`): installs signed prebuilt binaries under `~/.local` (works on SteamOS), upgrades, uninstalls, and verifies prerequisites before changing anything. `LAM_DATADIR` can now override the data directory at run time.
 - AI Voice Changer (RVC): real-time voice conversion with a guided calibration wizard, model management (HuggingFace search/download or local files), and auto-tune.
 - Noise Cancellation panel with presets and full manual control.
 - Hardware EQ support for the Nova Pro family, with a per-channel backend selector (Auto / Software / Hardware).

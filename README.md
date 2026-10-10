@@ -82,7 +82,23 @@ Choose the installation method that fits your setup:
 
 - **[Arch Linux (AUR)](#arch-linux-aur)** - community-maintained package for Arch users
 - **[Fedora (COPR)](#fedora-copr)** - prebuilt RPM packages for Fedora/Bazzite
+- **[User-level installer](#user-level-installer-steamos-and-any-distro)** - prebuilt, installs into `~/.local` (works on SteamOS, no package manager needed)
 - **[Build from source](#build-from-source)** - for all other Linux distros (Debian, Ubuntu, ...)
+
+---
+
+### User-level installer (SteamOS and any distro)
+
+Installs everything under `~/.local` (and `~/.config` for the systemd user units), from signed prebuilt binaries. It also works on SteamOS, whose read-only root filesystem rules out normal packages.
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL https://github.com/elegos/Linux-Arctis-Manager/releases/latest/download/install.sh | sh
+```
+
+- Installing again upgrades. `--pre-release` includes pre-releases, `--version X.Y.Z` pins one, `--dry-run` only verifies and checks prerequisites, `--diagnose` prints a report for bug reports.
+- `... | sh -s -- uninstall` removes everything it installed (`--purge` also deletes your settings).
+- The release checksums are signed (SSH signature) and verified before anything is run. Every security-relevant step is announced and waits for you to press Enter (or Ctrl+C to abort); the only step needing root is giving the HID helper its capability (`setcap`), via `pkexec`/`sudo`.
+- Needs `systemd` (user session), `libpulse`, a PipeWire/PulseAudio server and glibc >= the version shown by `--dry-run`; if something is missing the installer stops before changing anything and tells you what.
 
 ---
 

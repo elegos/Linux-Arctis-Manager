@@ -13,6 +13,61 @@ jobs:
   build-pkg:
     uses: ./.github/workflows/build-pkg.yaml
 
+  build-tarball:
+    uses: ./.github/workflows/build-tarball.yaml
+
+  shell-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: shellcheck --severity=warning scripts/install.sh scripts/build-release-tarball.sh tests/installer/dry-run.sh
+
+  # scripts/install.sh's verification + preflight against the prebuilt
+  # tarball on every distro of the matrix (nothing is installed: --dry-run).
+  # This is what proves the "build on an old glibc, run anywhere newer"
+  # tarball really resolves its shared libraries on each target.
+  installer-test:
+    needs: [build-pkg, build-tarball]
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.build-pkg.outputs.matrix) }}
+
+    container:
+      image: ${{ matrix.image }}
+      options: --user root
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: tarball-generic
+          path: /tarball
+
+      - name: Install the installer's own prerequisites
+        shell: bash
+        run: |
+          set -e
+          # What a user is told to have: the runtime libraries come from
+          # the preflight's own error output if missing; these are the
+          # tools. libpulse + libudev are what the daemon links against.
+          case "${{ matrix.family }}" in
+            arch) pacman -Sy --noconfirm --needed openssh libcap libpulse systemd-libs openssl coreutils tar ;;
+            rpm)  dnf install -y openssh libcap pulseaudio-libs systemd-libs openssl-libs tar findutils ;;
+            deb)  apt-get update
+                  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+                    openssh-client libcap2-bin libpulse0 libudev1 tar findutils ca-certificates
+                  # libssl3 was renamed libssl3t64 in the 64-bit time_t transition
+                  apt-get install -y --no-install-recommends libssl3t64 || apt-get install -y --no-install-recommends libssl3 ;;
+          esac
+
+      - name: Installer verification + preflight
+        shell: bash
+        run: tests/installer/dry-run.sh /tarball/*.tar.gz
+
   # Installs the artifact from build-pkg on a *fresh* instance of the same
   # image via the distro's own package manager — this is the step that
   # actually resolves depends=/Requires:/Depends: against that distro's
