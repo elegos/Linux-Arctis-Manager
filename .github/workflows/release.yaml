@@ -37,9 +37,57 @@ jobs:
     if: ${{ github.event_name == 'push' }}
     uses: ./.github/workflows/build-pkg.yaml
 
+  build-tarball:
+    if: ${{ github.event_name == 'push' }}
+    uses: ./.github/workflows/build-tarball.yaml
+
+  # Signs SHA256SUMS of the prebuilt tarball(s) with the maintainer's SSH
+  # signing key (verified by scripts/install.sh with `ssh-keygen -Y verify`).
+  # Runs in the protected `release-signing` environment so the key is only
+  # reachable by an approved release run. See docs/release-pipeline.md.
+  sign-tarball:
+    if: ${{ github.event_name == 'push' }}
+    needs: build-tarball
+    runs-on: ubuntu-latest
+    environment: release-signing
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: tarball-generic
+          path: signed
+
+      - name: Checksum and sign
+        working-directory: signed
+        env:
+          SIGNING_KEY: ${{ secrets.LAM_RELEASE_SIGNING_KEY }}
+          SIGNING_KEY_PASSPHRASE: ${{ secrets.LAM_RELEASE_SIGNING_KEY_PASSPHRASE }}
+        run: |
+          set -e
+          sha256sum -- *.tar.gz > SHA256SUMS
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "::warning::LAM_RELEASE_SIGNING_KEY is not set: SHA256SUMS is NOT signed, so scripts/install.sh will refuse to install this release."
+            exit 0
+          fi
+          umask 077
+          printf '%s\n' "$SIGNING_KEY" > "$RUNNER_TEMP/sign_key"
+          printf '#!/bin/sh\nprintf %%s "$SIGNING_KEY_PASSPHRASE"\n' > "$RUNNER_TEMP/askpass"
+          chmod 700 "$RUNNER_TEMP/askpass"
+          SSH_ASKPASS="$RUNNER_TEMP/askpass" SSH_ASKPASS_REQUIRE=force DISPLAY=none \
+            ssh-keygen -Y sign -f "$RUNNER_TEMP/sign_key" -n lam-release SHA256SUMS
+          rm -f "$RUNNER_TEMP/sign_key" "$RUNNER_TEMP/askpass"
+          test -s SHA256SUMS.sig
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tarball-signed
+          path: |
+            signed/SHA256SUMS
+            signed/SHA256SUMS.sig
+          if-no-files-found: warn
+
   release:
     if: ${{ github.event_name == 'push' }}
-    needs: build-pkg
+    needs: [build-pkg, build-tarball, sign-tarball]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -61,6 +109,12 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           path: pkg
+
+      # The user-level installer travels as a release asset (not fetched from
+      # a branch), so `releases/latest/download/install.sh` is always the
+      # script that shipped with - and pins the signing key of - a real tag.
+      - name: Add the user-level installer
+        run: install -Dm755 scripts/install.sh pkg/installer/install.sh
 
       # Debug symbol packages (makepkg's auto-split "-debug-*" pkg.tar.zst,
       # dpkg's auto-generated "*-dbgsym_*.deb"; rpm's debuginfo/debugsource

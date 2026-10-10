@@ -280,7 +280,11 @@ install-gnome-extension:
 	# from /usr/share/glib-2.0/schemas/.
 	glib-compile-schemas $(DESTDIR)$(GNOME_EXT_DEST_DIR)/schemas
 
-install-core: build generate-services install-python
+# SKIP_PYTHON=1 leaves the venv + lam-gui wrapper out: the prebuilt release
+# tarball (scripts/build-release-tarball.sh) ships a hash-pinned requirements
+# lock + wheel instead, and scripts/install.sh builds the venv on the target
+# (a venv bakes absolute paths, so it can't be built once and relocated).
+install-core: build generate-services $(if $(SKIP_PYTHON),,install-python)
 	# Daemon binary
 	install -Dm755 $(DAEMON_BIN) $(DESTDIR)$(BINDIR)/lam-daemon
 	# Privileged helper

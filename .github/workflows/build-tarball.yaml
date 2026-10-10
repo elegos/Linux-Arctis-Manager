@@ -1,0 +1,43 @@
+name: Build release tarball (reusable)
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  # The prebuilt tarball scripts/install.sh installs into ~/.local. Built on
+  # the *oldest* glibc we're willing to support (Ubuntu 22.04: 2.35) - the
+  # same idea as a manylinux wheel: build old, run anywhere newer. The real
+  # floor is measured from the binaries and written to manifest.txt, which is
+  # what the installer actually checks against the host.
+  build-tarball:
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:22.04
+      options: --user root
+
+    steps:
+      - name: Install build dependencies
+        run: |
+          set -e
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates curl git make binutils build-essential pkg-config \
+            libudev-dev libssl-dev libpulse-dev libglib2.0-bin \
+            python3 python3-pip
+          # Same reason as packaging/debian/rules: the distro's rustc is
+          # behind this project's MSRV.
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          pip3 install --no-cache-dir uv==0.10.9
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - uses: actions/checkout@v5
+
+      - name: Build tarball
+        run: ./scripts/build-release-tarball.sh --target generic --out /out
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tarball-generic
+          path: /out/*.tar.gz
