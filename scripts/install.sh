@@ -440,6 +440,11 @@ rollback_stash() { # move an existing path aside (rename keeps xattrs/owner)
     mkdir -p "$ROLLBACK"
     mv "$1" "$ROLLBACK/$(echo "$1" | tr '/' '%')"
 }
+rollback_copy() { # hardlinked backup copy of a directory tree
+    [ -e "$1" ] || return 0
+    mkdir -p "$ROLLBACK"
+    cp -al "$1" "$ROLLBACK/$(echo "$1" | tr '/' '%')"
+}
 rollback_restore() {
     [ -d "$ROLLBACK" ] || return 0
     for f in "$ROLLBACK"/*; do
@@ -468,12 +473,31 @@ setup_python() {
     py=$(mf python)
     step "Preparing Python $py (standalone build, verified by uv)"
     "$uvdir/uv" python install --no-bin "$py" >/dev/null 2>&1 || die "could not install the standalone Python $py"
-    rollback_stash "$LIBDIR/venv"
-    step "Creating the virtual environment and installing locked dependencies"
-    "$uvdir/uv" venv --quiet --python "$py" "$LIBDIR/venv"
-    "$uvdir/uv" pip install --quiet --python "$LIBDIR/venv/bin/python" \
-        --require-hashes --no-deps -r "$SRC/python/requirements.lock.txt"
-    "$uvdir/uv" pip install --quiet --python "$LIBDIR/venv/bin/python" --no-deps "$SRC"/python/*.whl
+    venv=$LIBDIR/venv
+    lock=$SRC/python/requirements.lock.txt
+    uvpy="$venv/bin/python"
+    cur=
+    if [ -x "$uvpy" ]; then cur=$("$uvpy" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || true); fi
+    if [ -n "$cur" ] && [ "$cur" = "$py" ]; then
+        # Upgrade in place: only the packages that differ are fetched. The
+        # rollback copy is hardlinked (same filesystem), so it costs ~nothing.
+        rollback_copy "$venv"
+        if cmp -s "$lock" "$LIBDIR/python.lock" 2>/dev/null; then
+            step "Python dependencies unchanged, updating the application only"
+        else
+            step "Updating the Python dependencies (only what changed is downloaded)"
+            "$uvdir/uv" pip sync --quiet --python "$uvpy" --require-hashes "$lock"
+        fi
+        "$uvdir/uv" pip install --quiet --python "$uvpy" --reinstall --no-deps "$SRC"/python/*.whl
+    else
+        rollback_stash "$venv"
+        step "Creating the virtual environment and installing locked dependencies"
+        "$uvdir/uv" venv --quiet --python "$py" "$venv"
+        "$uvdir/uv" pip install --quiet --python "$uvpy" --require-hashes --no-deps -r "$lock"
+        "$uvdir/uv" pip install --quiet --python "$uvpy" --no-deps "$SRC"/python/*.whl
+    fi
+    rollback_stash "$LIBDIR/python.lock"
+    cp "$lock" "$LIBDIR/python.lock"
     track dir "$LIBDIR/venv"
 }
 
@@ -648,6 +672,7 @@ do_install() {
         rm -rf "$LIBDIR/venv"
         remove_entries "$NEWRECEIPT"
         rollback_restore
+        rm -rf "$ROLLBACK"
         if [ -n "$old_ver" ]; then systemctl --user start lam-hidraw-helper.service lam-daemon.service 2>/dev/null || true; fi
         die "installation failed (nothing from the new version is active). Report it: $ISSUES_URL"
     fi
@@ -662,7 +687,7 @@ do_install() {
         if [ -n "$old_ver" ]; then
             warn "rolling back to $old_ver"
             systemctl --user stop lam-daemon.service lam-hidraw-helper.service 2>/dev/null || true
-            rm -rf "$LIBDIR/venv"; rollback_restore
+            rm -rf "$LIBDIR/venv"; rollback_restore; rm -rf "$ROLLBACK"
             systemctl --user start lam-hidraw-helper.service lam-daemon.service 2>/dev/null || true
         fi
         die "the services failed to start. Report it with 'install.sh --diagnose': $ISSUES_URL"
