@@ -101,6 +101,26 @@ curl --proto '=https' --tlsv1.2 -fsSL https://github.com/elegos/Linux-Arctis-Man
 - The release checksums are signed (SSH signature) and verified before anything is run. Every security-relevant step is announced and waits for you to press Enter (or Ctrl+C to abort); the only step needing root is giving the HID helper its capability (`setcap`), via `pkexec`/`sudo`.
 - Needs `systemd` (user session), `libpulse`, a PipeWire/PulseAudio server and glibc >= the version shown by `--dry-run`; if something is missing the installer stops before changing anything and tells you what.
 
+#### Verifying a release by hand
+
+Releases are signed with this SSH key (`lam-release`), fingerprint:
+
+```
+SHA256:ACwAZQm1Pfgrg2gv3CpS7jShGtASZKgmlaCYGsFoDA0
+```
+
+`install.sh` checks the signature of `SHA256SUMS` and then the tarball's checksum before extracting or running anything. To do the same yourself:
+
+```bash
+V=https://github.com/elegos/Linux-Arctis-Manager/releases/download/<tag>
+curl -fsSLO $V/SHA256SUMS -O $V/SHA256SUMS.sig -O $V/lam-<version>-x86_64-generic.tar.gz
+echo 'lam-release namespaces="lam-release" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGEJRaTQKrVoLHoNLxtYs4s5TXt6KILaEEElIi83LYfH' > allowed_signers
+ssh-keygen -Y verify -f allowed_signers -I lam-release -n lam-release -s SHA256SUMS.sig < SHA256SUMS
+sha256sum -c --ignore-missing SHA256SUMS
+```
+
+The `ssh-keygen` command must print `Good "lam-release" signature` with the fingerprint above. The installer itself is only protected by TLS (it is the root of this chain), so you can download `install.sh` from the release page and read it before running it.
+
 ---
 
 ### Arch Linux (AUR)

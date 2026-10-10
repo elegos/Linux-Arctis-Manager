@@ -35,7 +35,7 @@ ISSUES_URL="https://github.com/$REPO/issues/new/choose"
 SIGNING_NAMESPACE='lam-release'
 # The release signing public key ("ssh-keygen -Y sign" key, type + base64).
 # Fingerprint is also published in the README; compare out of band if paranoid.
-SIGNING_PUBKEY='ssh-ed25519 PLACEHOLDER-REPLACE-WITH-RELEASE-PUBLIC-KEY'
+SIGNING_PUBKEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGEJRaTQKrVoLHoNLxtYs4s5TXt6KILaEEElIi83LYfH'
 
 CMD=install
 CHANNEL=stable
