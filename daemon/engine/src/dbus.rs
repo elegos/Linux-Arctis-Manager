@@ -2136,37 +2136,53 @@ pub async fn start_dbus_service(
 fn build_status_json(state: &AppState) -> String {
     // Skip entries whose status map is empty: they are placeholder DeviceEntries
     // registered by a task that was aborted before device_init completed.
-    let Some(entry) = state.primary_device().filter(|e| !e.status.is_empty()) else {
+    let Some(primary) = state.primary_device().filter(|e| !e.status.is_empty()) else {
         return "{}".to_string();
     };
 
-    if let Some(representation) = &entry.config.representation {
-        let mut result: Map<String, JsonValue> = Map::new();
-        for (category, field_names) in representation {
-            let mut cat_map: Map<String, JsonValue> = Map::new();
-            for field_name in field_names {
-                if let Some(val) = entry.status.get(field_name) {
-                    cat_map.insert(field_name.clone(), val.clone());
-                }
-            }
-            if !cat_map.is_empty() {
-                result.insert(category.clone(), JsonValue::Object(cat_map));
-            }
+    let mut result = status_categories(primary);
+    // Other connected devices of the same product (the GameBuds charging case
+    // next to its dongle) add their own categories. The primary device wins
+    // any category name both define.
+    for entry in state.devices.values() {
+        if std::ptr::eq(entry, primary) || entry.status.is_empty() {
+            continue;
         }
-        if result.is_empty() {
-            return "{}".to_string();
+        for (category, fields) in status_categories(entry) {
+            result.entry(category).or_insert(fields);
         }
-        return to_json_or(&result, "{}");
     }
-
-    // Fallback: group all fields under "headset" when no representation is defined.
-    let fields: Map<String, JsonValue> = entry
-        .status
-        .iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
-    let result = serde_json::json!({"headset": fields});
+    if result.is_empty() {
+        return "{}".to_string();
+    }
     to_json_or(&result, "{}")
+}
+
+/// One device's status fields grouped by its config's `representation`, or
+/// all under "headset" when it defines none.
+fn status_categories(entry: &crate::state::DeviceEntry) -> Map<String, JsonValue> {
+    let mut result: Map<String, JsonValue> = Map::new();
+    let Some(representation) = &entry.config.representation else {
+        let fields: Map<String, JsonValue> = entry
+            .status
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        result.insert("headset".to_string(), JsonValue::Object(fields));
+        return result;
+    };
+    for (category, field_names) in representation {
+        let mut cat_map: Map<String, JsonValue> = Map::new();
+        for field_name in field_names {
+            if let Some(val) = entry.status.get(field_name) {
+                cat_map.insert(field_name.clone(), val.clone());
+            }
+        }
+        if !cat_map.is_empty() {
+            result.insert(category.clone(), JsonValue::Object(cat_map));
+        }
+    }
+    result
 }
 
 pub(crate) fn build_settings_json(state: &AppState) -> String {
@@ -2665,7 +2681,8 @@ mod tests {
     #[test]
     fn build_status_json_prefers_headset_over_accessory() {
         // GameBuds: the dongle and the battery-only case are both connected.
-        // Whatever order the map yields, status must come from the dongle.
+        // Whatever order the map yields, headset status must come from the
+        // dongle.
         for case_first in [true, false] {
             let (tx, _rx) = mpsc::channel(1);
             let entry = |battery: u8, caps: &[&str]| {
@@ -2683,8 +2700,15 @@ mod tests {
             } else {
                 ("/dev/hidraw1", "/dev/hidraw0")
             };
+            let mut case = entry(40, &["battery"]);
+            let mut rep = HashMap::new();
+            rep.insert("case".to_string(), vec!["battery".to_string()]);
+            case.config = Arc::new(DeviceConfig {
+                representation: Some(rep),
+                ..DeviceConfig::default()
+            });
             let mut devices = HashMap::new();
-            devices.insert(PathBuf::from(case_path), entry(40, &["battery"]));
+            devices.insert(PathBuf::from(case_path), case);
             devices.insert(
                 PathBuf::from(dongle_path),
                 entry(90, &["battery", "noise_cancelling", "wireless"]),
@@ -2698,6 +2722,8 @@ mod tests {
             };
             let json: JsonValue = serde_json::from_str(&build_status_json(&state)).unwrap();
             assert_eq!(json["headset"]["battery"]["value"], 90);
+            // ...and the case's own category is merged in beside it.
+            assert_eq!(json["case"]["battery"]["value"], 40);
         }
     }
 
