@@ -24,6 +24,19 @@ pub struct AppState {
     pub general_settings_path: PathBuf,
 }
 
+impl AppState {
+    /// The device that D-Bus status, settings and EQ act on. Some products
+    /// enumerate as several devices at once (the GameBuds dongle and its
+    /// battery-only charging case), so prefer an initialised entry, then the
+    /// one with the most capabilities, instead of whichever the map yields
+    /// first. Callers that need an initialised device still check `status`.
+    pub fn primary_device(&self) -> Option<&DeviceEntry> {
+        self.devices
+            .values()
+            .max_by_key(|e| (!e.status.is_empty(), e.capabilities.len()))
+    }
+}
+
 pub struct DeviceEntry {
     pub config: Arc<DeviceConfig>,
     pub vid: u16,

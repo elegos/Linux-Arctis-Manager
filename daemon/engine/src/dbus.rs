@@ -90,7 +90,7 @@ impl StatusInterface {
 
     async fn get_current_device(&self) -> String {
         let state = self.state.lock().await;
-        if let Some(entry) = state.devices.values().next() {
+        if let Some(entry) = state.primary_device() {
             serde_json::json!({
                 "pid": entry.pid,
                 "name": entry.name,
@@ -189,7 +189,7 @@ impl SettingsInterface {
         // Device settings require a connected device and a matching API.
         let (api_name, field_value) = {
             let state = self.state.lock().await;
-            let Some(entry) = state.devices.values().find(|e| !e.status.is_empty()) else {
+            let Some(entry) = state.primary_device().filter(|e| !e.status.is_empty()) else {
                 return false;
             };
             let Some(api) = find_api_for_field(&entry.config, setting) else {
@@ -208,7 +208,7 @@ impl SettingsInterface {
 
         let sent = {
             let state = self.state.lock().await;
-            let Some(entry) = state.devices.values().find(|e| !e.status.is_empty()) else {
+            let Some(entry) = state.primary_device().filter(|e| !e.status.is_empty()) else {
                 return false;
             };
             // For multi-field structs, populate sibling fields from current status.
@@ -233,7 +233,7 @@ impl SettingsInterface {
             // Persist the written value: load existing overrides, update, save.
             let (vid, pid) = {
                 let s = self.state.lock().await;
-                if let Some(entry) = s.devices.values().find(|e| !e.status.is_empty()) {
+                if let Some(entry) = s.primary_device().filter(|e| !e.status.is_empty()) {
                     (entry.vid, entry.pid)
                 } else {
                     (0, 0)
@@ -289,7 +289,7 @@ impl SettingsInterface {
     async fn trigger_action(&self, action_name: &str, args_json: &str) -> bool {
         let (cmd_tx, values) = {
             let state = self.state.lock().await;
-            let Some(entry) = state.devices.values().find(|e| !e.status.is_empty()) else {
+            let Some(entry) = state.primary_device().filter(|e| !e.status.is_empty()) else {
                 return false;
             };
             let Some(values) = resolve_action_write(&entry.config, action_name, args_json) else {
@@ -2136,7 +2136,7 @@ pub async fn start_dbus_service(
 fn build_status_json(state: &AppState) -> String {
     // Skip entries whose status map is empty: they are placeholder DeviceEntries
     // registered by a task that was aborted before device_init completed.
-    let Some(entry) = state.devices.values().find(|e| !e.status.is_empty()) else {
+    let Some(entry) = state.primary_device().filter(|e| !e.status.is_empty()) else {
         return "{}".to_string();
     };
 
@@ -2180,7 +2180,7 @@ pub(crate) fn build_settings_json(state: &AppState) -> String {
         "settings_config": general_config
     });
 
-    let Some(entry) = state.devices.values().next() else {
+    let Some(entry) = state.primary_device() else {
         return serde_json::to_string(&result).unwrap_or_else(|_| result.to_string());
     };
 
@@ -2660,6 +2660,45 @@ mod tests {
         // Fields are nested under the "headset" category for GUI compatibility.
         assert_eq!(json["headset"]["battery"]["value"], 80);
         assert_eq!(json["headset"]["battery"]["type"], "uint8");
+    }
+
+    #[test]
+    fn build_status_json_prefers_headset_over_accessory() {
+        // GameBuds: the dongle and the battery-only case are both connected.
+        // Whatever order the map yields, status must come from the dongle.
+        for case_first in [true, false] {
+            let (tx, _rx) = mpsc::channel(1);
+            let entry = |battery: u8, caps: &[&str]| {
+                let mut status = HashMap::new();
+                status.insert(
+                    "battery".to_string(),
+                    serde_json::json!({"value": battery, "type": "uint8"}),
+                );
+                let mut e = dummy_entry_with_status(status, tx.clone());
+                e.capabilities = caps.iter().map(|c| c.to_string()).collect();
+                e
+            };
+            let (case_path, dongle_path) = if case_first {
+                ("/dev/hidraw0", "/dev/hidraw1")
+            } else {
+                ("/dev/hidraw1", "/dev/hidraw0")
+            };
+            let mut devices = HashMap::new();
+            devices.insert(PathBuf::from(case_path), entry(40, &["battery"]));
+            devices.insert(
+                PathBuf::from(dongle_path),
+                entry(90, &["battery", "noise_cancelling", "wireless"]),
+            );
+            let state = AppState {
+                configs: vec![],
+                devices,
+                config_dirs: vec![PathBuf::from("/tmp")],
+                general_settings: crate::general_settings::GeneralSettings::default(),
+                general_settings_path: PathBuf::from("/tmp/gs.yaml"),
+            };
+            let json: JsonValue = serde_json::from_str(&build_status_json(&state)).unwrap();
+            assert_eq!(json["headset"]["battery"]["value"], 90);
+        }
     }
 
     #[test]
