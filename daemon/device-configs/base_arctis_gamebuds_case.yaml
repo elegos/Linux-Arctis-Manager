@@ -18,6 +18,11 @@ transforms:
     type: case_int_to_str
     default: UNKNOWN
     values: {0: DISCHARGING, 1: PLUGGED_IN_CHARGING, 2: PLUGGED_IN_NOT_CHARGING}
+  # Confirmed on GameBuds X hardware by opening and closing the lid.
+  case_lid_status_to_label:
+    type: case_int_to_str
+    default: UNKNOWN
+    values: {0: OPEN, 1: CLOSED}
 
 structs:
   # Get Buds in Case Status (0xB8). 0x00 disconnected, 0x01 connected (seated).
@@ -85,7 +90,7 @@ sync_events:
   0xBC:
     emit: case_lid_changed
     fields:
-      - {name: lid_status, byte: 2}
+      - {name: lid_status, byte: 2, transform: case_lid_status_to_label}
 
 sync_read:
   - struct: battery_status
@@ -105,7 +110,7 @@ sync_read:
 
   - struct: case_lid_status
     maps:
-      - {emit: case_lid_changed, field: lid_status}
+      - {emit: case_lid_changed, field: lid_status, transform: case_lid_status_to_label}
 
 lifecycle:
   init:
