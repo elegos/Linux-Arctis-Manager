@@ -104,7 +104,9 @@ async fn handle_connection(mut stream: UnixStream, config: &HelperConfig) -> std
         }
     };
 
-    if !has_audio_interface(&hid_path).unwrap_or(false) {
+    if !has_audio_interface(&hid_path).unwrap_or(false)
+        && !is_audio_accessory(&hid_path).unwrap_or(false)
+    {
         warn!("rejected {hidraw_name}: no USB audio interface on parent device");
         stream.write_all(&[0x00]).await?;
         return Ok(());
@@ -186,6 +188,22 @@ pub fn has_audio_interface(hid_dev: &Path) -> std::io::Result<bool> {
         }
     }
     Ok(false)
+}
+
+// Headset accessories that are pure HID but still belong to an audio product:
+// the Arctis GameBuds charging cases (0x230C GameBuds, 0x231A GameBuds X) carry
+// battery and lid status for the earbuds and have no USB audio interface. Kept
+// to an explicit PID list so SteelSeries keyboards and mice stay rejected.
+const AUDIO_ACCESSORY_PIDS: &[u16] = &[0x230C, 0x231A];
+
+pub fn is_audio_accessory(hid_dev: &Path) -> std::io::Result<bool> {
+    let usb_dev = hid_dev.parent().and_then(Path::parent).ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::NotFound, "unexpected sysfs layout")
+    })?;
+    let raw = std::fs::read_to_string(usb_dev.join("idProduct"))?;
+    let pid = u16::from_str_radix(raw.trim().trim_start_matches("0x"), 16)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    Ok(AUDIO_ACCESSORY_PIDS.contains(&pid))
 }
 
 fn open_hidraw(path: &Path) -> std::io::Result<std::fs::File> {
@@ -359,6 +377,24 @@ mod tests {
         fake_sysfs_keyboard(&dir, "hidraw0", 0x1038);
         let hid_fn = dir.path().join("usb_dev/hid_iface/hid_fn");
         assert!(!has_audio_interface(&hid_fn).unwrap());
+    }
+
+    #[test]
+    fn gamebuds_case_is_an_audio_accessory() {
+        let dir = TempDir::new().unwrap();
+        fake_sysfs_keyboard(&dir, "hidraw0", 0x1038);
+        std::fs::write(dir.path().join("usb_dev/idProduct"), "231a\n").unwrap();
+        let hid_fn = dir.path().join("usb_dev/hid_iface/hid_fn");
+        assert!(is_audio_accessory(&hid_fn).unwrap());
+    }
+
+    #[test]
+    fn keyboard_is_not_an_audio_accessory() {
+        let dir = TempDir::new().unwrap();
+        fake_sysfs_keyboard(&dir, "hidraw0", 0x1038);
+        std::fs::write(dir.path().join("usb_dev/idProduct"), "1622\n").unwrap();
+        let hid_fn = dir.path().join("usb_dev/hid_iface/hid_fn");
+        assert!(!is_audio_accessory(&hid_fn).unwrap());
     }
 
     // --- fd passing ---
