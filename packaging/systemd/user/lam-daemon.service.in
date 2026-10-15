@@ -3,6 +3,7 @@ Description=Linux Arctis Manager daemon
 Documentation=https://github.com/elegos/Linux-Arctis-Manager
 Requires=lam-hidraw-helper.service
 After=lam-hidraw-helper.service
+ConditionUser=!@system
 
 [Service]
 Type=simple
