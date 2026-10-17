@@ -179,6 +179,8 @@ class DeviceConfiguration:
         raw_device_init = raw_config.get('device_init', None)
         if raw_device_init is not None:
             self.device_init = raw_device_init
+        else:
+            self.device_init = None
         
         raw_status = raw_config.get('status', {})
         if raw_status:
@@ -187,6 +189,8 @@ class DeviceConfiguration:
                 response_mapping=raw_status.get('response_mapping', []),
                 representation=raw_status.get('representation', {}),
             )
+        else:
+            self.status = None
         
         raw_status_parse: dict[str, dict[str, Any]] = raw_config.get('status_parse', {})
         self.status_parse = {}

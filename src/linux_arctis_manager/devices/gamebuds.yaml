@@ -1,0 +1,95 @@
+device:
+  name: SteelSeries Arctis GameBuds (PS5/PC)
+  vendor_id: 0x1038
+  product_ids:
+    - 0x230a
+  command_padding:
+    length: 64
+    position: end
+    filler: 0x00
+  command_interface_index: [0, 3]
+  listen_interface_indexes: [3]
+
+  device_init:
+    - [0x37, 'settings.mic_volume']
+    - [0x39, 'settings.mic_side_tone']
+    - [0xbd, 'settings.noise_cancelling']
+    - [0xb9, 'settings.noise_level']
+    - [0xc1, 'settings.pm_shutdown']
+    - [0xc5, 'settings.volume_limiter']
+    - [0x27, 'settings.wear_sense']
+    - [0x09]
+
+  settings:
+    microphone:
+      mic_volume:
+        type: slider
+        min: 0x00
+        max: 0x0a
+        step: 1
+        min_label: mic_muted
+        max_label: perc_100
+        default: 0x0a
+        update_sequence: [0x37, 'value']
+      mic_side_tone:
+        type: discrete_map
+        values_mapping:
+          0x00: off
+          0x03: low
+          0x06: medium
+          0x0a: high
+        default: 0x00
+        update_sequence: [0x39, 'value']
+    audio:
+      noise_cancelling:
+        type: discrete_map
+        values_mapping:
+          0x00: off
+          0x01: transparent
+          0x02: on
+        default: 0x00
+        update_sequence: [0xbd, 'value']
+      noise_level:
+        type: slider
+        min: 0x00
+        max: 0x0a
+        step: 1
+        min_label: perc_0
+        max_label: perc_100
+        default: 0x06
+        update_sequence: [0xb9, 'value']
+    headset:
+      volume_limiter:
+        type: toggle
+        values:
+          off: 0x00
+          on: 0x01
+          off_label: off
+          on_label: on
+        default: 0x00
+        update_sequence: [0xc5, 'value']
+      wear_sense:
+        type: toggle
+        values:
+          off: 0x00
+          on: 0x01
+          off_label: off
+          on_label: on
+        default: 0x01
+        update_sequence: [0x27, 'value']
+    power_management:
+      pm_shutdown:
+        type: discrete_map
+        values_mapping:
+          0x00: never
+          0x01: 1_minute
+          0x05: 5_minutes
+          0x0a: 10_minutes
+          0x0f: 15_minutes
+          0x1e: 30_minutes
+          0x2d: 45_minutes
+          0x3c: 60_minutes
+          0x4b: 75_minutes
+          0x5a: 90_minutes
+        default: 0x1e
+        update_sequence: [0xc1, 'value']
