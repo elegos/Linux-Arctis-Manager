@@ -49,8 +49,8 @@ fn flat_preset() -> EqPreset {
     }
 }
 
-/// Build a `HwEqContext` from the first connected device, or `None` if the
-/// device has no hardware EQ API.
+/// Build a `HwEqContext` from the primary device, or `None` if the device
+/// has no hardware EQ API.
 pub fn build_hw_eq_context(state: &AppState) -> Option<HwEqContext> {
     let entry = state.primary_device()?;
     let apis = entry.config.apis.as_ref()?;

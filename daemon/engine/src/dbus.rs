@@ -255,7 +255,7 @@ impl SettingsInterface {
             // reverting the widget to the old value on receipt of SettingsChanged.
             {
                 let mut s = self.state.lock().await;
-                if let Some(entry) = s.devices.values_mut().next() {
+                if let Some(entry) = s.primary_device_mut() {
                     let slot = entry
                         .status
                         .entry(setting.to_string())
@@ -433,11 +433,7 @@ impl EqInterface {
         // tab QComboBox reflects the custom slot without requiring a tab re-visit.
         let (vid, pid) = {
             let s = self.state.lock().await;
-            s.devices
-                .values()
-                .next()
-                .map(|e| (e.vid, e.pid))
-                .unwrap_or((0, 0))
+            s.primary_device().map(|e| (e.vid, e.pid)).unwrap_or((0, 0))
         };
         if vid != 0 || pid != 0 {
             let file_path =
@@ -450,7 +446,7 @@ impl EqInterface {
         }
         {
             let mut s = self.state.lock().await;
-            if let Some(entry) = s.devices.values_mut().next() {
+            if let Some(entry) = s.primary_device_mut() {
                 let slot = entry
                     .status
                     .entry("eq_preset".to_string())
@@ -474,11 +470,7 @@ impl EqInterface {
     async fn persist_eq_preset_slot(&self, slot: u8) {
         let (vid, pid) = {
             let s = self.state.lock().await;
-            s.devices
-                .values()
-                .next()
-                .map(|e| (e.vid, e.pid))
-                .unwrap_or((0, 0))
+            s.primary_device().map(|e| (e.vid, e.pid)).unwrap_or((0, 0))
         };
         if vid != 0 || pid != 0 {
             let file_path =
@@ -491,7 +483,7 @@ impl EqInterface {
         }
         {
             let mut s = self.state.lock().await;
-            if let Some(entry) = s.devices.values_mut().next() {
+            if let Some(entry) = s.primary_device_mut() {
                 let field = entry
                     .status
                     .entry("eq_preset".to_string())
@@ -2141,15 +2133,42 @@ fn build_status_json(state: &AppState) -> String {
     };
 
     let mut result = status_categories(primary);
-    // Other connected devices of the same product (the GameBuds charging case
-    // next to its dongle) add their own categories. The primary device wins
-    // any category name both define.
-    for entry in state.devices.values() {
-        if std::ptr::eq(entry, primary) || entry.status.is_empty() {
-            continue;
-        }
-        for (category, fields) in status_categories(entry) {
-            result.entry(category).or_insert(fields);
+    // Every other initialised device (in practice the GameBuds charging case
+    // next to its dongle) adds its own categories. The primary device wins
+    // any category name or field role both define, then the others in path
+    // order: clients pick battery bars by role, so a role must name one field
+    // only.
+    let mut roles: std::collections::HashSet<String> = result
+        .values()
+        .filter_map(JsonValue::as_object)
+        .flat_map(|fields| fields.values())
+        .filter_map(|field| field.get("role")?.as_str().map(str::to_string))
+        .collect();
+    let mut others: Vec<_> = state
+        .devices
+        .iter()
+        .filter(|(_, e)| !std::ptr::eq(*e, primary) && !e.status.is_empty())
+        .collect();
+    others.sort_by_key(|(path, _)| *path);
+    for (_, entry) in others {
+        for (category, mut fields) in status_categories(entry) {
+            if result.contains_key(&category) {
+                continue;
+            }
+            for field in fields
+                .as_object_mut()
+                .into_iter()
+                .flat_map(|f| f.values_mut())
+            {
+                let Some(field) = field.as_object_mut() else {
+                    continue;
+                };
+                let role = field.get("role").and_then(JsonValue::as_str);
+                if role.is_some_and(|r| !roles.insert(r.to_string())) {
+                    field.remove("role");
+                }
+            }
+            result.insert(category, fields);
         }
     }
     if result.is_empty() {
@@ -2682,14 +2701,14 @@ mod tests {
     fn build_status_json_prefers_headset_over_accessory() {
         // GameBuds: the dongle and the battery-only case are both connected.
         // Whatever order the map yields, headset status must come from the
-        // dongle.
+        // dongle, and only the dongle's fields may carry the roles both report.
         for case_first in [true, false] {
             let (tx, _rx) = mpsc::channel(1);
             let entry = |battery: u8, caps: &[&str]| {
                 let mut status = HashMap::new();
                 status.insert(
                     "battery".to_string(),
-                    serde_json::json!({"value": battery, "type": "uint8"}),
+                    serde_json::json!({"value": battery, "type": "uint8", "role": "battery_left"}),
                 );
                 let mut e = dummy_entry_with_status(status, tx.clone());
                 e.capabilities = caps.iter().map(|c| c.to_string()).collect();
@@ -2701,8 +2720,15 @@ mod tests {
                 ("/dev/hidraw1", "/dev/hidraw0")
             };
             let mut case = entry(40, &["battery"]);
+            case.status.insert(
+                "case_battery".to_string(),
+                serde_json::json!({"value": 70, "type": "uint8", "role": "battery_case"}),
+            );
             let mut rep = HashMap::new();
-            rep.insert("case".to_string(), vec!["battery".to_string()]);
+            rep.insert(
+                "case".to_string(),
+                vec!["battery".to_string(), "case_battery".to_string()],
+            );
             case.config = Arc::new(DeviceConfig {
                 representation: Some(rep),
                 ..DeviceConfig::default()
@@ -2724,6 +2750,101 @@ mod tests {
             assert_eq!(json["headset"]["battery"]["value"], 90);
             // ...and the case's own category is merged in beside it.
             assert_eq!(json["case"]["battery"]["value"], 40);
+            assert_eq!(json["headset"]["battery"]["role"], "battery_left");
+            assert!(json["case"]["battery"].get("role").is_none());
+            assert_eq!(json["case"]["case_battery"]["role"], "battery_case");
+        }
+    }
+
+    #[test]
+    fn primary_device_breaks_ties_by_path() {
+        // Two identical headsets: the same one wins for reads and writes
+        // alike, whatever order the map yields.
+        let (tx, _rx) = mpsc::channel(1);
+        let mut devices = HashMap::new();
+        for n in [3, 1, 2] {
+            let mut status = HashMap::new();
+            status.insert(
+                "battery".to_string(),
+                serde_json::json!({"value": 50, "type": "uint8"}),
+            );
+            let mut e = dummy_entry_with_status(status, tx.clone());
+            e.name = format!("hidraw{n}");
+            e.capabilities = vec!["battery".into()];
+            devices.insert(PathBuf::from(format!("/dev/hidraw{n}")), e);
+        }
+        let mut state = AppState {
+            configs: vec![],
+            devices,
+            config_dirs: vec![PathBuf::from("/tmp")],
+            general_settings: crate::general_settings::GeneralSettings::default(),
+            general_settings_path: PathBuf::from("/tmp/gs.yaml"),
+        };
+        assert_eq!(state.primary_device().unwrap().name, "hidraw1");
+        assert_eq!(state.primary_device_mut().unwrap().name, "hidraw1");
+    }
+
+    #[tokio::test]
+    async fn set_setting_updates_headset_not_accessory() {
+        // GameBuds again: the optimistic status update after SetSetting must
+        // land on the dongle that was written to, never on the case.
+        for case_first in [true, false] {
+            let (tx, _rx) = mpsc::channel(1);
+            let mut dongle_config = pairing_mode_config();
+            if let Some(api) = dongle_config
+                .apis
+                .as_mut()
+                .and_then(|a| a.get_mut("pairing_mode"))
+            {
+                api.action = false;
+            }
+            let mut dongle_status = HashMap::new();
+            dongle_status.insert(
+                "mode".to_string(),
+                serde_json::json!({"value": 0, "type": "uint8"}),
+            );
+            let mut dongle = dummy_entry_with_status(dongle_status, tx.clone());
+            dongle.config = Arc::new(dongle_config);
+            dongle.capabilities = vec!["battery".into(), "noise_cancelling".into()];
+
+            let mut case_status = HashMap::new();
+            case_status.insert(
+                "battery".to_string(),
+                serde_json::json!({"value": 40, "type": "uint8"}),
+            );
+            let mut case = dummy_entry_with_status(case_status, tx.clone());
+            case.capabilities = vec!["battery".into()];
+
+            let (case_path, dongle_path) = if case_first {
+                ("/dev/hidraw0", "/dev/hidraw1")
+            } else {
+                ("/dev/hidraw1", "/dev/hidraw0")
+            };
+            let mut devices = HashMap::new();
+            devices.insert(PathBuf::from(case_path), case);
+            devices.insert(PathBuf::from(dongle_path), dongle);
+            let dir = tempfile::tempdir().unwrap();
+            let state = Arc::new(Mutex::new(AppState {
+                configs: vec![],
+                devices,
+                config_dirs: vec![dir.path().to_path_buf()],
+                general_settings: crate::general_settings::GeneralSettings::default(),
+                general_settings_path: dir.path().join("gs.yaml"),
+            }));
+            let iface = SettingsInterface {
+                state: state.clone(),
+                signal_tx: broadcast::channel(4).0,
+                settings_base_dir: dir.path().to_path_buf(),
+                audio_shared: Arc::new(Mutex::new(None)),
+                visibility_shared: Arc::new(Mutex::new(None)),
+            };
+
+            assert!(iface.set_setting("mode", "1").await);
+            let s = state.lock().await;
+            let dongle = &s.devices[&PathBuf::from(dongle_path)];
+            let case = &s.devices[&PathBuf::from(case_path)];
+            assert_eq!(dongle.status["mode"]["value"], 1);
+            assert!(!case.status.contains_key("mode"));
         }
     }
 
