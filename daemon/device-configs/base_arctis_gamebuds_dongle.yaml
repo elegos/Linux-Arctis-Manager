@@ -180,7 +180,10 @@ structs:
       - {name: transparency_level, type: uint8, range: [1, 10]}
       - {name: anc_level, type: uint8, range: [1, 3]}
       - {name: transparency_anc_mode, type: uint8, range: [0, 2]}
-      - {name: mute_led_brightness, type: uint8, range: [1, 10]}
+      # 0 on real GameBuds X hardware (no mute LED), so 0 must decode. The
+      # field is read-only and not mapped to D-Bus (see the header), so the
+      # wider range only relaxes decoding.
+      - {name: mute_led_brightness, type: uint8, range: [0, 10]}
       - {name: inactivity_timer, type: uint8, range: [0, 255]}
       # 4-state firmware enum, collapsed to bool on read — see header comment.
       - {name: wear_sense_config, type: uint8, range: [0, 3]}

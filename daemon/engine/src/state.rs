@@ -1,5 +1,6 @@
 // Shared engine state: updated by device tasks, read by the D-Bus service.
 
+use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -22,6 +23,36 @@ pub struct AppState {
     pub general_settings: GeneralSettings,
     /// Filesystem path where `general_settings` is persisted.
     pub general_settings_path: PathBuf,
+}
+
+impl AppState {
+    /// The device that D-Bus status, settings and EQ act on. Some products
+    /// enumerate as several devices at once (the GameBuds dongle and its
+    /// battery-only charging case), so prefer an initialised entry, then the
+    /// one with the most capabilities, then a stable path order, instead of
+    /// whichever the map yields first. Callers that need an initialised
+    /// device still check `status`.
+    pub fn primary_device(&self) -> Option<&DeviceEntry> {
+        self.devices
+            .iter()
+            .max_by_key(|(path, e)| primary_rank(path, e))
+            .map(|(_, e)| e)
+    }
+
+    /// Mutable counterpart of [`AppState::primary_device`], for updates that
+    /// must land on the same device the reads came from.
+    pub fn primary_device_mut(&mut self) -> Option<&mut DeviceEntry> {
+        self.devices
+            .iter_mut()
+            .max_by_key(|(path, e)| primary_rank(path, e))
+            .map(|(_, e)| e)
+    }
+}
+
+/// Ordering key for [`AppState::primary_device`]. The path breaks ties, so
+/// two identical headsets don't swap roles when the map rehashes.
+fn primary_rank<'a>(path: &'a PathBuf, e: &DeviceEntry) -> (bool, usize, Reverse<&'a PathBuf>) {
+    (!e.status.is_empty(), e.capabilities.len(), Reverse(path))
 }
 
 pub struct DeviceEntry {

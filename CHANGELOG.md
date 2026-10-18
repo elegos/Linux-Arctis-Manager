@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- `GetStatus` also merges in the status categories of every other initialised device, so the GameBuds charging case's batteries, charging state and lid show up next to the earbuds. The primary device wins a clash, and a merged field drops a `role` that another device already reports.
+
+### Fixed
+
+- Arctis GameBuds X: the dongle and the charging case now initialise. The case is allowed past the hidraw helper's audio-interface check, uses command interface 0, and both devices read replies without a report-ID byte. The shared GameBuds configs apply the same changes to the original GameBuds (untested).
+- With several devices connected (such as the GameBuds dongle and its case), status, settings and their optimistic updates act on the same primary device instead of whichever one the device map yielded first.
+
 ## [3.0.0-beta1]
 
 ### Added
