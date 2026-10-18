@@ -80,10 +80,11 @@ setcap cap_dac_override+eip /usr/local/libexec/lam-hidraw-helper
 
 `setcap` stores the capability in an extended attribute on the inode. Replacing the binary creates a new inode that does **not** inherit the attribute; regaining the capability requires root to re-run `setcap`. A non-root attacker who replaces the binary cannot escalate privileges through it.
 
-The helper enforces two invariants before opening any device node:
+The helper enforces three invariants before opening any device node:
 
 1. **Peer authentication**: accepts connections only from processes matching the engine's UID (verified via `SO_PEERCRED` on the Unix domain socket).
-2. **VID allowlist**: reads the USB device's `idVendor` sysfs attribute before opening; refuses any device whose VID is not in the compiled-in SteelSeries allowlist (`0x1038`). This prevents the helper from being used to open HID keyboards or mice.
+2. **VID allowlist**: reads the USB device's `idVendor` sysfs attribute before opening; refuses any device whose VID is not in the compiled-in SteelSeries allowlist (`0x1038`). This prevents the helper from being used to open non-SteelSeries devices.
+3. **Audio product only**: the USB device that owns the HID function must expose a USB Audio interface (`bInterfaceClass == 01`), which keeps SteelSeries keyboards and mice out. The one exception is a compiled-in PID list (`AUDIO_ACCESSORY_PIDS`) of pure-HID accessories that belong to an audio product, such as the Arctis GameBuds charging cases. `daemon/hidraw-helper/build.rs` generates it from the shipped device configs marked `companion: true` (the `product_id` of each variant), so there is a single source of truth. The helper binary never reads configs at runtime: the allowlist is fixed when it is built, and is therefore only as trusted as the repository it is built from.
 
 ### Engine
 

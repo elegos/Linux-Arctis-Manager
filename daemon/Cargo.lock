@@ -827,6 +827,7 @@ dependencies = [
 name = "lam-hidraw-helper"
 version = "0.1.0"
 dependencies = [
+ "device-config",
  "nix",
  "tempfile",
  "tokio",

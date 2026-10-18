@@ -74,8 +74,8 @@ sync_events:
   0xB7:
     emit: case_battery_changed
     fields:
-      - {name: left_battery_percent, byte: 2, display_type: percentage, role: battery_left}
-      - {name: right_battery_percent, byte: 3, display_type: percentage, role: battery_right}
+      - {name: left_battery_percent, byte: 2, display_type: percentage, role: battery_case_left}
+      - {name: right_battery_percent, byte: 3, display_type: percentage, role: battery_case_right}
       - {name: case_battery_percent, byte: 4, display_type: percentage, role: battery_case}
       - {name: left_charging_status, byte: 5, transform: case_charging_status_to_label}
       - {name: right_charging_status, byte: 6, transform: case_charging_status_to_label}
@@ -97,7 +97,7 @@ sync_read:
     maps:
       - emit: case_battery_changed
         fields: [left_battery_percent, right_battery_percent, case_battery_percent]
-        roles: [battery_left, battery_right, battery_case]
+        roles: [battery_case_left, battery_case_right, battery_case]
         display_type: percentage
       - emit: case_battery_changed
         fields: [left_charging_status, right_charging_status, case_charging_status]

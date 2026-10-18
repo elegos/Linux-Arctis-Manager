@@ -395,6 +395,13 @@ pub struct DeviceSection {
     pub firmware: Option<serde_yaml::Value>,
     #[serde(default)]
     pub capabilities: Option<Vec<String>>,
+    /// Marks a device that only ever accompanies another one (the GameBuds
+    /// charging case next to its dongle). When several devices are connected,
+    /// the engine routes status, settings and EQ to a non-companion device
+    /// first. The variants' PIDs are also compiled into `lam-hidraw-helper`'s
+    /// allowlist of pure-HID accessories (see its `build.rs`).
+    #[serde(default)]
+    pub companion: bool,
 }
 
 // ── Top-level config ──────────────────────────────────────────────────────────

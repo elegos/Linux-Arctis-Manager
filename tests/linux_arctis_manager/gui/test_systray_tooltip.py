@@ -55,6 +55,33 @@ def test_tooltip_shows_earbud_batteries_instead_of_headset_when_no_single_batter
     assert '90%' in tooltip
 
 
+def test_tooltip_shows_earbuds_and_case_as_separate_rows():
+    # GameBuds: the dongle reports the earbuds, the charging case reports its
+    # own battery plus the earbuds' charge as seen from inside the case.
+    tray = _tray_with_status({
+        'headset': {
+            'left_battery_level': {'value': 11, 'type': 'percentage', 'role': 'battery_left'},
+            'right_battery_level': {'value': 22, 'type': 'percentage', 'role': 'battery_right'},
+        },
+        'case': {
+            'left_battery_percent': {'value': 33, 'type': 'percentage', 'role': 'battery_case_left'},
+            'right_battery_percent': {'value': 44, 'type': 'percentage', 'role': 'battery_case_right'},
+            'case_battery_percent': {'value': 55, 'type': 'percentage', 'role': 'battery_case'},
+        },
+    })
+
+    lines = tray._build_tooltip().splitlines()[1:]
+
+    assert [line.split(':')[0].strip() for line in lines] == [
+        'Left Earbud Battery',
+        'Right Earbud Battery',
+        'Left Earbud in Case',
+        'Right Earbud in Case',
+        'Case Battery',
+    ]
+    assert [line.rsplit(' ', 1)[1] for line in lines] == ['11%', '22%', '33%', '44%', '55%']
+
+
 def test_tooltip_includes_chatmix_line_when_both_game_and_chat_present():
     tray = _tray_with_status({'headset': {
         'chatmix_game': {'value': 50, 'type': 'uint8', 'role': 'chatmix_game'},

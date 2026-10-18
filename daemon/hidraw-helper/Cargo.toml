@@ -24,5 +24,10 @@ nix = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
+[build-dependencies]
+# Build-time only: reads the device configs to derive the pure-HID accessory
+# PID allowlist. The helper binary itself never parses configs.
+device-config = { path = "../device-config" }
+
 [dev-dependencies]
 tempfile = "3"

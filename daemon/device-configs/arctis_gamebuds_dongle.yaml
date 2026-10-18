@@ -33,7 +33,7 @@ device:
       usage_page: 0xFF00
       usage: 0x0001
     # Confirmed on GameBuds X hardware: replies arrive without a report-ID
-    # byte (e.g. `b7 00 00 64 ...`), on both the command and sync pipes.
+    # byte (e.g. `b0 01 01 03 ...`), on both the command and sync pipes.
     unnumbered_reports: true
 
   capabilities:

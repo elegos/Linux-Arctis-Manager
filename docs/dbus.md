@@ -112,13 +112,15 @@ Returns boolean (true: setting saved, false: setting not found / not saved)
 
 Returns an object with the series of configured status values, categorized per **the device's `representation` block** in `daemon/device-configs/*.yaml`. Each field's raw value is looked up from that same device's `sync_events`/`sync_read` definitions, with `display_type` (and, for a handful of well-known fields, `role` — see below) applied as declared there.
 
+Some products enumerate as several devices at once (the Arctis GameBuds dongle and its charging case). The categories of every initialised device are merged into the one object: the *primary* device comes first, then the others in hidraw path order, and when two devices define a category with the same name the first one wins and the other is dropped whole. The primary device is the initialised one that is not marked `device.companion: true` in its config (see [`DEVICE_DSL.md`](DEVICE_DSL.md)), with the lowest hidraw path as the last tie-break. The same device receives `SetSetting`, `TriggerAction`, the EQ methods and is the one reported by `GetCurrentDevice` / `GetSettings`.
+
 If no device is connected, an empty object will return.
 
 Each setting has two required attributes, plus one optional one:
 
 - `value`: the (parsed, but not translated) value
 - `type`: "label" in case of string, or the display type declared as `display_type` on the field in `daemon/device-configs/*.yaml` (falls back to the raw Rust type, e.g. `uint8`, when the field declares none)
-- `role` (optional): a stable, device-agnostic identity for a handful of well-known concepts whose *raw* field name varies a lot per device family — currently `battery_headset`, `battery_dock`, `battery_left`, `battery_right`, `battery_case`, `chatmix_game`, `chatmix_chat`. Present only on fields the device config explicitly tags; a client that wants "the headset battery" regardless of which device is connected should scan for `role == "battery_headset"` rather than hardcoding a field name like `headset_battery_charge` — that name is specific to one device family among several.
+- `role` (optional): a stable, device-agnostic identity for a handful of well-known concepts whose *raw* field name varies a lot per device family — currently `battery_headset`, `battery_dock`, `battery_left`, `battery_right`, `battery_case`, `battery_case_left`, `battery_case_right`, `chatmix_game`, `chatmix_chat`. `battery_left`/`battery_right` are the earbuds' batteries as reported by the dongle, while `battery_case_left`/`battery_case_right` are the same earbuds as measured by the charging case (`battery_case` is the case's own battery). A role must name a single field across the whole merged output: clients keep one value per role, so two devices must not tag fields with the same role. Present only on fields the device config explicitly tags; a client that wants "the headset battery" regardless of which device is connected should scan for `role == "battery_headset"` rather than hardcoding a field name like `headset_battery_charge` — that name is specific to one device family among several.
 
 ```json
 {

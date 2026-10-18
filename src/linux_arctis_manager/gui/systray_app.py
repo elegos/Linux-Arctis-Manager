@@ -108,7 +108,7 @@ class QSystrayApp(QBaseDesktopApp):
                     val = int(field['value'])
                     rows.append((I18n.translate('status', f'role_{role}'), f'{battery_bar(val)} {val}%'))
 
-        for role in ('battery_case', 'battery_dock'):
+        for role in ('battery_case_left', 'battery_case_right', 'battery_case', 'battery_dock'):
             field = self._find_by_role(role)
             if field is not None:
                 val = int(field['value'])

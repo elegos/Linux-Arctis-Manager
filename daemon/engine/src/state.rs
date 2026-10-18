@@ -28,9 +28,9 @@ pub struct AppState {
 impl AppState {
     /// The device that D-Bus status, settings and EQ act on. Some products
     /// enumerate as several devices at once (the GameBuds dongle and its
-    /// battery-only charging case), so prefer an initialised entry, then the
-    /// one with the most capabilities, then a stable path order, instead of
-    /// whichever the map yields first. Callers that need an initialised
+    /// battery-only charging case), so prefer an initialised entry, then one
+    /// that is not a `companion` of another device, then a stable path order,
+    /// instead of whichever the map yields first. Callers that need an initialised
     /// device still check `status`.
     pub fn primary_device(&self) -> Option<&DeviceEntry> {
         self.devices
@@ -51,8 +51,9 @@ impl AppState {
 
 /// Ordering key for [`AppState::primary_device`]. The path breaks ties, so
 /// two identical headsets don't swap roles when the map rehashes.
-fn primary_rank<'a>(path: &'a PathBuf, e: &DeviceEntry) -> (bool, usize, Reverse<&'a PathBuf>) {
-    (!e.status.is_empty(), e.capabilities.len(), Reverse(path))
+fn primary_rank<'a>(path: &'a PathBuf, e: &DeviceEntry) -> (bool, bool, Reverse<&'a PathBuf>) {
+    let companion = e.config.device.as_ref().is_some_and(|d| d.companion);
+    (!e.status.is_empty(), !companion, Reverse(path))
 }
 
 pub struct DeviceEntry {

@@ -4,10 +4,14 @@ device:
   name: "SteelSeries Arctis GameBuds Case"
   vendor_id: 0x1038
 
-  # Same command_interface/sync_interface situation as the dongle file
-  # (see arctis_gamebuds_dongle.yaml's note) — sync_interface is taken as
-  # declared by the raw spec (`(sync-interface 0xffc1 0x0001 2)`, confirmed
-  # identical for both PID pairs below). command_interface is 0: on real
+  # The case only accompanies the dongle: the engine routes status, settings
+  # and EQ to the dongle first when both are connected, and lam-hidraw-helper
+  # accepts the PIDs below despite the case having no USB audio interface.
+  companion: true
+
+  # sync_interface is taken as declared by the raw spec
+  # (`(sync-interface 0xffc1 0x0001 2)`, confirmed identical for both PID
+  # pairs below). command_interface is 0: on real
   # GameBuds X Case hardware (0x231A) the case exposes only HID interfaces
   # 0-2, and interface 0 is the 0xFFC0/0x0001 vendor collection declared
   # under `hid` below. The 0x230C case is assumed to match; unverified.

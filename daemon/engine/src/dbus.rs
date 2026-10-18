@@ -2134,16 +2134,8 @@ fn build_status_json(state: &AppState) -> String {
 
     let mut result = status_categories(primary);
     // Every other initialised device (in practice the GameBuds charging case
-    // next to its dongle) adds its own categories. The primary device wins
-    // any category name or field role both define, then the others in path
-    // order: clients pick battery bars by role, so a role must name one field
-    // only.
-    let mut roles: std::collections::HashSet<String> = result
-        .values()
-        .filter_map(JsonValue::as_object)
-        .flat_map(|fields| fields.values())
-        .filter_map(|field| field.get("role")?.as_str().map(str::to_string))
-        .collect();
+    // next to its dongle) adds its own categories, in path order. The primary
+    // device wins a category name both define.
     let mut others: Vec<_> = state
         .devices
         .iter()
@@ -2151,24 +2143,8 @@ fn build_status_json(state: &AppState) -> String {
         .collect();
     others.sort_by_key(|(path, _)| *path);
     for (_, entry) in others {
-        for (category, mut fields) in status_categories(entry) {
-            if result.contains_key(&category) {
-                continue;
-            }
-            for field in fields
-                .as_object_mut()
-                .into_iter()
-                .flat_map(|f| f.values_mut())
-            {
-                let Some(field) = field.as_object_mut() else {
-                    continue;
-                };
-                let role = field.get("role").and_then(JsonValue::as_str);
-                if role.is_some_and(|r| !roles.insert(r.to_string())) {
-                    field.remove("role");
-                }
-            }
-            result.insert(category, fields);
+        for (category, fields) in status_categories(entry) {
+            result.entry(category).or_insert(fields);
         }
     }
     if result.is_empty() {
@@ -2697,48 +2673,63 @@ mod tests {
         assert_eq!(json["headset"]["battery"]["type"], "uint8");
     }
 
+    /// Config of a device that only accompanies another one (the GameBuds
+    /// charging case), optionally with a `representation`.
+    fn companion_config(representation: Option<HashMap<String, Vec<String>>>) -> Arc<DeviceConfig> {
+        Arc::new(DeviceConfig {
+            device: Some(device_config::DeviceSection {
+                companion: true,
+                ..Default::default()
+            }),
+            representation,
+            ..DeviceConfig::default()
+        })
+    }
+
     #[test]
-    fn build_status_json_prefers_headset_over_accessory() {
+    fn build_status_json_prefers_headset_over_companion() {
         // GameBuds: the dongle and the battery-only case are both connected.
-        // Whatever order the map yields, headset status must come from the
-        // dongle, and only the dongle's fields may carry the roles both report.
+        // Whatever order the map yields, the headset category comes from the
+        // dongle and the case's own category is merged in beside it, each
+        // keeping its own roles.
         for case_first in [true, false] {
             let (tx, _rx) = mpsc::channel(1);
-            let entry = |battery: u8, caps: &[&str]| {
-                let mut status = HashMap::new();
-                status.insert(
-                    "battery".to_string(),
-                    serde_json::json!({"value": battery, "type": "uint8", "role": "battery_left"}),
-                );
-                let mut e = dummy_entry_with_status(status, tx.clone());
-                e.capabilities = caps.iter().map(|c| c.to_string()).collect();
-                e
-            };
             let (case_path, dongle_path) = if case_first {
                 ("/dev/hidraw0", "/dev/hidraw1")
             } else {
                 ("/dev/hidraw1", "/dev/hidraw0")
             };
-            let mut case = entry(40, &["battery"]);
-            case.status.insert(
-                "case_battery".to_string(),
-                serde_json::json!({"value": 70, "type": "uint8", "role": "battery_case"}),
+
+            let mut dongle_status = HashMap::new();
+            dongle_status.insert(
+                "left_battery_level".to_string(),
+                serde_json::json!({"value": 90, "type": "percentage", "role": "battery_left"}),
             );
+            let dongle = dummy_entry_with_status(dongle_status, tx.clone());
+
+            let mut case_status = HashMap::new();
+            case_status.insert(
+                "left_battery_percent".to_string(),
+                serde_json::json!({"value": 40, "type": "percentage", "role": "battery_case_left"}),
+            );
+            case_status.insert(
+                "case_battery_percent".to_string(),
+                serde_json::json!({"value": 70, "type": "percentage", "role": "battery_case"}),
+            );
+            let mut case = dummy_entry_with_status(case_status, tx.clone());
             let mut rep = HashMap::new();
             rep.insert(
                 "case".to_string(),
-                vec!["battery".to_string(), "case_battery".to_string()],
+                vec![
+                    "left_battery_percent".to_string(),
+                    "case_battery_percent".to_string(),
+                ],
             );
-            case.config = Arc::new(DeviceConfig {
-                representation: Some(rep),
-                ..DeviceConfig::default()
-            });
+            case.config = companion_config(Some(rep));
+
             let mut devices = HashMap::new();
             devices.insert(PathBuf::from(case_path), case);
-            devices.insert(
-                PathBuf::from(dongle_path),
-                entry(90, &["battery", "noise_cancelling", "wireless"]),
-            );
+            devices.insert(PathBuf::from(dongle_path), dongle);
             let state = AppState {
                 configs: vec![],
                 devices,
@@ -2747,13 +2738,49 @@ mod tests {
                 general_settings_path: PathBuf::from("/tmp/gs.yaml"),
             };
             let json: JsonValue = serde_json::from_str(&build_status_json(&state)).unwrap();
-            assert_eq!(json["headset"]["battery"]["value"], 90);
-            // ...and the case's own category is merged in beside it.
-            assert_eq!(json["case"]["battery"]["value"], 40);
-            assert_eq!(json["headset"]["battery"]["role"], "battery_left");
-            assert!(json["case"]["battery"].get("role").is_none());
-            assert_eq!(json["case"]["case_battery"]["role"], "battery_case");
+            assert_eq!(json["headset"]["left_battery_level"]["value"], 90);
+            assert_eq!(
+                json["headset"]["left_battery_level"]["role"],
+                "battery_left"
+            );
+            assert_eq!(json["case"]["left_battery_percent"]["value"], 40);
+            assert_eq!(
+                json["case"]["left_battery_percent"]["role"],
+                "battery_case_left"
+            );
+            assert_eq!(json["case"]["case_battery_percent"]["role"], "battery_case");
         }
+    }
+
+    #[test]
+    fn primary_device_prefers_non_companion() {
+        // The companion has more capabilities and the lower path: neither may
+        // make it primary.
+        let (tx, _rx) = mpsc::channel(1);
+        let mut status = HashMap::new();
+        status.insert(
+            "battery".to_string(),
+            serde_json::json!({"value": 50, "type": "uint8"}),
+        );
+        let mut companion = dummy_entry_with_status(status.clone(), tx.clone());
+        companion.name = "case".into();
+        companion.config = companion_config(None);
+        companion.capabilities = vec!["battery".into(), "wireless".into()];
+        let mut headset = dummy_entry_with_status(status, tx.clone());
+        headset.name = "dongle".into();
+        headset.capabilities = vec!["battery".into()];
+        let mut devices = HashMap::new();
+        devices.insert(PathBuf::from("/dev/hidraw0"), companion);
+        devices.insert(PathBuf::from("/dev/hidraw1"), headset);
+        let mut state = AppState {
+            configs: vec![],
+            devices,
+            config_dirs: vec![PathBuf::from("/tmp")],
+            general_settings: crate::general_settings::GeneralSettings::default(),
+            general_settings_path: PathBuf::from("/tmp/gs.yaml"),
+        };
+        assert_eq!(state.primary_device().unwrap().name, "dongle");
+        assert_eq!(state.primary_device_mut().unwrap().name, "dongle");
     }
 
     #[test]
@@ -2805,7 +2832,6 @@ mod tests {
             );
             let mut dongle = dummy_entry_with_status(dongle_status, tx.clone());
             dongle.config = Arc::new(dongle_config);
-            dongle.capabilities = vec!["battery".into(), "noise_cancelling".into()];
 
             let mut case_status = HashMap::new();
             case_status.insert(
@@ -2813,7 +2839,7 @@ mod tests {
                 serde_json::json!({"value": 40, "type": "uint8"}),
             );
             let mut case = dummy_entry_with_status(case_status, tx.clone());
-            case.capabilities = vec!["battery".into()];
+            case.config = companion_config(None);
 
             let (case_path, dongle_path) = if case_first {
                 ("/dev/hidraw0", "/dev/hidraw1")

@@ -448,6 +448,15 @@ device:
       tx_dsp: ">=0.3.82"
       tx_mcu: ">=1.27.0"
 
+  # Optional (default false). Marks a device that only accompanies another
+  # one, such as the GameBuds charging case next to its dongle. When several
+  # devices are connected, status, settings and EQ go to a non-companion
+  # device first; the companion's status categories are still merged into
+  # GetStatus. The variants' product_id are also compiled into lam-hidraw-helper's
+  # allowlist of pure-HID accessories, so the device can be opened without a
+  # USB audio interface.
+  companion: false
+
   capabilities:
     - mic_volume
     - sidetone

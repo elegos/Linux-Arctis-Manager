@@ -86,6 +86,8 @@ PlasmoidItem {
             pushBattery("battery_left")
             pushBattery("battery_right")
         }
+        pushBattery("battery_case_left")
+        pushBattery("battery_case_right")
         pushBattery("battery_case")
         pushBattery("battery_dock")
 
