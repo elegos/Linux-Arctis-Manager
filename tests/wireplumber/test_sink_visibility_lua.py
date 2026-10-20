@@ -13,7 +13,8 @@ LUA = shutil.which("lua") or shutil.which("lua5.4") or shutil.which("luajit")
 pytestmark = pytest.mark.skipif(LUA is None, reason="lua interpreter not installed")
 
 
-def run(variant: str) -> subprocess.CompletedProcess:
+def run(variant: str) -> subprocess.CompletedProcess[str]:
+    assert LUA is not None
     return subprocess.run(
         [LUA, str(HARNESS), str(SCRIPT), variant],
         capture_output=True, text=True, check=False,
