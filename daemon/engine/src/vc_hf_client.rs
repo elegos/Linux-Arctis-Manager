@@ -246,7 +246,11 @@ fn extract_pth_from_zip(zip_bytes: &[u8], dest_folder: &Path) -> Result<Vec<Stri
         let entry = archive
             .by_index(i)
             .map_err(|e| HfError::Zip(e.to_string()))?;
-        names.push(entry.name().to_owned());
+        // zip >= 9 reports unsafe member names (absolute, `..`, ...) as an
+        // error; such members are never extracted.
+        if let Ok(name) = entry.name() {
+            names.push(name.into_owned());
+        }
     }
 
     let pth_members = zip_members_with_ext(&names, ".pth");

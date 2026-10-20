@@ -20,7 +20,7 @@ authors = ["Giacomo 'Mr. Wolf' Furlan <g.furlan@accenture.com>"]
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 # D-Bus
-zbus = { version = "5", default-features = false, features = ["tokio"] }
+zbus = { version = "6", default-features = false, features = ["tokio", "proxy", "service"] }
 # structured logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
@@ -32,7 +32,7 @@ hidapi = { version = "2", default-features = false, features = ["linux-native"] 
 nix = { version = "0.30", features = ["user", "socket", "uio", "ioctl", "fs"] }
 # serialisation
 serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.9"
+serde_yaml = { package = "serde_norway", version = "0.9" }
 serde_json = "1"
 # HTTP client (HuggingFace Hub API, base RVC model downloads — added in E10-S3).
 # native-tls (system OpenSSL via FFI), not rustls: both of rustls' crypto
@@ -47,7 +47,7 @@ reqwest = { version = "0.13", default-features = false, features = ["native-tls"
 sha2 = "0.10"
 # zip archive extraction (RVC WebUI .pth+.index bundles — added in E10-S3);
 # deflate via flate2's pure-Rust backend, no system zlib required
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 # real FFT, for the VTLN formant warp (frequency-domain resample) — added in E10-S6a
 realfft = "3"
