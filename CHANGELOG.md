@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `sink-visibility.lua` falls back to the global `Log` API when `Log.open_topic` is missing, so WirePlumber 0.4.x (Ubuntu 24.04 / Linux Mint) no longer crash-loops and takes every audio device with it.
 - Arctis GameBuds X: the dongle and the charging case now initialise. The case is allowed past the hidraw helper's audio-interface check, uses command interface 0, and both devices read replies without a report-ID byte. The shared GameBuds configs apply the same changes to the original GameBuds (untested).
 - With several devices connected (such as the GameBuds dongle and its case), status, settings and their optimistic updates act on the same primary device (the non-companion one) instead of whichever one the device map yielded first.
 

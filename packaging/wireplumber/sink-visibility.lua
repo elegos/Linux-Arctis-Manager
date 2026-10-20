@@ -32,7 +32,26 @@
 -- reason, including a crash, which this script observes like any other
 -- deletion.
 
-local log = Log.open_topic("s-lam-sink-visibility")
+-- `Log.open_topic` only exists from WirePlumber 0.4.81 (the 0.5 betas) on;
+-- older 0.4.x (e.g. 0.4.17 on Ubuntu 24.04 / Linux Mint) only has the
+-- global `Log.info(message)` family, and calling the missing
+-- function aborts the script and crash-loops wireplumber.service.
+local function make_logger(topic)
+  if Log.open_topic ~= nil then
+    return Log.open_topic(topic)
+  end
+  local function emit(fn)
+    return function(_, message)
+      fn("[" .. topic .. "] " .. message)
+    end
+  end
+  return {
+    info = emit(Log.info),
+    warning = emit(Log.warning),
+  }
+end
+
+local log = make_logger("s-lam-sink-visibility")
 
 local LEASE_DIR = os.getenv("XDG_RUNTIME_DIR") or "/tmp"
 local LEASE_NAME = "lam-sink-visibility.lease"
