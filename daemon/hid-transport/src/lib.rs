@@ -76,7 +76,9 @@ impl HidTransport {
         // SAFETY: fd.into_raw_fd() consumes the OwnedFd, transferring ownership to File.
         let std_file = unsafe { std::fs::File::from_raw_fd(fd.into_raw_fd()) }; // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
         Ok(Self {
-            inner: AsyncFd::new(std_file)?,
+            // SAFETY: `std_file` owns a valid, open, non-blocking fd that is
+            // moved into the AsyncFd and not closed or replaced elsewhere.
+            inner: unsafe { AsyncFd::register(std_file)? }, // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
             prepend_report_id_on_read: false,
         })
     }

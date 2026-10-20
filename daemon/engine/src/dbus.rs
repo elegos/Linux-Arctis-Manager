@@ -1878,14 +1878,14 @@ pub async fn start_dbus_service(
     let focus_state = Arc::clone(&state);
     let focus_rx = signal_tx.subscribe();
 
-    let conn = connection::Builder::session()?
-        .name(BUS_NAME)?
+    let conn = connection::Builder::session()
+        .name(BUS_NAME)
         .serve_at(
             STATUS_PATH,
             StatusInterface {
                 state: Arc::clone(&state),
             },
-        )?
+        )
         .serve_at(
             SETTINGS_PATH,
             SettingsInterface {
@@ -1895,14 +1895,14 @@ pub async fn start_dbus_service(
                 audio_shared: Arc::clone(&audio_shared),
                 visibility_shared: Arc::clone(&visibility_shared),
             },
-        )?
+        )
         .serve_at(
             CONFIG_PATH,
             ConfigInterface {
                 state: Arc::clone(&state),
                 signal_tx: signal_tx.clone(),
             },
-        )?
+        )
         .serve_at(
             EQ_PATH,
             EqInterface {
@@ -1913,7 +1913,7 @@ pub async fn start_dbus_service(
                 audio_shared,
                 focus_backend: focus_backend.clone(),
             },
-        )?
+        )
         .serve_at(
             NC_PATH,
             NcInterface {
@@ -1922,7 +1922,7 @@ pub async fn start_dbus_service(
                 nc_runtime,
                 mic_router: Arc::clone(&mic_router),
             },
-        )?
+        )
         .serve_at(
             VC_PATH,
             VcInterface {
@@ -1933,7 +1933,7 @@ pub async fn start_dbus_service(
                 mic_router,
                 calibration,
             },
-        )?
+        )
         .build()
         .await?;
 
