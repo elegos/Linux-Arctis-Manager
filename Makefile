@@ -17,7 +17,8 @@ DESKTOP_FILES       := $(wildcard src/linux_arctis_manager/desktop/*.desktop)
 # name for the app launcher/window icon, "-symbolic" for panel/tray contexts
 # (Plasma/Kirigami auto-recolor icons named "*-symbolic" to match the
 # panel's light/dark foreground; the plain name doesn't get that treatment).
-ICON_SRC            := src/linux_arctis_manager/gui/images/steelseries_logo.svg
+ICON_SRC            := src/linux_arctis_manager/gui/images/app_icon.svg
+SYMBOLIC_ICON_SRC   := src/linux_arctis_manager/gui/images/systray_icon.svg
 ICON_DIR            := $(DATADIR)/icons/hicolor/scalable/apps
 
 # A standalone copy of the translation files, outside the venv's site-packages
@@ -301,7 +302,7 @@ install-core: build generate-services $(if $(SKIP_PYTHON),,install-python)
 	# hicolor icon theme entry (app launcher/window + Plasma panel/tray)
 	install -dm755 $(DESTDIR)$(ICON_DIR)
 	install -Dm644 $(ICON_SRC) $(DESTDIR)$(ICON_DIR)/arctis-manager.svg
-	install -Dm644 $(ICON_SRC) $(DESTDIR)$(ICON_DIR)/arctis-manager-symbolic.svg
+	install -Dm644 $(SYMBOLIC_ICON_SRC) $(DESTDIR)$(ICON_DIR)/arctis-manager-symbolic.svg
 	# Optional WirePlumber policy script for "hide_physical_sink"
 	install -Dm644 $(WIREPLUMBER_SCRIPT) $(DESTDIR)$(WIREPLUMBER_SCRIPTS_DIR)/sink-visibility.lua
 	install -Dm644 $(WIREPLUMBER_CONF) $(DESTDIR)$(WIREPLUMBER_CONF_DIR)/51-lam-sink-visibility.conf

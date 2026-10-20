@@ -6,7 +6,9 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPainter, QPalette, QPixmap
 from PySide6.QtWidgets import QApplication
 
-ICON_PATH = Path(__file__).parent / 'images' / 'steelseries_logo.svg'
+IMAGES_PATH = Path(__file__).parent / 'images'
+ICON_PATH = IMAGES_PATH / 'app_icon.svg'
+SYSTRAY_ICON_PATH = IMAGES_PATH / 'systray_icon.svg'
 
 def get_icon_pixmap(icon_path: Path = ICON_PATH, color: QPalette.ColorRole = QPalette.ColorRole.Text) -> QPixmap:
     brush_color = QApplication.palette().color(color)
@@ -15,8 +17,9 @@ def get_icon_pixmap(icon_path: Path = ICON_PATH, color: QPalette.ColorRole = QPa
     xml_root = xml_tree.getroot()
     assert xml_root is not None
 
-    for path in xml_root.findall('.//{http://www.w3.org/2000/svg}path'):
-        path.set('fill', brush_color.name())
+    for tag in ('path', 'circle'):
+        for shape in xml_root.findall(f'.//{{http://www.w3.org/2000/svg}}{tag}'):
+            shape.set('fill', brush_color.name())
 
     xml_str = DET.tostring(xml_root)
 

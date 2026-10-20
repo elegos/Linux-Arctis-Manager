@@ -11,7 +11,7 @@ from linux_arctis_manager.gui.base_app import QBaseDesktopApp
 from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
 from linux_arctis_manager.gui.main_app import QMainApp
 from linux_arctis_manager.gui.status_widget import QStatusWidget
-from linux_arctis_manager.gui.ui_utils import get_icon_pixmap
+from linux_arctis_manager.gui.ui_utils import SYSTRAY_ICON_PATH, get_icon_pixmap
 from linux_arctis_manager.i18n import I18n
 
 
@@ -43,7 +43,7 @@ class QSystrayApp(QBaseDesktopApp):
         self.last_device_status = {}
         self._settings_config = {}
 
-        pixmap = get_icon_pixmap()
+        pixmap = get_icon_pixmap(SYSTRAY_ICON_PATH)
         self.tray_icon = QSystemTrayIcon(QIcon(pixmap), parent=self.app)
         self.tray_icon.setToolTip('Arctis Manager')
 
