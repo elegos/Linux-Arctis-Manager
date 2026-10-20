@@ -7,19 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
+## [3.0.0-beta2]
 
-- `GetStatus` also merges in the status categories of every other initialised device, so the GameBuds charging case's batteries, charging state and lid show up next to the earbuds. The primary device wins a category name clash.
-- New optional `device.companion` flag in device configs; devices marked as such (the GameBuds case) are never chosen as the primary device while another one is connected.
-- New status roles `battery_case_left` and `battery_case_right` for the earbud batteries as reported by the GameBuds case; the tray and the Plasma widget show them next to the earbuds' and the case's own battery.
+### Added
+
+- The Arctis GameBuds X charging case's battery levels, charging state and lid status now show up next to the earbuds, and the tray and the Plasma widget display the earbud batteries as reported by the case alongside the case's own battery.
 
 ### Fixed
 
-- Security: `urllib3` 2.8.0 (three PYSEC advisories), `zip` 9 (RUSTSEC-2026-0367/0368/0369; LAM never called `extract()`, but members with unsafe names are now skipped), and `serde_yaml` replaced by the maintained drop-in fork `serde_norway`.
-- `zbus` 6: replaces the unmaintained `zvariant`/`zbus_names` crates; D-Bus interfaces unchanged.
-- `sink-visibility.lua` falls back to the global `Log` API when `Log.open_topic` is missing, so WirePlumber 0.4.x (Ubuntu 24.04 / Linux Mint) no longer crash-loops and takes every audio device with it.
-- Arctis GameBuds X: the dongle and the charging case now initialise. The case is allowed past the hidraw helper's audio-interface check, uses command interface 0, and both devices read replies without a report-ID byte. The shared GameBuds configs apply the same changes to the original GameBuds (untested).
-- With several devices connected (such as the GameBuds dongle and its case), status, settings and their optimistic updates act on the same primary device (the non-companion one) instead of whichever one the device map yielded first.
+- Linux Mint, Ubuntu 24.04 and other distributions shipping WirePlumber 0.4.x: installing Arctis Manager no longer makes WirePlumber crash-loop and take every audio device with it. Thanks to Zalko for the report and the diagnosis, and to @Kathryl for helping to track it down.
+- Arctis GameBuds X: the dongle and the charging case now work on real hardware, and the same changes are applied to the original GameBuds (untested). Thanks to @squeedledorf.
+- With several devices connected (such as the GameBuds dongle and its case), status and settings always act on the headset instead of whichever device was listed first.
+- The background services no longer start for system users (for example the login screen's session). Thanks to @Kathryl (#77).
+- The "Hide Physical Sink" WirePlumber policy is now registered correctly, so it loads on Debian and its derivatives. Thanks to @Kathryl (#78).
 
 ## [3.0.0-beta1]
 
