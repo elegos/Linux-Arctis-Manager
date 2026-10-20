@@ -16,7 +16,7 @@ pytestmark = pytest.mark.skipif(LUA is None, reason="lua interpreter not install
 def run(variant: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [LUA, str(HARNESS), str(SCRIPT), variant],
-        capture_output=True, text=True,
+        capture_output=True, text=True, check=False,
     )
 
 
@@ -25,5 +25,5 @@ def test_script_loads_and_logs(variant):
     result = run(variant)
     assert result.returncode == 0, result.stderr
     # file-monitor-api is stubbed missing, so the script logs a warning at load.
-    warnings = [l for l in result.stdout.splitlines() if l.startswith("warning|")]
-    assert any("file-monitor-api plugin not available" in l for l in warnings)
+    warnings = [line for line in result.stdout.splitlines() if line.startswith("warning|")]
+    assert any("file-monitor-api plugin not available" in line for line in warnings)
