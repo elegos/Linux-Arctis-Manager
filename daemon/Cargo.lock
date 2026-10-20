@@ -194,7 +194,7 @@ dependencies = [
 
 [[package]]
 name = "device-config"
-version = "0.1.0"
+version = "3.0.0"
 dependencies = [
  "serde",
  "serde_norway",
@@ -421,7 +421,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hid-transport"
-version = "0.1.0"
+version = "3.0.0"
 dependencies = [
  "hidapi",
  "nix 0.30.1",
@@ -691,7 +691,7 @@ dependencies = [
 
 [[package]]
 name = "lam-daemon"
-version = "0.1.0"
+version = "3.0.0"
 dependencies = [
  "audioadapter-buffers",
  "device-config",
@@ -723,7 +723,7 @@ dependencies = [
 
 [[package]]
 name = "lam-hidraw-helper"
-version = "0.1.0"
+version = "3.0.0"
 dependencies = [
  "device-config",
  "nix 0.30.1",
