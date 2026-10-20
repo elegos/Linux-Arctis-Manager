@@ -55,7 +55,7 @@ jobs:
           # the preflight's own error output if missing; these are the
           # tools. libpulse + libudev are what the daemon links against.
           case "${{ matrix.family }}" in
-            arch) pacman -Sy --noconfirm --needed openssh libcap libpulse systemd-libs openssl coreutils tar sudo ;;
+            arch) pacman -Syu --noconfirm --needed openssh libcap libpulse systemd-libs openssl coreutils tar sudo ;;
             rpm)  dnf install -y openssh libcap pulseaudio-libs systemd-libs openssl-libs tar findutils sudo ;;
             deb)  apt-get update
                   DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -115,7 +115,7 @@ jobs:
               if ! grep -q '^DisableSandboxNetwork' /etc/pacman.conf; then
                 sed -i '/^\[options\]/a DisableSandboxNetwork' /etc/pacman.conf
               fi
-              pacman -Sy --noconfirm
+              pacman -Syu --noconfirm
               pacman -U --noconfirm /pkg/*.pkg.tar.zst
               ;;
             rpm)
