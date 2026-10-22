@@ -971,7 +971,7 @@ async fn main() {
         Arc::new(Mutex::new(mic_router::MicRouterState::new()));
 
     // Start D-Bus service.  On failure, continue without it (headless / test env).
-    let _dbus_conn = match dbus::start_dbus_service(
+    let dbus_conn = match dbus::start_dbus_service(
         Arc::clone(&app_state),
         signal_rx,
         signal_tx.clone(),
@@ -1020,6 +1020,7 @@ async fn main() {
         vc_runtime,
         rvc_live_runtime,
         mic_router,
+        dbus_conn,
     )
     .await;
 }
@@ -1116,6 +1117,7 @@ async fn run_main_loop(
     vc_runtime: Arc<Mutex<vc_ladspa_chain::VcLadspaRuntime>>,
     rvc_live_runtime: Arc<Mutex<rvc_live_chain::RvcLiveRuntime>>,
     mic_router: Arc<Mutex<mic_router::MicRouterState>>,
+    dbus_conn: Option<zbus::Connection>,
 ) {
     let existing = match hotplug::scan_existing(&[]) {
         Ok(devs) => devs,
@@ -1190,6 +1192,8 @@ async fn run_main_loop(
 
     let aud_on_remove = Arc::clone(&audio_shared);
     let vis_on_remove = Arc::clone(&visibility_shared);
+
+    let mut dbus_lost = false;
 
     tokio::select! {
         res = hotplug::watch(vec![], tx) => {
@@ -1343,6 +1347,18 @@ async fn run_main_loop(
         } => {
             info!("SIGTERM received, shutting down");
         }
+        // zbus does not reconnect, and on GNOME the user bus is restarted on
+        // every logout (gnome-session-restart-dbus.service) while this daemon
+        // keeps running.  Exit and let systemd restart us on the new bus.
+        _ = async {
+            match dbus_conn.as_ref() {
+                Some(c) => c.closed().await,
+                None => std::future::pending::<()>().await,
+            }
+        } => {
+            error!("D-Bus session bus connection lost, shutting down so systemd restarts the daemon");
+            dbus_lost = true;
+        }
     }
 
     // Tear down virtual audio sinks on any exit path.
@@ -1357,6 +1373,11 @@ async fn run_main_loop(
     nc_manager::teardown_nc(&mut *nc_runtime.lock().await).await;
     vc_ladspa_chain::teardown_vc_ladspa(&mut *vc_runtime.lock().await).await;
     rvc_live_chain::teardown_rvc(&mut *rvc_live_runtime.lock().await).await;
+
+    // Non-zero so `Restart=on-failure` brings the daemon back on the new bus.
+    if dbus_lost {
+        std::process::exit(1);
+    }
 }
 
 #[cfg(test)]
