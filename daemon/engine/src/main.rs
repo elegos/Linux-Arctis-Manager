@@ -31,6 +31,7 @@ mod vc_rvc_config;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::process::ExitCode;
 use std::sync::Arc;
 
 use std::time::Duration;
@@ -874,7 +875,7 @@ fn chatmix_from_events(events: &[EmitEvent]) -> (Option<u8>, Option<u8>) {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 #[tokio::main]
-async fn main() {
+async fn main() -> ExitCode {
     // Accept --log-level=<level> or --log-level <level>; falls back to RUST_LOG, then "info".
     let log_level = std::env::args() // nosemgrep: rust.lang.security.args.args — CLI flag parsing, not a security boundary
         .collect::<Vec<_>>()
@@ -1022,7 +1023,7 @@ async fn main() {
         mic_router,
         dbus_conn,
     )
-    .await;
+    .await
 }
 
 /// Keep only devices that are useful to start a task for.
@@ -1118,7 +1119,7 @@ async fn run_main_loop(
     rvc_live_runtime: Arc<Mutex<rvc_live_chain::RvcLiveRuntime>>,
     mic_router: Arc<Mutex<mic_router::MicRouterState>>,
     dbus_conn: Option<zbus::Connection>,
-) {
+) -> ExitCode {
     let existing = match hotplug::scan_existing(&[]) {
         Ok(devs) => devs,
         Err(e) => {
@@ -1347,9 +1348,9 @@ async fn run_main_loop(
         } => {
             info!("SIGTERM received, shutting down");
         }
-        // zbus does not reconnect, and on GNOME the user bus is restarted on
-        // every logout (gnome-session-restart-dbus.service) while this daemon
-        // keeps running.  Exit and let systemd restart us on the new bus.
+        // The session bus can go away while we keep running (e.g. GNOME restarts it
+        // on logout via gnome-session-restart-dbus.service).  zbus does not
+        // reconnect, so exit and let systemd restart us on the new bus.
         _ = async {
             match dbus_conn.as_ref() {
                 Some(c) => c.closed().await,
@@ -1376,7 +1377,9 @@ async fn run_main_loop(
 
     // Non-zero so `Restart=on-failure` brings the daemon back on the new bus.
     if dbus_lost {
-        std::process::exit(1);
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
     }
 }
 
