@@ -17,7 +17,7 @@ DESKTOP_FILES       := $(wildcard src/linux_arctis_manager/desktop/*.desktop)
 # name for the app launcher/window icon, "-symbolic" for panel/tray contexts
 # (Plasma/Kirigami auto-recolor icons named "*-symbolic" to match the
 # panel's light/dark foreground; the plain name doesn't get that treatment).
-ICON_SRC            := src/linux_arctis_manager/gui/images/steelseries_logo.svg
+ICON_SRC            := src/linux_arctis_manager/gui/images/app_icon.svg
 ICON_DIR            := $(DATADIR)/icons/hicolor/scalable/apps
 
 # A standalone copy of the translation files, outside the venv's site-packages

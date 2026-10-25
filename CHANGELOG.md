@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- New application and system tray icons.
+
 ## [3.0.0-beta2]
 
 ### Added
