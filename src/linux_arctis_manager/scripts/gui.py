@@ -75,6 +75,7 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName('Arctis Manager')
     app.setApplicationDisplayName('Arctis Manager')
+    app.setDesktopFileName('ArctisManager')
 
     # Ensure the daemon is reachable before creating the app objects that
     # open D-Bus connections.  QMainApp.__init__ calls dbus_wrapper.start()

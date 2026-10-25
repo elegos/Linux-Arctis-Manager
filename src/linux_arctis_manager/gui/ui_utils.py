@@ -8,7 +8,6 @@ from PySide6.QtWidgets import QApplication
 
 IMAGES_PATH = Path(__file__).parent / 'images'
 ICON_PATH = IMAGES_PATH / 'app_icon.svg'
-SYSTRAY_ICON_PATH = IMAGES_PATH / 'systray_icon.svg'
 
 def get_icon_pixmap(icon_path: Path = ICON_PATH, color: QPalette.ColorRole = QPalette.ColorRole.Text) -> QPixmap:
     brush_color = QApplication.palette().color(color)
