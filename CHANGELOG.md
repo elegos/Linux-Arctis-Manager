@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- New "Remove Virtual Sinks After (seconds)" general setting (default 2, 0 = immediately, up to 5): when the headset drops and comes straight back (flaky USB port or power glitch), the `Arctis_Media`/`Arctis_Chat` sinks are kept instead of being destroyed and recreated. "Redirect Audio on Disconnect" now applies when the delay expires.
+
 ### Changed
 
 - New application and system tray icons.

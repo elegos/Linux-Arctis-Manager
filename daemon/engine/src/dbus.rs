@@ -2932,6 +2932,7 @@ mod tests {
                 redirect_audio_on_disconnect: false,
                 redirect_audio_on_disconnect_device: Some("alsa_output.test".to_owned()),
                 hide_physical_sink: false,
+                ..Default::default()
             },
             general_settings_path: PathBuf::from("/tmp/gs.yaml"),
         };

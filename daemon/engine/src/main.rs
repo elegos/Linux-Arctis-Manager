@@ -1,5 +1,6 @@
 mod audio;
 mod dbus;
+mod deferred;
 mod device_persistence;
 mod device_session;
 mod engine_error;
@@ -438,6 +439,7 @@ async fn run_device(
         // Create virtual audio sinks and apply the initial chatmix balance.
         // Must run before redirect so Arctis_Media exists when set_default_sink
         // is called.
+        SINK_RELEASE.cancel();
         {
             let mut guard = audio_shared.lock().await;
             if guard.is_none() {
@@ -554,13 +556,9 @@ async fn run_device(
             h.abort();
         }
 
-        // Tear down any sinks still alive (e.g. hidraw EOF while headset was on).
-        if let Some(setup) = audio_shared.lock().await.take() {
-            audio::teardown_sinks(setup).await;
-        }
-        if let Some(refresher) = visibility_shared.lock().await.take() {
-            refresher.stop().await;
-        }
+        // Release any sinks still alive (e.g. hidraw EOF while headset was on),
+        // after the grace period in case the headset comes straight back.
+        schedule_sink_release(&app_state, &audio_shared, &visibility_shared).await;
 
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
@@ -737,33 +735,14 @@ async fn forward_events(
             last_radio_status = Some(status.clone());
             if changed {
                 if status.contains("NOT_CONNECTED") || status == "DISCONNECTED" {
-                    // Read redirect settings before touching sinks.
-                    let (do_redirect, target) = {
-                        let s = state_for_events.lock().await;
-                        (
-                            s.general_settings.redirect_audio_on_disconnect,
-                            s.general_settings
-                                .redirect_audio_on_disconnect_device
-                                .clone(),
-                        )
-                    };
-                    // Set default and move active streams BEFORE removing virtual sinks
-                    // so playback is not interrupted on wireless disconnect.
-                    if do_redirect {
-                        if let Some(ref sink) = target {
-                            audio::set_default_sink(sink).await;
-                            audio::move_virtual_sink_inputs_to(sink).await;
-                        }
-                    }
-                    let setup = audio_for_task.lock().await.take();
-                    if let Some(s) = setup {
-                        info!("headset wireless off: removing virtual sinks");
-                        audio::teardown_sinks(s).await;
-                    }
-                    if let Some(refresher) = visibility_for_task.lock().await.take() {
-                        refresher.stop().await;
-                    }
+                    schedule_sink_release(
+                        &state_for_events,
+                        &audio_for_task,
+                        &visibility_for_task,
+                    )
+                    .await;
                 } else if status == "PAIRED_CONNECTED" || status == "CONNECTED" {
+                    SINK_RELEASE.cancel();
                     let needs = audio_for_task.lock().await.is_none();
                     if needs {
                         match audio::setup_sinks().await {
@@ -822,6 +801,50 @@ async fn forward_events(
             }
         }
     }
+}
+
+/// Pending virtual-sink removal; cancelled when the headset comes back within
+/// the `sink_removal_delay_secs` grace period so the sinks are reused.
+static SINK_RELEASE: deferred::Deferred = deferred::Deferred::new();
+
+/// Removes the virtual sinks after the configured grace period. The
+/// redirect-on-disconnect (default sink + active streams) runs when the delay
+/// expires, right before the removal, so a quick reconnect leaves routing alone.
+async fn schedule_sink_release(
+    app_state: &Arc<Mutex<state::AppState>>,
+    audio_shared: &Arc<Mutex<Option<audio::AudioSetup>>>,
+    visibility_shared: &Arc<Mutex<Option<sink_visibility::LeaseGuard>>>,
+) {
+    let (delay, target) = {
+        let s = app_state.lock().await;
+        let g = &s.general_settings;
+        (
+            Duration::from_secs(g.sink_removal_delay_secs.into()),
+            g.redirect_audio_on_disconnect
+                .then(|| g.redirect_audio_on_disconnect_device.clone())
+                .flatten(),
+        )
+    };
+    let audio_shared = Arc::clone(audio_shared);
+    let visibility_shared = Arc::clone(visibility_shared);
+    SINK_RELEASE
+        .schedule(delay, async move {
+            // Set default and move active streams BEFORE removing virtual sinks
+            // so playback is not interrupted on disconnect.
+            if let Some(ref sink) = target {
+                audio::set_default_sink(sink).await;
+                audio::move_virtual_sink_inputs_to(sink).await;
+            }
+            let setup = audio_shared.lock().await.take();
+            if let Some(s) = setup {
+                info!("headset gone: removing virtual sinks");
+                audio::teardown_sinks(s).await;
+            }
+            if let Some(refresher) = visibility_shared.lock().await.take() {
+                refresher.stop().await;
+            }
+        })
+        .await;
 }
 
 /// Starts the sink-visibility lease refresher for `sink_name` if the

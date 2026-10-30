@@ -43,3 +43,4 @@ audioadapter-buffers = { workspace = true }
 [dev-dependencies]
 lam-hidraw-helper = { workspace = true }
 tempfile = "3"
+tokio = { workspace = true, features = ["test-util"] }

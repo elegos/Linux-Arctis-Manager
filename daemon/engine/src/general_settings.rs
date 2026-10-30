@@ -3,7 +3,11 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+fn default_sink_removal_delay_secs() -> u32 {
+    2
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeneralSettings {
     #[serde(default)]
     pub redirect_audio_on_connect: bool,
@@ -13,6 +17,22 @@ pub struct GeneralSettings {
     pub redirect_audio_on_disconnect_device: Option<String>,
     #[serde(default)]
     pub hide_physical_sink: bool,
+    /// Grace period before the virtual sinks are removed after a headset
+    /// disconnect; a reconnect within it keeps the existing sinks. 0 = immediate.
+    #[serde(default = "default_sink_removal_delay_secs")]
+    pub sink_removal_delay_secs: u32,
+}
+
+impl Default for GeneralSettings {
+    fn default() -> Self {
+        Self {
+            redirect_audio_on_connect: false,
+            redirect_audio_on_disconnect: false,
+            redirect_audio_on_disconnect_device: None,
+            hide_physical_sink: false,
+            sink_removal_delay_secs: default_sink_removal_delay_secs(),
+        }
+    }
 }
 
 impl GeneralSettings {
@@ -37,6 +57,7 @@ impl GeneralSettings {
             "redirect_audio_on_disconnect": self.redirect_audio_on_disconnect,
             "redirect_audio_on_disconnect_device": self.redirect_audio_on_disconnect_device,
             "hide_physical_sink": self.hide_physical_sink,
+            "sink_removal_delay_secs": self.sink_removal_delay_secs,
         })
     }
 
@@ -64,6 +85,13 @@ impl GeneralSettings {
                 "available": crate::sink_visibility::wireplumber_available(),
                 "unavailable_reason": "wireplumber_required",
                 "values": {"on": true, "off": false, "on_label": "on", "off_label": "off"}
+            },
+            "sink_removal_delay_secs": {
+                "type": "slider",
+                "default_value": default_sink_removal_delay_secs(),
+                "min": 0,
+                "max": 5,
+                "step": 1
             }
         })
     }
@@ -75,6 +103,7 @@ impl GeneralSettings {
                 | "redirect_audio_on_disconnect"
                 | "redirect_audio_on_disconnect_device"
                 | "hide_physical_sink"
+                | "sink_removal_delay_secs"
         )
     }
 
@@ -118,6 +147,14 @@ impl GeneralSettings {
                     false
                 }
             }
+            "sink_removal_delay_secs" => {
+                if let Some(n) = json_val.as_u64().and_then(|n| u32::try_from(n).ok()) {
+                    self.sink_removal_delay_secs = n;
+                    true
+                } else {
+                    false
+                }
+            }
             _ => false,
         }
     }
@@ -145,6 +182,7 @@ mod tests {
             redirect_audio_on_disconnect: false,
             redirect_audio_on_disconnect_device: Some("alsa_output.pci-test".to_owned()),
             hide_physical_sink: true,
+            ..Default::default()
         };
         let j = g.to_json();
         assert!(j["redirect_audio_on_connect"].as_bool() == Some(true));
@@ -216,6 +254,31 @@ mod tests {
     }
 
     #[test]
+    fn sink_removal_delay_defaults_to_two_seconds() {
+        assert_eq!(GeneralSettings::default().sink_removal_delay_secs, 2);
+        let g: GeneralSettings = serde_yaml::from_str("hide_physical_sink: true\n").unwrap();
+        assert_eq!(g.sink_removal_delay_secs, 2);
+    }
+
+    #[test]
+    fn set_field_sink_removal_delay() {
+        let mut g = GeneralSettings::default();
+        assert!(GeneralSettings::is_general_field("sink_removal_delay_secs"));
+        assert!(g.set_field("sink_removal_delay_secs", "0"));
+        assert_eq!(g.sink_removal_delay_secs, 0);
+        assert!(g.set_field("sink_removal_delay_secs", "4"));
+        assert_eq!(g.sink_removal_delay_secs, 4);
+        assert!(!g.set_field("sink_removal_delay_secs", "-1"));
+        assert!(!g.set_field("sink_removal_delay_secs", "\"x\""));
+        assert_eq!(g.sink_removal_delay_secs, 4);
+        assert_eq!(g.to_json()["sink_removal_delay_secs"], 4);
+        assert_eq!(
+            GeneralSettings::settings_config_json()["sink_removal_delay_secs"]["type"],
+            "slider"
+        );
+    }
+
+    #[test]
     fn set_field_device_string_and_null() {
         let mut g = GeneralSettings::default();
         assert!(g.set_field(
@@ -258,6 +321,7 @@ mod tests {
             redirect_audio_on_disconnect: true,
             redirect_audio_on_disconnect_device: Some("alsa_output.test".to_owned()),
             hide_physical_sink: true,
+            ..Default::default()
         };
         original.save_to_file(&path).unwrap();
         let loaded = GeneralSettings::load_from_file(&path);
