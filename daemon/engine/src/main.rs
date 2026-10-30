@@ -735,12 +735,8 @@ async fn forward_events(
             last_radio_status = Some(status.clone());
             if changed {
                 if status.contains("NOT_CONNECTED") || status == "DISCONNECTED" {
-                    schedule_sink_release(
-                        &state_for_events,
-                        &audio_for_task,
-                        &visibility_for_task,
-                    )
-                    .await;
+                    schedule_sink_release(&state_for_events, &audio_for_task, &visibility_for_task)
+                        .await;
                 } else if status == "PAIRED_CONNECTED" || status == "CONNECTED" {
                     SINK_RELEASE.cancel();
                     let needs = audio_for_task.lock().await.is_none();
