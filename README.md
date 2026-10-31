@@ -1,4 +1,4 @@
-# Linux Arctis Manager
+# <img src="./src/linux_arctis_manager/gui/images/app_icon.svg" style="height: 1em; vertical-align: middle;" /> Linux Arctis Manager
 
 An open-source replacement for SteelSeries GG, to manage your Arctis headset on Linux!
 
