@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - New application and system tray icons.
 
+### Fixed
+
+- After a USB glitch the virtual sinks could be destroyed and recreated about once a second until the daemon was restarted: a leftover monitoring task for the same headset kept fighting the new one. The stale task is now stopped when the device reappears.
+
 ## [3.0.0-beta2]
 
 ### Added

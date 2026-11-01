@@ -1313,6 +1313,26 @@ async fn run_main_loop(
                                 iface_s,
                                 name
                             );
+                            // A missed remove event (USB reset) leaves the previous
+                            // task for this device running; abort it so two tasks
+                            // don't keep replacing each other's command channel.
+                            let tracked: Vec<_> = tasks
+                                .iter()
+                                .map(|(k, (pid, iface, _))| (k.clone(), *pid, *iface))
+                                .collect();
+                            for k in superseded_tasks(
+                                &tracked,
+                                &dev.hidraw_path,
+                                dev.pid,
+                                dev.interface_num,
+                            ) {
+                                if let Some((_, _, handle)) = tasks.remove(&k) {
+                                    info!("aborting stale task for {} (superseded)", k.display());
+                                    handle.abort();
+                                    app_state.lock().await.devices.remove(&k);
+                                }
+                            }
+
                             let cfg = Arc::clone(cfg);
                             let sock = helper_sock.clone();
                             let path = dev.hidraw_path.clone();
@@ -1402,10 +1422,51 @@ async fn run_main_loop(
     }
 }
 
+/// Paths of already-tracked tasks that a newly added device supersedes: the
+/// same hidraw path (a missed remove event), or the same PID and interface on
+/// a different path (the node was renumbered across a USB reset). Left alone
+/// they keep running detached and fight over the device's command channel.
+fn superseded_tasks(
+    tasks: &[(PathBuf, u16, Option<u8>)],
+    new_path: &Path,
+    new_pid: u16,
+    new_iface: Option<u8>,
+) -> Vec<PathBuf> {
+    tasks
+        .iter()
+        .filter(|(path, pid, iface)| path == new_path || (*pid == new_pid && *iface == new_iface))
+        .map(|(path, ..)| path.clone())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use device_config::{DeviceSection, DeviceVariant};
+
+    #[test]
+    fn same_path_task_is_superseded() {
+        let tasks = vec![(PathBuf::from("/dev/hidraw5"), 0x227e, Some(3))];
+        let got = superseded_tasks(&tasks, Path::new("/dev/hidraw5"), 0x227e, Some(3));
+        assert_eq!(got, vec![PathBuf::from("/dev/hidraw5")]);
+    }
+
+    #[test]
+    fn renumbered_node_with_same_pid_and_iface_is_superseded() {
+        let tasks = vec![(PathBuf::from("/dev/hidraw7"), 0x227e, Some(3))];
+        let got = superseded_tasks(&tasks, Path::new("/dev/hidraw5"), 0x227e, Some(3));
+        assert_eq!(got, vec![PathBuf::from("/dev/hidraw7")]);
+    }
+
+    #[test]
+    fn other_interface_or_pid_is_kept() {
+        let tasks = vec![
+            (PathBuf::from("/dev/hidraw6"), 0x227e, Some(4)),
+            (PathBuf::from("/dev/hidraw9"), 0x2202, Some(3)),
+        ];
+        let got = superseded_tasks(&tasks, Path::new("/dev/hidraw5"), 0x227e, Some(3));
+        assert!(got.is_empty());
+    }
 
     #[test]
     fn runtime_datadir_overrides_baked_one() {
