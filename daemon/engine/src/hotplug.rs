@@ -126,6 +126,15 @@ fn vid_pid(dev: &Device) -> Option<(u16, u16)> {
             return Some((vid, pid));
         }
     }
+    // `HID_ID` is set by the kernel's uevent, so unlike the parent lookup below
+    // it is still available on `remove` events, when sysfs is already gone.
+    if let Some(ids) = dev
+        .property_value("HID_ID")
+        .and_then(|s| s.to_str())
+        .and_then(parse_hid_id)
+    {
+        return Some(ids);
+    }
     // Fallback: parse VID:PID from the parent HID device's sysname.
     // Kernel names HID devices as "BBBB:VVVV:PPPP.IIII"
     // (e.g. "0003:1038:12E0.0007").  Raw/vendor HID interfaces often lack
@@ -165,6 +174,20 @@ fn usb_interface_num(dev: &Device) -> Option<u8> {
     parse_hex_interface_num(s)
 }
 
+/// Parse udev's `HID_ID` property (`BBBB:VVVVVVVV:PPPPPPPP`, all hex) into
+/// `(vid, pid)`.
+fn parse_hid_id(s: &str) -> Option<(u16, u16)> {
+    let mut parts = s.split(':');
+    let (_bus, vid, pid) = (parts.next()?, parts.next()?, parts.next()?);
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((
+        u16::try_from(u32::from_str_radix(vid, 16).ok()?).ok()?,
+        u16::try_from(u32::from_str_radix(pid, 16).ok()?).ok()?,
+    ))
+}
+
 fn parse_hex_interface_num(s: &str) -> Option<u8> {
     u8::from_str_radix(s.trim(), 16).ok()
 }
@@ -198,6 +221,22 @@ mod tests {
     fn scan_existing_runs_without_error() {
         // No hardware required; only verifies the enumeration path doesn't panic.
         assert!(scan_existing(&[]).is_ok());
+    }
+
+    #[test]
+    fn parse_hid_id_reads_vid_and_pid() {
+        assert_eq!(
+            parse_hid_id("0003:00001038:0000227E"),
+            Some((0x1038, 0x227e))
+        );
+    }
+
+    #[test]
+    fn parse_hid_id_rejects_malformed() {
+        assert_eq!(parse_hid_id("garbage"), None);
+        assert_eq!(parse_hid_id("0003:00001038"), None);
+        assert_eq!(parse_hid_id("0003:zzzz:0000227E"), None);
+        assert_eq!(parse_hid_id("0003:00011038:0000227E"), None);
     }
 
     #[test]
