@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+from contextlib import asynccontextmanager
 from threading import Thread
 
 from dbus_next.aio.message_bus import MessageBus
@@ -22,6 +23,22 @@ from linux_arctis_manager.constants import (
     DBUS_VC_INTERFACE_NAME,
     DBUS_VC_OBJECT_PATH,
 )
+
+@asynccontextmanager
+async def _bus():
+    """Open a session-bus connection and always close it on exit.
+
+    Every ``asyncio.run`` call tears its event loop down, so a connection left
+    open can never be read again; dbus-broker keeps queueing messages for it
+    against the user's quota (#82).
+    """
+    bus = await MessageBus().connect()
+    try:
+        yield bus
+    finally:
+        bus.disconnect()
+        await bus.wait_for_disconnect()
+
 
 # ── V3 EQ translation ─────────────────────────────────────────────────────────
 # V3 daemon uses band_mode ('fixed10'/'parametric10'/'fixed5') and 'preset'.
@@ -249,6 +266,10 @@ class DbusWrapper(QObject):
                 if self._stopping:
                     return
                 self.logger.warning('status signal registration failed, retrying: %s', e)
+            finally:
+                # Don't leak the previous connection when retrying (#82).
+                if bus is not None:
+                    bus.disconnect()
 
             if not self._stopping:
                 await asyncio.sleep(5)
@@ -377,16 +398,16 @@ class DbusWrapper(QObject):
     def request_current_device(qt_signal: SignalInstance) -> None:
         async def _call() -> None:
             try:
-                bus = await MessageBus().connect()
-                reply = await bus.call(Message(
-                    destination=DBUS_BUS_NAME,
-                    path=DBUS_STATUS_OBJECT_PATH,
-                    interface=DBUS_STATUS_INTERFACE_NAME,
-                    member='GetCurrentDevice',
-                    message_type=MessageType.METHOD_CALL,
-                    signature='',
-                    body=[],
-                ))
+                async with _bus() as bus:
+                    reply = await bus.call(Message(
+                        destination=DBUS_BUS_NAME,
+                        path=DBUS_STATUS_OBJECT_PATH,
+                        interface=DBUS_STATUS_INTERFACE_NAME,
+                        member='GetCurrentDevice',
+                        message_type=MessageType.METHOD_CALL,
+                        signature='',
+                        body=[],
+                    ))
                 if reply is not None and reply.message_type != MessageType.ERROR:
                     data = json.loads(reply.body[0])
                     if data:
@@ -401,11 +422,11 @@ class DbusWrapper(QObject):
 
     async def _request_status_async(self):
         try:
-            bus = await MessageBus().connect()
-            introspection = await bus.introspect(DBUS_BUS_NAME, DBUS_STATUS_OBJECT_PATH)
-            obj = bus.get_proxy_object(DBUS_BUS_NAME, DBUS_STATUS_OBJECT_PATH, introspection)
-            iface = obj.get_interface(DBUS_STATUS_INTERFACE_NAME)
-            result = await iface.call_get_status()  # type: ignore
+            async with _bus() as bus:
+                introspection = await bus.introspect(DBUS_BUS_NAME, DBUS_STATUS_OBJECT_PATH)
+                obj = bus.get_proxy_object(DBUS_BUS_NAME, DBUS_STATUS_OBJECT_PATH, introspection)
+                iface = obj.get_interface(DBUS_STATUS_INTERFACE_NAME)
+                result = await iface.call_get_status()  # type: ignore
             self.sig_status.emit(json.loads(result) or {})
         except Exception as e:
             self.logger.warning('request_status failed: %s', e)
@@ -414,16 +435,16 @@ class DbusWrapper(QObject):
     def request_service_version(qt_signal: SignalInstance) -> None:
         async def _call():
             try:
-                bus = await MessageBus().connect()
-                reply = await bus.call(Message(
-                    destination=DBUS_BUS_NAME,
-                    path=DBUS_SETTINGS_OBJECT_PATH,
-                    interface=DBUS_SETTINGS_INTERFACE_NAME,
-                    member='GetVersion',
-                    message_type=MessageType.METHOD_CALL,
-                    signature='',
-                    body=[],
-                ))
+                async with _bus() as bus:
+                    reply = await bus.call(Message(
+                        destination=DBUS_BUS_NAME,
+                        path=DBUS_SETTINGS_OBJECT_PATH,
+                        interface=DBUS_SETTINGS_INTERFACE_NAME,
+                        member='GetVersion',
+                        message_type=MessageType.METHOD_CALL,
+                        signature='',
+                        body=[],
+                    ))
                 if reply is not None and reply.message_type != MessageType.ERROR:
                     qt_signal.emit(reply.body[0])
                 else:
@@ -459,16 +480,16 @@ class DbusWrapper(QObject):
     
     @staticmethod
     async def request_list_options_async(list_name: str, qt_signal: SignalInstance):
-        dbus_bus = await MessageBus().connect()
-        reply = await dbus_bus.call(Message(
-            destination=DBUS_BUS_NAME,
-            path=DBUS_SETTINGS_OBJECT_PATH,
-            interface=DBUS_SETTINGS_INTERFACE_NAME,
-            member='GetListOptions',
-            message_type=MessageType.METHOD_CALL,
-            signature='s',
-            body=[list_name],
-        ))
+        async with _bus() as dbus_bus:
+            reply = await dbus_bus.call(Message(
+                destination=DBUS_BUS_NAME,
+                path=DBUS_SETTINGS_OBJECT_PATH,
+                interface=DBUS_SETTINGS_INTERFACE_NAME,
+                member='GetListOptions',
+                message_type=MessageType.METHOD_CALL,
+                signature='s',
+                body=[list_name],
+            ))
 
         if reply is None:
             DbusWrapper.logger.error('Error getting settings: no reply')
@@ -588,16 +609,16 @@ class DbusWrapper(QObject):
     def apply_factory_eq_preset(preset_idx: int, qt_signal: SignalInstance) -> None:
         async def _call() -> None:
             try:
-                dbus_bus = await MessageBus().connect()
-                reply = await dbus_bus.call(Message(
-                    destination=DBUS_BUS_NAME,
-                    path=DBUS_SETTINGS_OBJECT_PATH,
-                    interface=DBUS_SETTINGS_INTERFACE_NAME,
-                    member='SetSetting',
-                    message_type=MessageType.METHOD_CALL,
-                    signature='ss',
-                    body=['eq_preset', json.dumps(preset_idx)],
-                ))
+                async with _bus() as dbus_bus:
+                    reply = await dbus_bus.call(Message(
+                        destination=DBUS_BUS_NAME,
+                        path=DBUS_SETTINGS_OBJECT_PATH,
+                        interface=DBUS_SETTINGS_INTERFACE_NAME,
+                        member='SetSetting',
+                        message_type=MessageType.METHOD_CALL,
+                        signature='ss',
+                        body=['eq_preset', json.dumps(preset_idx)],
+                    ))
                 ok = (reply is not None
                       and reply.message_type != MessageType.ERROR
                       and bool(reply.body)
@@ -620,12 +641,12 @@ class DbusWrapper(QObject):
     @staticmethod
     async def _eq_call_raw(member: str, signature: str, body: list) -> str | None:
         """Low-level EQ call; returns raw reply string or None on error."""
-        bus = await MessageBus().connect()
-        reply = await bus.call(Message(
-            destination=DBUS_BUS_NAME, path=DBUS_EQ_OBJECT_PATH,
-            interface=DBUS_EQ_INTERFACE_NAME, member=member,
-            message_type=MessageType.METHOD_CALL, signature=signature, body=body,
-        ))
+        async with _bus() as bus:
+            reply = await bus.call(Message(
+                destination=DBUS_BUS_NAME, path=DBUS_EQ_OBJECT_PATH,
+                interface=DBUS_EQ_INTERFACE_NAME, member=member,
+                message_type=MessageType.METHOD_CALL, signature=signature, body=body,
+            ))
         if reply and reply.message_type != MessageType.ERROR and reply.body:
             return reply.body[0]
         return None
@@ -665,16 +686,16 @@ class DbusWrapper(QObject):
     async def _call_nc_async(member: str, signature: str, body: list,
                              qt_signal: SignalInstance | None = None, is_json: bool = False) -> None:
         try:
-            bus = await MessageBus().connect()
-            reply = await bus.call(Message(
-                destination=DBUS_BUS_NAME,
-                path=DBUS_NC_OBJECT_PATH,
-                interface=DBUS_NC_INTERFACE_NAME,
-                member=member,
-                message_type=MessageType.METHOD_CALL,
-                signature=signature,
-                body=body,
-            ))
+            async with _bus() as bus:
+                reply = await bus.call(Message(
+                    destination=DBUS_BUS_NAME,
+                    path=DBUS_NC_OBJECT_PATH,
+                    interface=DBUS_NC_INTERFACE_NAME,
+                    member=member,
+                    message_type=MessageType.METHOD_CALL,
+                    signature=signature,
+                    body=body,
+                ))
             if qt_signal is not None and reply is not None and reply.message_type != MessageType.ERROR:
                 result = json.loads(reply.body[0]) if is_json else reply.body[0]
                 qt_signal.emit(result)
@@ -795,16 +816,16 @@ class DbusWrapper(QObject):
     async def _call_vc_async(member: str, signature: str, body: list,
                              qt_signal: SignalInstance | None = None, is_json: bool = False) -> None:
         try:
-            bus = await MessageBus().connect()
-            reply = await bus.call(Message(
-                destination=DBUS_BUS_NAME,
-                path=DBUS_VC_OBJECT_PATH,
-                interface=DBUS_VC_INTERFACE_NAME,
-                member=member,
-                message_type=MessageType.METHOD_CALL,
-                signature=signature,
-                body=body,
-            ))
+            async with _bus() as bus:
+                reply = await bus.call(Message(
+                    destination=DBUS_BUS_NAME,
+                    path=DBUS_VC_OBJECT_PATH,
+                    interface=DBUS_VC_INTERFACE_NAME,
+                    member=member,
+                    message_type=MessageType.METHOD_CALL,
+                    signature=signature,
+                    body=body,
+                ))
             if qt_signal is not None and reply is not None and reply.message_type != MessageType.ERROR:
                 result = json.loads(reply.body[0]) if is_json else reply.body[0]
                 qt_signal.emit(result)
@@ -822,14 +843,14 @@ class DbusWrapper(QObject):
     
     @staticmethod
     async def change_setting_async(name: str, value: int|bool|str):
-        dbus_bus = await MessageBus().connect()
-        await dbus_bus.call(Message(
-            destination=DBUS_BUS_NAME,
-            path=DBUS_SETTINGS_OBJECT_PATH,
-            interface=DBUS_SETTINGS_INTERFACE_NAME,
-            member='SetSetting',
-            message_type=MessageType.METHOD_CALL,
-            signature='ss',
-            body=[name, json.dumps(value)],
-        ))
+        async with _bus() as dbus_bus:
+            await dbus_bus.call(Message(
+                destination=DBUS_BUS_NAME,
+                path=DBUS_SETTINGS_OBJECT_PATH,
+                interface=DBUS_SETTINGS_INTERFACE_NAME,
+                member='SetSetting',
+                message_type=MessageType.METHOD_CALL,
+                signature='ss',
+                body=[name, json.dumps(value)],
+            ))
     

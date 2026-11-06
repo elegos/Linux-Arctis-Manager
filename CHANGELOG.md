@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The GUI no longer leaks a D-Bus connection on every status poll and one-shot call. Over hours the leaked connections could exhaust the session bus quota and make dbus-broker disconnect unrelated apps (#82).
 - After a USB glitch the virtual sinks could be destroyed and recreated about once a second until the daemon was restarted: a leftover monitoring task for the same headset kept fighting the new one. The stale task is now stopped when the device reappears.
 - Unplugging a headset or dongle is now always noticed: its removal was ignored on systems where udev doesn't expose the vendor/product IDs, so the device's task and virtual sinks lingered until the daemon restarted.
 - Unplugging a HID device the daemon does not manage (e.g. the headset's own USB-C charging cable) no longer removes the virtual sinks while the dongle is still connected (#81).

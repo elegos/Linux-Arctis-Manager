@@ -8,6 +8,8 @@ import json
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from dbus_next.constants import MessageType
+
 from PySide6.QtWidgets import QApplication
 
 # One QApplication for the whole module (required for QObject subclasses).
@@ -168,3 +170,104 @@ def test_start_creates_periodic_refresh_timer():
     assert timer.interval() > 0, "_refresh_timer interval must be positive"
     # Clean up
     timer.stop()
+
+
+# ── bus connection cleanup (#82) ─────────────────────────────────────────────
+
+
+def _closable_bus():
+    """Mock bus whose disconnect()/wait_for_disconnect() can be asserted."""
+    bus = MagicMock()
+    bus.disconnect = MagicMock()
+    bus.wait_for_disconnect = AsyncMock()
+    bus.call = AsyncMock(return_value=MagicMock(message_type=MessageType.ERROR, body=[]))
+    bus.introspect = AsyncMock(return_value=MagicMock())
+    return bus
+
+
+def _patched_bus(bus):
+    patcher = patch("linux_arctis_manager.gui.dbus_wrapper.MessageBus")
+    MockBus = patcher.start()
+    MockBus.return_value.connect = AsyncMock(return_value=bus)
+    return patcher
+
+
+def test_bus_context_disconnects_on_normal_exit():
+    from linux_arctis_manager.gui.dbus_wrapper import _bus
+    bus = _closable_bus()
+    patcher = _patched_bus(bus)
+    try:
+        async def go():
+            async with _bus() as b:
+                assert b is bus
+                bus.disconnect.assert_not_called()
+        _run(go())
+    finally:
+        patcher.stop()
+
+    bus.disconnect.assert_called_once()
+    bus.wait_for_disconnect.assert_awaited_once()
+
+
+def test_bus_context_disconnects_when_body_raises():
+    from linux_arctis_manager.gui.dbus_wrapper import _bus
+    bus = _closable_bus()
+    patcher = _patched_bus(bus)
+    try:
+        async def go():
+            async with _bus():
+                raise RuntimeError("boom")
+        try:
+            _run(go())
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("exception was swallowed")
+    finally:
+        patcher.stop()
+
+    bus.disconnect.assert_called_once()
+
+
+def test_request_status_disconnects_bus():
+    bus = _closable_bus()
+    iface = AsyncMock()
+    iface.call_get_status = AsyncMock(return_value="{}")
+    bus.get_proxy_object = MagicMock(return_value=MagicMock(get_interface=MagicMock(return_value=iface)))
+    patcher = _patched_bus(bus)
+    try:
+        _run(_make_wrapper()._request_status_async())
+    finally:
+        patcher.stop()
+    bus.disconnect.assert_called_once()
+
+
+def test_request_status_disconnects_bus_on_error():
+    bus = _closable_bus()
+    bus.introspect = AsyncMock(side_effect=RuntimeError("no daemon"))
+    patcher = _patched_bus(bus)
+    try:
+        _run(_make_wrapper()._request_status_async())
+    finally:
+        patcher.stop()
+    bus.disconnect.assert_called_once()
+
+
+def test_one_shot_calls_disconnect_bus():
+    """Every fire-and-forget DbusWrapper call must release its connection."""
+    from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
+    calls = [
+        lambda: DbusWrapper.change_setting_async("x", 1),
+        lambda: DbusWrapper._eq_call_raw("M", "", []),
+        lambda: DbusWrapper._call_nc_async("M", "", []),
+        lambda: DbusWrapper._call_vc_async("M", "", []),
+        lambda: DbusWrapper.request_list_options_async("l", MagicMock()),
+    ]
+    for make in calls:
+        bus = _closable_bus()
+        patcher = _patched_bus(bus)
+        try:
+            _run(make())
+        finally:
+            patcher.stop()
+        bus.disconnect.assert_called_once()
