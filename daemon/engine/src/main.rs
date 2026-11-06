@@ -446,11 +446,12 @@ async fn run_device(
                 match audio::setup_sinks().await {
                     Ok(setup) => {
                         if let (Some(game), Some(chat)) = chatmix_from_events(&init_events) {
-                            audio::set_chatmix(game, chat).await;
+                            audio::set_chatmix(&setup, game, chat).await;
                         }
                         let sink_name = setup.physical_sink.clone();
                         *guard = Some(setup);
                         drop(guard);
+                        audio::restore_chat_streams().await;
                         maybe_start_hiding(&app_state, &visibility_shared, sink_name).await;
                     }
                     Err(e) => warn!("audio setup failed for {path_str}: {e}"),
@@ -745,7 +746,13 @@ async fn forward_events(
                             Ok(s) => {
                                 info!("headset wireless on: virtual sinks created");
                                 let sink_name = s.physical_sink.clone();
+                                // The loopbacks were recreated at 100 %, so
+                                // re-apply the last known dial position.
+                                if let Some((g, c)) = last_chatmix {
+                                    audio::set_chatmix(&s, g, c).await;
+                                }
                                 *audio_for_task.lock().await = Some(s);
+                                audio::restore_chat_streams().await;
                                 maybe_start_hiding(
                                     &state_for_events,
                                     &visibility_for_task,
@@ -792,7 +799,9 @@ async fn forward_events(
             if let (Some(g), Some(c)) = (game, chat) {
                 if last_chatmix != Some((g, c)) {
                     last_chatmix = Some((g, c));
-                    audio::set_chatmix(g, c).await;
+                    if let Some(setup) = audio_for_task.lock().await.as_ref() {
+                        audio::set_chatmix(setup, g, c).await;
+                    }
                 }
             }
         }
@@ -1355,8 +1364,22 @@ async fn run_main_loop(
                             "hotplug remove: {} (PID={:#06x})",
                             dev.hidraw_path.display(), dev.pid
                         );
-                        if let Some((_, _, handle)) = tasks.remove(&dev.hidraw_path) {
-                            handle.abort();
+                        if is_managed_removal(tasks.keys(), &dev.hidraw_path) {
+                            if let Some((_, _, handle)) = tasks.remove(&dev.hidraw_path) {
+                                handle.abort();
+                            }
+                        } else {
+                            // Not one of our device tasks (e.g. the headset's own USB
+                            // port when the charging cable is unplugged, or any other
+                            // HID device).  The dongle is still connected, so leave the
+                            // virtual sinks and audio chains alone.  Caveat: if a
+                            // config ever matches that port's PID it gets a task, and
+                            // unplugging the cable tears everything down again.
+                            info!(
+                                "hotplug remove: {} not managed, ignoring",
+                                dev.hidraw_path.display()
+                            );
+                            continue;
                         }
                         // The aborted task may not have reached its own teardown;
                         // take and destroy the sinks here unconditionally.
@@ -1439,10 +1462,36 @@ fn superseded_tasks(
         .collect()
 }
 
+/// A hotplug removal only concerns us if a device task exists for that path.
+/// Other HID devices (or a path already superseded by a newer task) must not
+/// tear down the shared virtual sinks.
+fn is_managed_removal<'a>(mut tracked: impl Iterator<Item = &'a PathBuf>, removed: &Path) -> bool {
+    tracked.any(|p| p == removed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use device_config::{DeviceSection, DeviceVariant};
+
+    #[test]
+    fn removal_of_tracked_path_is_managed() {
+        let tracked = [PathBuf::from("/dev/hidraw5")];
+        assert!(is_managed_removal(
+            tracked.iter(),
+            Path::new("/dev/hidraw5")
+        ));
+    }
+
+    #[test]
+    fn removal_of_unknown_path_is_ignored() {
+        let tracked = [PathBuf::from("/dev/hidraw5")];
+        assert!(!is_managed_removal(
+            tracked.iter(),
+            Path::new("/dev/hidraw9")
+        ));
+        assert!(!is_managed_removal([].iter(), Path::new("/dev/hidraw5")));
+    }
 
     #[test]
     fn same_path_task_is_superseded() {

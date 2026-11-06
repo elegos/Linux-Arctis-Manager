@@ -290,6 +290,11 @@ async fn ensure_sink(
 
     let null_idx = if virtual_sink_exists(name).await {
         info!("audio: {name} null-sink already present, reusing");
+        // Older versions stored the ChatMix split in the sink volume; the split
+        // now lives on the loopback, so reset it to avoid double attenuation.
+        if let Err(e) = pactl(&["set-sink-volume", name, "100%"]).await {
+            warn!("audio: reset volume of {name}: {e}");
+        }
         // Best-effort: retrieve the module index for later unload; 0 if not found.
         let mods = list_short_modules().await;
         find_in_modules(&mods, "module-null-sink", &format!("sink_name={name}")).unwrap_or(0)
@@ -331,18 +336,62 @@ pub async fn unload_module_by_id(id: u32) -> Result<(), AudioError> {
     pactl(&["unload-module", &id.to_string()]).await.map(|_| ())
 }
 
-/// Update the game/chat volume split on the virtual sinks.
-/// Values are 0–100.
-pub async fn set_chatmix(game: u8, chat: u8) {
-    let game_pct = format!("{game}%");
-    let chat_pct = format!("{chat}%");
+/// Update the game/chat volume split.  Values are 0–100.
+///
+/// The split is applied to the loopback streams (`<sink>.monitor` → physical
+/// sink), not to the virtual sinks themselves.  Arctis_Media is usually the
+/// default sink, so changing its volume would overwrite the user's own volume
+/// setting and make the desktop (e.g. Plasma) pop up a volume OSD on every
+/// dial movement.  The loopbacks are identified by the module ids in `setup`
+/// (module args are not reliably preserved by PipeWire).
+pub async fn set_chatmix(setup: &AudioSetup, game: u8, chat: u8) {
+    let inputs = match pactl(&["--format=json", "list", "sink-inputs"]).await {
+        Ok(out) => parse_sink_input_owners_json(&out),
+        Err(e) => {
+            warn!("audio: list sink-inputs: {e}");
+            return;
+        }
+    };
+    for (sink, module, value) in [
+        (MEDIA_SINK, setup.media_loopback, game),
+        (CHAT_SINK, setup.chat_loopback, chat),
+    ] {
+        let Some(idx) = loopback_sink_input(&inputs, module) else {
+            warn!(
+                "audio: no loopback sink-input for {sink} (module {module}), chatmix not applied"
+            );
+            continue;
+        };
+        let pct = format!("{value}%");
+        if let Err(e) = pactl(&["set-sink-input-volume", &idx.to_string(), &pct]).await {
+            warn!("audio: chatmix volume for {sink}: {e}");
+        }
+    }
+}
 
-    if let Err(e) = pactl(&["set-sink-volume", MEDIA_SINK, &game_pct]).await {
-        warn!("audio: set-sink-volume {MEDIA_SINK}: {e}");
-    }
-    if let Err(e) = pactl(&["set-sink-volume", CHAT_SINK, &chat_pct]).await {
-        warn!("audio: set-sink-volume {CHAT_SINK}: {e}");
-    }
+/// Sink-input index owned by loopback module `module`.
+fn loopback_sink_input(inputs: &[(u32, u32)], module: u32) -> Option<u32> {
+    inputs
+        .iter()
+        .find(|(_, owner)| *owner == module)
+        .map(|(idx, _)| *idx)
+}
+
+/// `(sink-input index, owner module)` from `pactl --format=json list sink-inputs`.
+fn parse_sink_input_owners_json(json: &str) -> Vec<(u32, u32)> {
+    let Ok(serde_json::Value::Array(items)) = serde_json::from_str(json) else {
+        return vec![];
+    };
+    items
+        .iter()
+        .filter_map(|i| {
+            let idx = u32::try_from(i["index"].as_u64()?).ok()?;
+            let owner = i["owner_module"]
+                .as_u64()
+                .or_else(|| i["owner_module"].as_str()?.parse().ok())?;
+            Some((idx, u32::try_from(owner).ok()?))
+        })
+        .collect()
 }
 
 /// Move all sink inputs attached to `source_sink` to `target_sink` (best-effort).
@@ -395,9 +444,145 @@ async fn move_sink_inputs_from(source_sink: &str, target_sink: &str) {
     }
 }
 
+// ── Chat stream restore ───────────────────────────────────────────────────────
+
+/// A stream that was playing on Arctis_Chat.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ChatApp {
+    name: String,
+    binary: Option<String>,
+}
+
+/// A sink-input as listed by `pactl --format=json list sink-inputs`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SinkInput {
+    index: u32,
+    sink: u32,
+    app: Option<ChatApp>,
+}
+
+/// Streams that were playing on Arctis_Chat when the virtual sinks were last
+/// torn down.  When the sinks disappear, PipeWire moves those streams
+/// elsewhere, and WirePlumber does not move an already running stream back
+/// once Arctis_Chat reappears, so chat apps (Discord, …) would stay on
+/// Arctis_Media and the ChatMix dial would seem to do nothing.
+static CHAT_APPS: std::sync::Mutex<Vec<ChatApp>> = std::sync::Mutex::new(Vec::new());
+
+/// Set by `move_virtual_sink_inputs_to` once it has saved the chat streams:
+/// by the time `teardown_sinks` runs, Arctis_Chat is empty and must not
+/// overwrite that snapshot.
+static CHAT_APPS_SAVED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn parse_sink_inputs_json(json: &str) -> Vec<SinkInput> {
+    let Ok(serde_json::Value::Array(items)) = serde_json::from_str(json) else {
+        return vec![];
+    };
+    items
+        .iter()
+        .filter_map(|i| {
+            let index = u32::try_from(i["index"].as_u64()?).ok()?;
+            let sink = u32::try_from(i["sink"].as_u64()?).ok()?;
+            let props = &i["properties"];
+            let app = props["application.name"].as_str().map(|name| ChatApp {
+                name: name.to_owned(),
+                binary: props["application.process.binary"]
+                    .as_str()
+                    .map(str::to_owned),
+            });
+            Some(SinkInput { index, sink, app })
+        })
+        .collect()
+}
+
+/// Same application: names equal, and binaries equal when both are known.
+fn same_app(a: &ChatApp, b: &ChatApp) -> bool {
+    a.name == b.name
+        && match (&a.binary, &b.binary) {
+            (Some(x), Some(y)) => x == y,
+            _ => true,
+        }
+}
+
+/// Indices of the sink-inputs outside `chat_idx` that belong to `apps`.
+fn streams_to_restore(inputs: &[SinkInput], chat_idx: u32, apps: &[ChatApp]) -> Vec<u32> {
+    inputs
+        .iter()
+        .filter(|i| i.sink != chat_idx)
+        .filter(|i| {
+            i.app
+                .as_ref()
+                .is_some_and(|a| apps.iter().any(|k| same_app(k, a)))
+        })
+        .map(|i| i.index)
+        .collect()
+}
+
+async fn sink_index(name: &str) -> Option<u32> {
+    let out = pactl(&["list", "short", "sinks"]).await.ok()?;
+    out.lines().find_map(|l| {
+        let mut cols = l.split('\t');
+        let idx = cols.next()?;
+        (cols.next()? == name).then(|| idx.parse().ok()).flatten()
+    })
+}
+
+async fn list_sink_inputs() -> Vec<SinkInput> {
+    match pactl(&["--format=json", "list", "sink-inputs"]).await {
+        Ok(out) => parse_sink_inputs_json(&out),
+        Err(e) => {
+            warn!("audio: list sink-inputs: {e}");
+            vec![]
+        }
+    }
+}
+
+/// Remember which applications currently play on Arctis_Chat.  The list is
+/// replaced whenever Arctis_Chat exists (even if empty), so an app the user
+/// moved away on purpose is not pushed back later.
+async fn remember_chat_streams() {
+    let Some(chat_idx) = sink_index(CHAT_SINK).await else {
+        return;
+    };
+    let mut apps: Vec<ChatApp> = Vec::new();
+    for app in list_sink_inputs()
+        .await
+        .into_iter()
+        .filter(|i| i.sink == chat_idx)
+        .filter_map(|i| i.app)
+    {
+        if !apps.contains(&app) {
+            apps.push(app);
+        }
+    }
+    info!("audio: remembering chat streams {apps:?}");
+    *CHAT_APPS.lock().unwrap_or_else(|e| e.into_inner()) = apps;
+}
+
+/// Move the streams remembered by `remember_chat_streams` back to Arctis_Chat.
+/// Call this after `setup_sinks`.
+pub async fn restore_chat_streams() {
+    CHAT_APPS_SAVED.store(false, std::sync::atomic::Ordering::SeqCst);
+    let apps = CHAT_APPS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    if apps.is_empty() {
+        return;
+    }
+    let Some(chat_idx) = sink_index(CHAT_SINK).await else {
+        return;
+    };
+    for idx in streams_to_restore(&list_sink_inputs().await, chat_idx, &apps) {
+        if let Err(e) = pactl(&["move-sink-input", &idx.to_string(), CHAT_SINK]).await {
+            warn!("audio: move-sink-input {idx} → {CHAT_SINK}: {e}");
+        } else {
+            info!("audio: restored sink-input {idx} → {CHAT_SINK}");
+        }
+    }
+}
+
 /// Move all sink inputs from both Arctis virtual sinks to `target_sink`.
 /// Call this before `teardown_sinks` so active streams survive wireless disconnect.
 pub async fn move_virtual_sink_inputs_to(target_sink: &str) {
+    remember_chat_streams().await;
+    CHAT_APPS_SAVED.store(true, std::sync::atomic::Ordering::SeqCst);
     for source in [MEDIA_SINK, CHAT_SINK] {
         move_sink_inputs_from(source, target_sink).await;
     }
@@ -405,6 +590,11 @@ pub async fn move_virtual_sink_inputs_to(target_sink: &str) {
 
 /// Unload all modules created by `setup_sinks`.
 pub async fn teardown_sinks(setup: AudioSetup) {
+    // Skip if the streams were already saved (and moved away) by
+    // `move_virtual_sink_inputs_to`; Arctis_Chat is empty by now.
+    if !CHAT_APPS_SAVED.load(std::sync::atomic::Ordering::SeqCst) {
+        remember_chat_streams().await;
+    }
     for id in [
         setup.media_loopback,
         setup.chat_loopback,
@@ -604,6 +794,110 @@ async fn try_find_physical_source() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn app(name: &str, bin: Option<&str>) -> ChatApp {
+        ChatApp {
+            name: name.into(),
+            binary: bin.map(Into::into),
+        }
+    }
+
+    #[test]
+    fn parse_sink_input_owners_json_skips_streams_without_module() {
+        let json = r#"[
+            {"index": 7, "owner_module": 536870917},
+            {"index": 8, "owner_module": "536870919"},
+            {"index": 9}
+        ]"#;
+        assert_eq!(
+            parse_sink_input_owners_json(json),
+            vec![(7, 536870917), (8, 536870919)]
+        );
+    }
+
+    #[test]
+    fn parse_sink_inputs_json_reads_index_sink_and_app() {
+        let json = r#"[
+            {"index": 12, "sink": 3, "properties": {"application.name": "vesktop", "application.process.binary": "vesktop"}},
+            {"index": 13, "sink": 4, "properties": {}},
+            {"index": "bad", "sink": 4, "properties": {}}
+        ]"#;
+        assert_eq!(
+            parse_sink_inputs_json(json),
+            vec![
+                SinkInput {
+                    index: 12,
+                    sink: 3,
+                    app: Some(app("vesktop", Some("vesktop")))
+                },
+                SinkInput {
+                    index: 13,
+                    sink: 4,
+                    app: None
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_sink_inputs_json_tolerates_garbage() {
+        assert!(parse_sink_inputs_json("not json").is_empty());
+    }
+
+    #[test]
+    fn loopback_sink_input_matches_owner_module() {
+        let inputs = [(7, 100), (8, 200)];
+        assert_eq!(loopback_sink_input(&inputs, 200), Some(8));
+        assert_eq!(loopback_sink_input(&inputs, 300), None);
+    }
+
+    #[test]
+    fn same_app_requires_matching_binary_when_known() {
+        assert!(same_app(
+            &app("Chromium", Some("chrome")),
+            &app("Chromium", Some("chrome"))
+        ));
+        assert!(!same_app(
+            &app("Chromium", Some("chrome")),
+            &app("Chromium", Some("other"))
+        ));
+        assert!(same_app(
+            &app("Chromium", None),
+            &app("Chromium", Some("chrome"))
+        ));
+        assert!(!same_app(&app("a", None), &app("b", None)));
+    }
+
+    #[test]
+    fn streams_to_restore_skips_chat_sink_and_other_apps() {
+        let inputs = vec![
+            SinkInput {
+                index: 1,
+                sink: 5,
+                app: Some(app("vesktop", None)),
+            },
+            SinkInput {
+                index: 2,
+                sink: 9,
+                app: Some(app("vesktop", None)),
+            },
+            SinkInput {
+                index: 3,
+                sink: 9,
+                app: Some(app("spotify", None)),
+            },
+            SinkInput {
+                index: 4,
+                sink: 9,
+                app: None,
+            },
+        ];
+        assert_eq!(
+            streams_to_restore(&inputs, 5, &[app("vesktop", None)]),
+            vec![2]
+        );
+        assert!(streams_to_restore(&inputs, 5, &[]).is_empty());
+    }
 
     #[test]
     fn audio_error_display() {

@@ -14,11 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - New application and system tray icons.
+- The ChatMix dial now sets the volume of the `Arctis_Media`/`Arctis_Chat` loopback streams instead of the virtual sinks, so it no longer overwrites the default output volume or triggers the desktop volume OSD on every step. Existing virtual sinks are reset to 100% once (#81).
 
 ### Fixed
 
 - After a USB glitch the virtual sinks could be destroyed and recreated about once a second until the daemon was restarted: a leftover monitoring task for the same headset kept fighting the new one. The stale task is now stopped when the device reappears.
 - Unplugging a headset or dongle is now always noticed: its removal was ignored on systems where udev doesn't expose the vendor/product IDs, so the device's task and virtual sinks lingered until the daemon restarted.
+- Unplugging a HID device the daemon does not manage (e.g. the headset's own USB-C charging cable) no longer removes the virtual sinks while the dongle is still connected (#81).
+- Streams that were playing on `Arctis_Chat` are moved back to it when the virtual sinks are recreated after a headset reconnect (#81).
 
 ## [3.0.0-beta2]
 
