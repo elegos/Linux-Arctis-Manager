@@ -5,7 +5,6 @@ from contextlib import asynccontextmanager
 from threading import Thread
 
 from dbus_next.aio.message_bus import MessageBus
-from dbus_next.aio.proxy_object import ProxyInterface
 from dbus_next.constants import MessageType
 from dbus_next.message import Message
 from PySide6.QtCore import QObject, Signal, SignalInstance
@@ -182,26 +181,11 @@ class DbusWrapper(QObject):
         self._vc_signal_loop: asyncio.AbstractEventLoop|None = None
         self._stop_vc_signal_future: asyncio.Future|None = None
 
-        self._status_iface: ProxyInterface|None = None
-        self._settings_iface: ProxyInterface|None = None
-
-    async def status_iface(self):
-        if not self._status_iface:
-            bus = await MessageBus().connect()
-            introspection = await bus.introspect(DBUS_BUS_NAME, DBUS_STATUS_OBJECT_PATH)
-            obj = bus.get_proxy_object(DBUS_BUS_NAME, DBUS_STATUS_OBJECT_PATH, introspection)
-            self._status_iface = obj.get_interface(DBUS_STATUS_INTERFACE_NAME)
-
-        return self._status_iface
-
-    async def settings_iface(self):
-        if not self._settings_iface:
-            bus = await MessageBus().connect()
-            introspection = await bus.introspect(DBUS_BUS_NAME, DBUS_SETTINGS_OBJECT_PATH)
-            obj = bus.get_proxy_object(DBUS_BUS_NAME, DBUS_SETTINGS_OBJECT_PATH, introspection)
-            self._settings_iface = obj.get_interface(DBUS_SETTINGS_INTERFACE_NAME)
-
-        return self._settings_iface
+    @staticmethod
+    async def _settings_iface(bus: MessageBus):
+        introspection = await bus.introspect(DBUS_BUS_NAME, DBUS_SETTINGS_OBJECT_PATH)
+        obj = bus.get_proxy_object(DBUS_BUS_NAME, DBUS_SETTINGS_OBJECT_PATH, introspection)
+        return obj.get_interface(DBUS_SETTINGS_INTERFACE_NAME)
 
     def start(self):
         self.request_status()
@@ -279,106 +263,107 @@ class DbusWrapper(QObject):
             def callback(settings_json: str) -> None:
                 self.sig_settings.emit(json.loads(settings_json) or {})
 
-            (await self.settings_iface()).on_settings_changed(callback) # type: ignore
+            async with _bus() as bus:
+                (await self._settings_iface(bus)).on_settings_changed(callback) # type: ignore
 
-            self._settings_signal_loop = asyncio.get_running_loop()
-            self._stop_settings_signal_future = self._settings_signal_loop.create_future()
-            await self._stop_settings_signal_future
+                self._settings_signal_loop = asyncio.get_running_loop()
+                self._stop_settings_signal_future = self._settings_signal_loop.create_future()
+                await self._stop_settings_signal_future
         except Exception as e:
             self.logger.warning('settings signal registration failed: %s', e)
 
     async def _register_vc_signals(self):
         try:
-            bus = await MessageBus().connect()
-            introspection = await bus.introspect(DBUS_BUS_NAME, DBUS_VC_OBJECT_PATH)
-            obj = bus.get_proxy_object(DBUS_BUS_NAME, DBUS_VC_OBJECT_PATH, introspection)
-            iface = obj.get_interface(DBUS_VC_INTERFACE_NAME)
+            async with _bus() as bus:
+                introspection = await bus.introspect(DBUS_BUS_NAME, DBUS_VC_OBJECT_PATH)
+                obj = bus.get_proxy_object(DBUS_BUS_NAME, DBUS_VC_OBJECT_PATH, introspection)
+                iface = obj.get_interface(DBUS_VC_INTERFACE_NAME)
 
-            def on_dl_progress(message: str) -> None:
-                self.sig_download_progress.emit(message)
+                def on_dl_progress(message: str) -> None:
+                    self.sig_download_progress.emit(message)
 
-            def on_dl_complete(result_json: str) -> None:
-                try:
-                    data = json.loads(result_json)
-                    self.sig_download_complete.emit(
-                        data.get('success', False),
-                        data.get('message', ''),
-                        data.get('name', ''),
-                    )
-                except Exception:
-                    self.sig_download_complete.emit(False, result_json, '')
+                def on_dl_complete(result_json: str) -> None:
+                    try:
+                        data = json.loads(result_json)
+                        self.sig_download_complete.emit(
+                            data.get('success', False),
+                            data.get('message', ''),
+                            data.get('name', ''),
+                        )
+                    except Exception:
+                        self.sig_download_complete.emit(False, result_json, '')
 
-            def on_base_progress(message: str) -> None:
-                self.sig_base_model_progress.emit(message)
+                def on_base_progress(message: str) -> None:
+                    self.sig_base_model_progress.emit(message)
 
-            def on_base_complete(result_json: str) -> None:
-                try:
-                    data = json.loads(result_json)
-                    self.sig_base_model_complete.emit(
-                        data.get('success', False), data.get('message', ''))
-                except Exception:
-                    self.sig_base_model_complete.emit(False, result_json)
+                def on_base_complete(result_json: str) -> None:
+                    try:
+                        data = json.loads(result_json)
+                        self.sig_base_model_complete.emit(
+                            data.get('success', False), data.get('message', ''))
+                    except Exception:
+                        self.sig_base_model_complete.emit(False, result_json)
 
-            def on_export_deps_progress(message: str) -> None:
-                self.sig_export_deps_progress.emit(message)
+                def on_export_deps_progress(message: str) -> None:
+                    self.sig_export_deps_progress.emit(message)
 
-            def on_export_deps_complete(result_json: str) -> None:
-                try:
-                    data = json.loads(result_json)
-                    self.sig_export_deps_complete.emit(
-                        data.get('success', False), data.get('message', ''))
-                except Exception:
-                    self.sig_export_deps_complete.emit(False, result_json)
+                def on_export_deps_complete(result_json: str) -> None:
+                    try:
+                        data = json.loads(result_json)
+                        self.sig_export_deps_complete.emit(
+                            data.get('success', False), data.get('message', ''))
+                    except Exception:
+                        self.sig_export_deps_complete.emit(False, result_json)
 
-            def on_export_progress(message: str) -> None:
-                self.sig_export_progress.emit(message)
+                def on_export_progress(message: str) -> None:
+                    self.sig_export_progress.emit(message)
 
-            def on_export_complete(result_json: str) -> None:
-                try:
-                    data = json.loads(result_json)
-                    self.sig_export_complete.emit(
-                        data.get('success', False),
-                        data.get('message', ''),
-                        data.get('name', ''),
-                    )
-                except Exception:
-                    self.sig_export_complete.emit(False, result_json, '')
+                def on_export_complete(result_json: str) -> None:
+                    try:
+                        data = json.loads(result_json)
+                        self.sig_export_complete.emit(
+                            data.get('success', False),
+                            data.get('message', ''),
+                            data.get('name', ''),
+                        )
+                    except Exception:
+                        self.sig_export_complete.emit(False, result_json, '')
 
-            def on_cudnn_install_progress(message: str) -> None:
-                self.sig_cudnn_install_progress.emit(message)
+                def on_cudnn_install_progress(message: str) -> None:
+                    self.sig_cudnn_install_progress.emit(message)
 
-            def on_cudnn_install_complete(result_json: str) -> None:
-                try:
-                    data = json.loads(result_json)
-                    self.sig_cudnn_install_complete.emit(
-                        data.get('success', False), data.get('message', ''))
-                except Exception:
-                    self.sig_cudnn_install_complete.emit(False, result_json)
+                def on_cudnn_install_complete(result_json: str) -> None:
+                    try:
+                        data = json.loads(result_json)
+                        self.sig_cudnn_install_complete.emit(
+                            data.get('success', False), data.get('message', ''))
+                    except Exception:
+                        self.sig_cudnn_install_complete.emit(False, result_json)
 
-            def on_live_chain_error(message: str) -> None:
-                self.sig_live_chain_error.emit(message)
+                def on_live_chain_error(message: str) -> None:
+                    self.sig_live_chain_error.emit(message)
 
-            # No InstallProgress/InstallComplete subscription: the v3 Rust
-            # daemon has no runtime Python deps to install, so VcInterface
-            # doesn't declare those signals — dbus_next raises AttributeError
-            # for an on_<signal> accessor the introspected interface doesn't
-            # have, which would abort this whole registration (including the
-            # download signals below) before it got here.
-            iface.on_download_progress(on_dl_progress)                   # type: ignore
-            iface.on_download_complete(on_dl_complete)                   # type: ignore
-            iface.on_base_model_progress(on_base_progress)               # type: ignore
-            iface.on_base_model_complete(on_base_complete)               # type: ignore
-            iface.on_export_deps_progress(on_export_deps_progress)       # type: ignore
-            iface.on_export_deps_complete(on_export_deps_complete)       # type: ignore
-            iface.on_export_progress(on_export_progress)                 # type: ignore
-            iface.on_export_complete(on_export_complete)                 # type: ignore
-            iface.on_cudnn_install_progress(on_cudnn_install_progress)   # type: ignore
-            iface.on_cudnn_install_complete(on_cudnn_install_complete)   # type: ignore
-            iface.on_live_chain_error(on_live_chain_error)               # type: ignore
+                # No InstallProgress/InstallComplete subscription: the v3 Rust
+                # daemon has no runtime Python deps to install, so VcInterface
+                # doesn't declare those signals — dbus_next raises AttributeError
+                # for an on_<signal> accessor the introspected interface doesn't
+                # have, which would abort this whole registration (including the
+                # download signals below) before it got here.
+                iface.on_download_progress(on_dl_progress)                   # type: ignore
+                iface.on_download_complete(on_dl_complete)                   # type: ignore
+                iface.on_base_model_progress(on_base_progress)               # type: ignore
+                iface.on_base_model_complete(on_base_complete)               # type: ignore
+                iface.on_export_deps_progress(on_export_deps_progress)       # type: ignore
+                iface.on_export_deps_complete(on_export_deps_complete)       # type: ignore
+                iface.on_export_progress(on_export_progress)                 # type: ignore
+                iface.on_export_complete(on_export_complete)                 # type: ignore
+                iface.on_cudnn_install_progress(on_cudnn_install_progress)   # type: ignore
+                iface.on_cudnn_install_complete(on_cudnn_install_complete)   # type: ignore
+                iface.on_live_chain_error(on_live_chain_error)               # type: ignore
 
-            self._vc_signal_loop = asyncio.get_running_loop()
-            self._stop_vc_signal_future = self._vc_signal_loop.create_future()
-            await self._stop_vc_signal_future
+                self._vc_signal_loop = asyncio.get_running_loop()
+                self._stop_vc_signal_future = self._vc_signal_loop.create_future()
+                await self._stop_vc_signal_future
         except Exception as e:
             self.logger.warning('VC signal registration failed: %s', e)
 
@@ -463,8 +448,9 @@ class DbusWrapper(QObject):
 
     async def _request_settings_async(self):
         try:
-            iface = await self.settings_iface()
-            result = await iface.call_get_settings() # type: ignore
+            async with _bus() as bus:
+                iface = await self._settings_iface(bus)
+                result = await iface.call_get_settings() # type: ignore
             self.sig_settings.emit(json.loads(result) or {})
         except Exception as e:
             self.logger.warning('request_settings failed: %s', e)

@@ -271,3 +271,86 @@ def test_one_shot_calls_disconnect_bus():
         finally:
             patcher.stop()
         bus.disconnect.assert_called_once()
+
+
+# ── settings interface: no shared cached connection (#82) ────────────────────
+
+
+def _settings_bus(payload="{}"):
+    bus = _closable_bus()
+    iface = MagicMock()
+    iface.call_get_settings = AsyncMock(return_value=payload)
+    bus.get_proxy_object = MagicMock(return_value=MagicMock(get_interface=MagicMock(return_value=iface)))
+    return bus
+
+
+def test_request_settings_disconnects_bus_and_emits():
+    wrapper = _make_wrapper()
+    got = []
+    wrapper.sig_settings.connect(got.append)
+    bus = _settings_bus('{"a": 1}')
+    patcher = _patched_bus(bus)
+    try:
+        _run(wrapper._request_settings_async())
+    finally:
+        patcher.stop()
+    assert got == [{"a": 1}]
+    bus.disconnect.assert_called_once()
+
+
+def test_request_settings_uses_a_fresh_connection_each_call():
+    """A connection cached across asyncio.run() calls would be bound to a dead loop."""
+    wrapper = _make_wrapper()
+    bus = _settings_bus()
+    patcher = _patched_bus(bus)
+    try:
+        _run(wrapper._request_settings_async())
+        _run(wrapper._request_settings_async())
+        assert bus.disconnect.call_count == 2
+    finally:
+        patcher.stop()
+
+
+def test_settings_signal_disconnects_bus_on_stop():
+    wrapper = _make_wrapper()
+    bus = _settings_bus()
+    patcher = _patched_bus(bus)
+
+    async def go():
+        task = asyncio.create_task(wrapper._register_settings_dbus_signal())
+        while wrapper._stop_settings_signal_future is None:
+            await asyncio.sleep(0)
+        wrapper._stop_settings_signal_future.set_result(None)
+        await task
+
+    try:
+        _run(go())
+    finally:
+        patcher.stop()
+    bus.disconnect.assert_called_once()
+
+
+def test_status_iface_helper_removed():
+    from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
+    assert not hasattr(DbusWrapper, "status_iface")
+    assert not hasattr(DbusWrapper, "settings_iface")
+
+
+def test_vc_signal_disconnects_bus_on_stop():
+    wrapper = _make_wrapper()
+    bus = _closable_bus()
+    bus.get_proxy_object = MagicMock(return_value=MagicMock(get_interface=MagicMock(return_value=MagicMock())))
+    patcher = _patched_bus(bus)
+
+    async def go():
+        task = asyncio.create_task(wrapper._register_vc_signals())
+        while wrapper._stop_vc_signal_future is None:
+            await asyncio.sleep(0)
+        wrapper._stop_vc_signal_future.set_result(None)
+        await task
+
+    try:
+        _run(go())
+    finally:
+        patcher.stop()
+    bus.disconnect.assert_called_once()
