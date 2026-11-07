@@ -343,6 +343,13 @@ verifies the signature with `ssh-keygen -Y verify` against the public key embedd
 script (`SIGNING_PUBKEY`) and the tarball against the signed checksum, before extracting or
 running anything.
 
+> [!NOTE]
+> The daemon links the system OpenSSL dynamically and `libssl.so.3` / `libssl.so.4` are not
+> interchangeable, so there are two generic targets: `generic` (OpenSSL 3, built on Ubuntu 22.04)
+> and `generic-ossl4` (OpenSSL 4, built on Fedora 45). `install.sh` picks `generic-ossl4` when the
+> host has `libssl.so.4` (via `ldconfig -p`) and `generic` otherwise; its preflight prints the
+> installed and installable OpenSSL. Both are signed in the same `SHA256SUMS`.
+
 One-time setup of the signing key:
 
 1. `ssh-keygen -t ed25519 -f lam-release -C lam-release` (set a passphrase). Keep the private

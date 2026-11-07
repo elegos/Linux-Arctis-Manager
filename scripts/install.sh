@@ -242,11 +242,20 @@ list_releases() {
         /^  \},?$/              { if (tag != "") print tag "|" pre "|" assets }'
 }
 
+# The generic tarball links libssl.so.3; a host that ships OpenSSL 4
+# (libssl.so.4, e.g. Fedora 45) gets the generic-ossl4 build instead.
+host_generic_target() {
+    case " $(openssl_installed) " in
+        *" libssl.so.4 "*) echo generic-ossl4 ;;
+        *)                 echo generic ;;
+    esac
+}
+
 # Sets TAG, VER, TARBALL (asset name), BASE_URL. Prefers an OS-specific build,
 # falls back to "generic"; skips releases lacking the tarball or its signature.
 resolve_release() {
-    TARGETS="$OS_ID generic"
-    [ "$OS_ID" = generic ] && TARGETS=generic
+    TARGETS="$OS_ID $(host_generic_target) generic"
+    [ "$OS_ID" = generic ] && TARGETS="$(host_generic_target) generic"
     listing=$(list_releases) || die "could not query GitHub releases (network down or API rate limit hit?)"
     TAG=
     set -f
@@ -327,13 +336,33 @@ pkg_hint() { # pkg_hint <lib-or-command> -> package name for this distro family
         debian:libpulse.so.0)  echo libpulse0 ;;        rpm:libpulse.so.0) echo pulseaudio-libs ;;   arch:libpulse.so.0) echo libpulse ;;
         debian:libudev.so.1)   echo libudev1 ;;         rpm:libudev.so.1)  echo systemd-libs ;;      arch:libudev.so.1)  echo systemd-libs ;;
         debian:libssl.so.*|debian:libcrypto.so.*) echo libssl3 ;;
-        rpm:libssl.so.*|rpm:libcrypto.so.*)       echo openssl-libs ;;
+        rpm:libssl.so.*|rpm:libcrypto.so.*)       echo "openssl-libs, or openssl3-libs on Fedora 45+ where openssl-libs is OpenSSL 4" ;;
         arch:libssl.so.*|arch:libcrypto.so.*)     echo openssl ;;
         debian:libgcc_s.so.1)  echo libgcc-s1 ;;        rpm:libgcc_s.so.1) echo libgcc ;;            arch:libgcc_s.so.1) echo gcc-libs ;;
         debian:setcap|debian:getcap) echo libcap2-bin ;; rpm:setcap|rpm:getcap) echo libcap ;;       arch:setcap|arch:getcap) echo libcap ;;
         debian:pkexec) echo policykit-1 ;;              rpm:pkexec) echo polkit ;;                   arch:pkexec) echo polkit ;;
         *) echo "" ;;
     esac
+}
+
+# Informational only (never a problem on its own): which libssl sonames the
+# host has, and what its package manager can install. Distros ship OpenSSL 3
+# or 4 (libssl.so.3 vs libssl.so.4, not interchangeable), so this is what
+# decides which tarball variant fits the host.
+openssl_installed() {
+    ldc=$(command -v ldconfig 2>/dev/null || echo /sbin/ldconfig)
+    { "$ldc" -p 2>/dev/null | sed -n 's/^[[:space:]]*\(libssl\.so\.[0-9][0-9.]*\).*/\1/p'; } | sort -u | tr '\n' ' '
+}
+openssl_installable() {
+    case $OS_FAMILY in
+        rpm)    have dnf && timeout 60 dnf repoquery --qf '%{name}-%{version}\n' openssl-libs 'openssl*-libs' 2>/dev/null | sort -u | tr '\n' ' ' ;;
+        debian) have apt-cache && apt-cache search --names-only '^libssl[0-9]' 2>/dev/null | cut -d' ' -f1 | sort -u | tr '\n' ' ' ;;
+        arch)   have pacman && pacman -Si openssl 2>/dev/null | sed -n 's/^Version *: *//p' | tr '\n' ' ' ;;
+    esac
+}
+report_openssl() {
+    say "OpenSSL (installed): $(openssl_installed || true)"
+    say "OpenSSL (installable): $(openssl_installable || true)"
 }
 
 PRE_PROBLEMS=
@@ -366,6 +395,8 @@ preflight() {
         systemctl --user show-environment >/dev/null 2>&1 \
             || add_problem "no systemd user session reachable (systemctl --user failed); log in graphically or enable lingering"
     fi
+
+    report_openssl
 
     if have ldd; then
         for bin in "$SRC/bin/lam-daemon" "$SRC/libexec/lam-hidraw-helper"; do
@@ -726,7 +757,13 @@ do_install() {
 
 resolve_release_or_local() {
     if [ -z "$LOCAL_ASSETS" ]; then resolve_release; return 0; fi
-    TARBALL=$(basename "$(find "$LOCAL_ASSETS" -maxdepth 1 -name "lam-*-$ARCH-*.tar.gz" | head -n1)")
+    TARBALL=
+    for t in "$OS_ID" "$(host_generic_target)" generic; do
+        f=$(find "$LOCAL_ASSETS" -maxdepth 1 -name "lam-*-$ARCH-$t.tar.gz" | head -n1)
+        [ -n "$f" ] && { TARBALL=$(basename "$f"); break; }
+    done
+    [ -n "$TARBALL" ] || TARBALL=$(basename "$(find "$LOCAL_ASSETS" -maxdepth 1 -name "lam-*-$ARCH-*.tar.gz" | head -n1)")
+    step "Selected build: $TARBALL"
     [ "$TARBALL" != . ] && [ -n "$TARBALL" ] || die "no lam-*-$ARCH-*.tar.gz in $LOCAL_ASSETS"
     VER=$(echo "$TARBALL" | sed -n "s/^lam-\(.*\)-$ARCH-.*\.tar\.gz$/\1/p")
     TARGET=$(echo "$TARBALL" | sed -n "s/^lam-.*-$ARCH-\(.*\)\.tar\.gz$/\1/p")

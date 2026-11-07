@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The prebuilt tarball now ships in two variants, `generic` (OpenSSL 3) and `generic-ossl4` (OpenSSL 4); `scripts/install.sh` picks the one matching the host's `libssl` (e.g. Fedora 45 ships OpenSSL 4 only), and its preflight reports the installed and installable OpenSSL.
 - New application and system tray icons.
 - The ChatMix dial now sets the volume of the `Arctis_Media`/`Arctis_Chat` loopback streams instead of the virtual sinks, so it no longer overwrites the default output volume or triggers the desktop volume OSD on every step. Existing virtual sinks are reset to 100% once (#81).
 

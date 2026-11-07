@@ -44,7 +44,8 @@ jobs:
 
       - uses: actions/download-artifact@v8
         with:
-          name: tarball-generic
+          pattern: tarball-generic*
+          merge-multiple: true
           path: /tarball
 
       - name: Install the installer's own prerequisites
