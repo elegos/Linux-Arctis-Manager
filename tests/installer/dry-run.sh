@@ -61,10 +61,12 @@ grep -q 'signature verification FAILED' "$W/wrong.log" || { cat "$W/wrong.log" >
 # "Selected build" line matters here (the preflight may fail on the real
 # libraries when the picked variant does not match this machine).
 FIRST=$(ls "$W"/assets/*.tar.gz | head -n1)
-BASE=$(basename "$FIRST" | sed 's/-[^-]*\.tar\.gz$//')
+ARCH_=$(uname -m)
+BASE=$(basename "$FIRST"); BASE=${BASE%%-"$ARCH_"-*}-$ARCH_
 mkdir -p "$W/sel" "$W/ssl3" "$W/ssl4"
-cp "$W/assets/SHA256SUMS" "$W/assets/SHA256SUMS.sig" "$W/sel/" 2>/dev/null || true
 cp "$FIRST" "$W/sel/$BASE-generic.tar.gz"; cp "$FIRST" "$W/sel/$BASE-generic-ossl4.tar.gz"
+( cd "$W/sel" && sha256sum -- *.tar.gz > SHA256SUMS )
+ssh-keygen -Y sign -f "$W/key" -n lam-release "$W/sel/SHA256SUMS" >/dev/null 2>&1
 printf '#!/bin/sh\necho "\tlibssl.so.4 (libc6,x86-64) => /usr/lib64/libssl.so.4"\n' > "$W/ssl4/ldconfig"
 printf '#!/bin/sh\necho "\tlibssl.so.3 (libc6,x86-64) => /usr/lib64/libssl.so.3"\n' > "$W/ssl3/ldconfig"
 chmod +x "$W/ssl4/ldconfig" "$W/ssl3/ldconfig"
