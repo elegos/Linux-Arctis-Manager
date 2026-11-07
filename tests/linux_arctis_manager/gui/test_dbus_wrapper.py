@@ -9,7 +9,6 @@ import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from dbus_next.constants import MessageType
-
 from PySide6.QtWidgets import QApplication
 
 # One QApplication for the whole module (required for QObject subclasses).

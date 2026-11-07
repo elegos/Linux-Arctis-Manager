@@ -23,6 +23,7 @@ from linux_arctis_manager.constants import (
     DBUS_VC_OBJECT_PATH,
 )
 
+
 @asynccontextmanager
 async def _bus():
     """Open a session-bus connection and always close it on exit.
