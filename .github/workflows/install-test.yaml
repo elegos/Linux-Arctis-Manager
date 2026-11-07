@@ -71,7 +71,7 @@ jobs:
         run: |
           set -e
           useradd -m tester
-          su -s /bin/bash tester -c 'tests/installer/dry-run.sh /tarball/*.tar.gz'
+          sudo -u tester -H bash -c 'tests/installer/dry-run.sh /tarball/*.tar.gz'
 
   # Installs the artifact from build-pkg on a *fresh* instance of the same
   # image via the distro's own package manager — this is the step that
