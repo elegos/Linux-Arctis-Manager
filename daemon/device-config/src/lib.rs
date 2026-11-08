@@ -1809,6 +1809,63 @@ mod nova_yaml_tests {
         assert!(checked > 0, "expected at least one device config to check");
     }
 
+    /// Regression guard (#84): the hardware ChatMix dial only emits `0x45`
+    /// events once software ChatMix is switched on (`0x49` = 1), and the
+    /// shutdown hook switches it off again. A device that declares the
+    /// `chatmix` capability and models `software_chatmix_status` must
+    /// therefore call `enable_chatmix` in `lifecycle.init`; otherwise the
+    /// dial does nothing and no ChatMix ever shows up (Nova Pro Omni).
+    #[test]
+    fn chatmix_capable_devices_enable_chatmix_on_init() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("device-configs");
+        if !dir.exists() {
+            return; // skip when not present (CI without device-configs)
+        }
+        let mut checked = 0;
+        for entry in std::fs::read_dir(&dir).expect("read device-configs dir") {
+            let path = entry.expect("dir entry").path();
+            let is_base = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("base_"));
+            if is_base || path.extension().and_then(|e| e.to_str()) != Some("yaml") {
+                continue;
+            }
+            let cfg = load(&path, &[dir.as_path()])
+                .unwrap_or_else(|e| panic!("{} failed to parse: {e}", path.display()));
+
+            let has_chatmix_cap = cfg
+                .device
+                .as_ref()
+                .and_then(|d| d.capabilities.as_ref())
+                .is_some_and(|c| c.iter().any(|c| c == "chatmix"));
+            let has_toggle_struct = cfg
+                .structs
+                .as_ref()
+                .is_some_and(|s| s.contains_key("software_chatmix_status"));
+            if !has_chatmix_cap || !has_toggle_struct {
+                continue;
+            }
+            checked += 1;
+
+            let enables = cfg
+                .lifecycle
+                .as_ref()
+                .and_then(|l| l.init.as_ref())
+                .is_some_and(|init| init.iter().any(|c| c.call == "enable_chatmix"));
+            assert!(
+                enables,
+                "{}: declares 'chatmix' and models software_chatmix_status but lifecycle.init \
+                 never calls enable_chatmix, so the hardware dial stays silent",
+                path.display()
+            );
+        }
+        assert!(checked > 0, "expected at least one chatmix device to check");
+    }
+
     /// `field_name -> role` for every field in `sync_events`/`sync_read`
     /// that declares one. Shared by the two role-related regression guards
     /// below.

@@ -646,6 +646,10 @@ lifecycle:
     # LAM does not provide SteelSeries Sonar.
     - call: discord_certified_set_attributes
       args: {echo_cancellation: true, noise_suppression: true}
+    # The hardware ChatMix dial only emits 0x45 events while software
+    # ChatMix is on, and `shutdown` turns it off; the station doesn't keep it
+    # across power cycles (v2 noted the same), so re-enable on every init.
+    - call: enable_chatmix
   shutdown:
     - call: disable_chatmix
     - call: disable_sonar
