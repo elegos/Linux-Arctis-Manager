@@ -43,7 +43,7 @@ structs:
   mic_noise_reduction:
     - {name: report_id, type: uint8, constant: 0x01}
     - {name: command,   type: uint8, constant: 0x3C}
-    - {name: level,     type: uint8, range: [0, 3]}
+    - {name: level,     type: uint8, range: [0, 3], status_field: mic_noise_reduction_level}
 
   # Startup snapshot, Omni's own layout (see header note). The EQ-band region
   # (custom + measured bands, 10 BT gains, 10 mic gains — same 140-byte total

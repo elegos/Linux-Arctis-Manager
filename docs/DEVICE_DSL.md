@@ -105,6 +105,32 @@ When `outgoing:` and `incoming:` are both present the struct is bidirectional: t
 | `values: [v1, v2, ...]` | Enumerated valid values (often bitmask flags) |
 | `repeat: n` | Field is an array of `n` elements of the given type |
 | `size: n` | Used with `bytearray`; number of bytes |
+| `status_field: name` | Writable fields only: the setting key (see below) |
+
+### Setting keys and `status_field`
+
+Every non-constant field of a writable (non-`action`) api's struct is a *setting*. Over D-Bus it is identified by its **setting key**: `GetSettings`, `SetSetting` and the persisted overrides all use it, and the daemon reads the current value from the status entry of the same name (the field name published by `sync_events` / `sync_read`).
+
+By default the setting key is the field's wire `name`. That breaks as soon as a write struct reuses a generic wire name (`level`, `state`, `mode`, `minutes`): the name is ambiguous across structs and never matches the status field carrying the value, so the control is hidden. Set `status_field` to the status name to use it as the setting key instead:
+
+```yaml
+structs:
+  transparent:
+    - {name: report_id, type: uint8, constant: 0x01}
+    - {name: command,   type: uint8, constant: 0xB9}
+    - {name: level,     type: uint8, range: [1, 10], status_field: transparent_level}
+
+sync_events:
+  0xB9:
+    emit: transparent_changed
+    fields:
+      - {name: transparent_level, byte: 2}   # same name as `status_field`
+```
+
+The wire `name` is still what the codec uses to build the message; `status_field` only renames the setting. Setting keys must be unique within a device, and the translation files need a `[settings]` entry per key.
+
+> [!NOTE]
+> Only the Nova Elite and Nova Pro Omni configs use `status_field` so far; the other devices' write structs still rely on the wire name matching the status name.
 
 ### Nested struct reference
 

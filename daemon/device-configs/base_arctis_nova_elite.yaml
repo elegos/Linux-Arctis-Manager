@@ -75,7 +75,7 @@ structs:
   volume_limiter:
     - {name: report_id, type: uint8, constant: 0x01}
     - {name: command,   type: uint8, constant: 0x27}
-    - {name: enabled,   type: uint8, range: [0, 1]}
+    - {name: enabled,   type: uint8, range: [0, 1], status_field: volume_limiter}
 
   mic_volume:
     - {name: report_id,  type: uint8, constant: 0x01}
@@ -87,8 +87,8 @@ structs:
   boom_mic_sidetone:
     - {name: report_id, type: uint8, constant: 0x01}
     - {name: command,   type: uint8, constant: 0x38}
-    - {name: state,     type: uint8, range: [0, 1]}
-    - {name: level,     type: uint8, range: [1, 10]}
+    - {name: state,     type: uint8, range: [0, 1], status_field: boom_sidetone_state}
+    - {name: level,     type: uint8, range: [1, 10], status_field: boom_sidetone_level}
 
   # NOT here: `on_ear_sidetone` (0x39). Only Nova Elite proper has a second,
   # detachable on-ear mic; Nova Pro Omni's raw spec has no 0x39 handling and
@@ -101,7 +101,7 @@ structs:
   muted_mic_brightness:
     - {name: report_id, type: uint8, constant: 0x01}
     - {name: command,   type: uint8, constant: 0xBF}
-    - {name: level,     type: uint8, range: [0, 10]}
+    - {name: level,     type: uint8, range: [0, 10], status_field: muted_mic_brightness}
 
   # [0] All off, [1] transparent-level mode, [2] ANC mode. The active level
   # within whichever mode is active is set separately via `transparent`
@@ -110,6 +110,7 @@ structs:
     - {name: report_id, type: uint8, constant: 0x01}
     - {name: command,   type: uint8, constant: 0xBD}
     - name: mode
+      status_field: transparent_anc_mode
       type: uint8
       range: [0, 2]
       values_mapping: {"0": "off", "1": "transparent", "2": "anc"}
@@ -118,6 +119,7 @@ structs:
     - {name: report_id, type: uint8, constant: 0x01}
     - {name: command,   type: uint8, constant: 0xB8}
     - name: level
+      status_field: active_noise_cancellation
       type: uint8
       range: [1, 3]
       values_mapping: {"1": "low", "2": "medium", "3": "high"}
@@ -125,12 +127,12 @@ structs:
   transparent:
     - {name: report_id, type: uint8, constant: 0x01}
     - {name: command,   type: uint8, constant: 0xB9}
-    - {name: level,     type: uint8, range: [1, 10]}
+    - {name: level,     type: uint8, range: [1, 10], status_field: transparent_level}
 
   inactivity_timer:
     - {name: report_id, type: uint8, constant: 0x01}
     - {name: command,   type: uint8, constant: 0xC1}
-    - {name: minutes,   type: uint8, values: [0, 1, 5, 10, 15, 30, 60]}
+    - {name: minutes,   type: uint8, values: [0, 1, 5, 10, 15, 30, 60], status_field: inactivity_timer}
 
   # NOTE: v2 labelled these values "Speaker"/"Stream", same guess it made for
   # Nova Pro Wired's line_out_mode (corrected there against an explicit
@@ -163,22 +165,23 @@ structs:
   oled_screen_saver_timer:
     - {name: report_id, type: uint8, constant: 0x01}
     - {name: command,   type: uint8, constant: 0x83}
-    - {name: minutes,   type: uint8, values: [0, 1, 5, 10, 15, 30, 60]}
+    - {name: minutes,   type: uint8, values: [0, 1, 5, 10, 15, 30, 60], status_field: oled_screen_saver_timer}
 
   oled_screen_saver_mode:
     - {name: report_id, type: uint8, constant: 0x01}
     - {name: command,   type: uint8, constant: 0x88}
-    - {name: mode,      type: uint8, range: [0, 1], values_mapping: {"0": "off", "1": "dim"}}
+    - {name: mode,      type: uint8, range: [0, 1], values_mapping: {"0": "off", "1": "dim"}, status_field: oled_screen_saver_mode}
 
   home_screen_view:
     - {name: report_id, type: uint8, constant: 0x01}
     - {name: command,   type: uint8, constant: 0x89}
-    - {name: mode,      type: uint8, range: [0, 1], values_mapping: {"0": "detailed", "1": "simple"}}
+    - {name: mode,      type: uint8, range: [0, 1], values_mapping: {"0": "detailed", "1": "simple"}, status_field: home_screen_view}
 
   home_screen_option:
     - {name: report_id, type: uint8, constant: 0x01}
     - {name: command,   type: uint8, constant: 0x8A}
     - name: mode
+      status_field: home_screen_option
       type: uint8
       range: [0, 2]
       values_mapping: {"0": "stereo", "1": "preset", "2": "meters"}
@@ -186,12 +189,13 @@ structs:
   bt_power_default:
     - {name: report_id, type: uint8, constant: 0x01}
     - {name: command,   type: uint8, constant: 0xB2}
-    - {name: enabled,   type: uint8, range: [0, 1]}
+    - {name: enabled,   type: uint8, range: [0, 1], status_field: bt_power_default}
 
   bt_call_default:
     - {name: report_id, type: uint8, constant: 0x01}
     - {name: command,   type: uint8, constant: 0xB3}
     - name: mode
+      status_field: bt_call_default
       type: uint8
       range: [0, 2]
       values_mapping: {"0": "off", "1": "attenuate", "2": "mute"}

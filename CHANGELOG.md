@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Nova Pro Omni and Nova Elite: the Device tab showed only "OLED Brightness" (the other controls appeared one by one, whenever the headset sent the matching event). The settings list matched each control to its current value by the write command's generic field name (`level`, `mode`, `minutes`…), which never matched the name the headset reports it under. Device configs can now name the status field a writable field maps to (`status_field`), and Nova Elite/Pro Omni use it, so ANC, transparency, sidetone, inactivity timer, screensaver, home screen, Bluetooth defaults, volume limiter and mic noise reduction show up straight away. Settings you had saved under the old names (`level`, `mode`, `minutes`, `enabled`, `state`) are not re-applied once.
 - The GUI no longer leaks a D-Bus connection on every status poll and one-shot call. Over hours the leaked connections could exhaust the session bus quota and make dbus-broker disconnect unrelated apps (#82).
 - After a USB glitch the virtual sinks could be destroyed and recreated about once a second until the daemon was restarted: a leftover monitoring task for the same headset kept fighting the new one. The stale task is now stopped when the device reappears.
 - Unplugging a headset or dongle is now always noticed: its removal was ignored on systems where udev doesn't expose the vendor/product IDs, so the device's task and virtual sinks lingered until the daemon restarted.

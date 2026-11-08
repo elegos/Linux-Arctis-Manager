@@ -2216,21 +2216,21 @@ pub(crate) fn build_settings_json(state: &AppState) -> String {
             if fdef.constant.is_some() {
                 continue;
             }
-            let current = entry
-                .status
-                .get(&fdef.name)
-                .and_then(|v| v.get("value"))
-                .cloned();
+            // Settings are keyed by `setting_key()` (the field's
+            // `status_field`, else its wire name): that is both where the
+            // current value lives in `status` and the key the GUI sends back.
+            let key = fdef.setting_key();
+            let current = entry.status.get(key).and_then(|v| v.get("value")).cloned();
 
             // device section: plain current value (no {value, type} wrapper)
             if let Some(val) = &current {
                 device_map
-                    .entry(fdef.name.clone())
+                    .entry(key.to_string())
                     .or_insert_with(|| val.clone());
             }
 
             config_map
-                .entry(fdef.name.clone())
+                .entry(key.to_string())
                 .or_insert_with(|| field_to_schema(fdef, current.as_ref()));
         }
     }
@@ -2377,7 +2377,7 @@ fn resolve_fields<'a>(
 // ── SetSetting helpers ────────────────────────────────────────────────────────
 
 /// Find the name of the first API whose write struct contains a non-constant
-/// field named `field_name`.
+/// field whose setting key (`status_field`, else wire name) is `field_name`.
 pub(crate) fn find_api_for_field(config: &DeviceConfig, field_name: &str) -> Option<String> {
     let apis = config.apis.as_ref()?;
     let structs = config.structs.as_ref()?;
@@ -2395,7 +2395,7 @@ pub(crate) fn find_api_for_field(config: &DeviceConfig, field_name: &str) -> Opt
         };
         let fields = outgoing_fields(struct_def, structs);
         for fdef in fields {
-            if fdef.constant.is_none() && fdef.name == field_name {
+            if fdef.constant.is_none() && fdef.setting_key() == field_name {
                 return Some(api_name.clone());
             }
         }
@@ -2403,8 +2403,24 @@ pub(crate) fn find_api_for_field(config: &DeviceConfig, field_name: &str) -> Opt
     None
 }
 
+/// Resolve a setting key to the wire name of the field it addresses in
+/// `api_name`'s write struct (the name the codec expects its values under).
+pub(crate) fn wire_field_name(
+    config: &DeviceConfig,
+    api_name: &str,
+    setting_key: &str,
+) -> Option<String> {
+    let structs = config.structs.as_ref()?;
+    let struct_def = structs.get(api_name)?;
+    outgoing_fields(struct_def, structs)
+        .into_iter()
+        .find(|f| f.constant.is_none() && f.setting_key() == setting_key)
+        .map(|f| f.name.clone())
+}
+
 /// Parse a JSON-encoded string value into a `FieldValue` matching the type
-/// expected by `field_name` in `api_name`'s write struct.
+/// expected by the field with setting key `field_name` in `api_name`'s write
+/// struct.
 pub(crate) fn parse_setting_value(
     config: &DeviceConfig,
     api_name: &str,
@@ -2414,7 +2430,9 @@ pub(crate) fn parse_setting_value(
     let structs = config.structs.as_ref()?;
     let struct_def = structs.get(api_name)?;
     let fields = outgoing_fields(struct_def, structs);
-    let fdef = fields.into_iter().find(|f| f.name == field_name)?;
+    let fdef = fields
+        .into_iter()
+        .find(|f| f.constant.is_none() && f.setting_key() == field_name)?;
 
     let json_val: serde_json::Value = serde_json::from_str(raw).ok()?;
 
@@ -2434,9 +2452,10 @@ pub(crate) fn parse_setting_value(
 /// Build the full `values` map for a `WriteApi` command.
 ///
 /// The codec requires every non-constant field in the struct. For the field
-/// being set (`changed_field`) we use `new_value`; for all other non-constant
-/// fields we read the current value from `status` (flat map of
-/// `field_name → {"value": ..., "type": ...}`).
+/// being set (`changed_field`, a setting key) we use `new_value`; for all other
+/// non-constant fields we read the current value from `status` (flat map of
+/// `setting_key → {"value": ..., "type": ...}`). The returned map is keyed by
+/// wire field name, as the codec expects.
 pub(crate) fn build_write_values(
     config: &DeviceConfig,
     api_name: &str,
@@ -2445,7 +2464,11 @@ pub(crate) fn build_write_values(
     status: &HashMap<String, serde_json::Value>,
 ) -> HashMap<String, FieldValue> {
     let mut values = HashMap::new();
-    values.insert(changed_field.to_string(), new_value);
+    values.insert(
+        wire_field_name(config, api_name, changed_field)
+            .unwrap_or_else(|| changed_field.to_string()),
+        new_value,
+    );
 
     let Some(structs) = config.structs.as_ref() else {
         return values;
@@ -2455,17 +2478,17 @@ pub(crate) fn build_write_values(
     };
 
     for fdef in outgoing_fields(struct_def, structs) {
-        if fdef.constant.is_some() || fdef.name == changed_field {
+        if fdef.constant.is_some() || fdef.setting_key() == changed_field {
             continue;
         }
         // Look up the current value from status and parse it into a FieldValue.
         let raw_val = status
-            .get(&fdef.name)
+            .get(fdef.setting_key())
             .and_then(|obj| obj.get("value"))
             .cloned()
             .unwrap_or(serde_json::Value::Null);
         let raw_str = raw_val.to_string();
-        if let Some(fv) = parse_setting_value(config, api_name, &fdef.name, &raw_str) {
+        if let Some(fv) = parse_setting_value(config, api_name, fdef.setting_key(), &raw_str) {
             values.insert(fdef.name.clone(), fv);
         } else {
             warn!(
@@ -2481,7 +2504,7 @@ pub(crate) fn build_write_values(
 /// already-parsed field values (used during persisted-settings re-apply).
 ///
 /// Unlike `build_write_values`, there is no "changed field" — the caller
-/// supplies whatever subset it has.  Any non-constant field absent from
+/// supplies whatever subset it has, keyed by wire field name.  Any non-constant field absent from
 /// `partial` is filled with its range minimum (or 0 for fields without a
 /// range), so the codec always receives a complete struct.
 pub(crate) fn build_write_values_with_defaults(
@@ -2974,6 +2997,7 @@ mod tests {
                 values_mapping: None,
                 repeat: None,
                 size: None,
+                status_field: None,
             })]),
         );
         let mut apis = Map::new();
@@ -3003,6 +3027,169 @@ mod tests {
         assert_eq!(find_api_for_field(&config, "nonexistent"), None);
     }
 
+    /// Nova Elite/Omni-shaped config: several write structs reuse the generic
+    /// wire field name `level`/`state`, while the sync events publish the
+    /// value under a distinct, unique status name. `status_field` bridges the
+    /// two and doubles as the unique setting key.
+    fn status_field_config() -> DeviceConfig {
+        serde_yaml::from_str(
+            r#"
+structs:
+  active_noise_cancellation:
+    - {name: report_id, type: uint8, constant: 0x01}
+    - {name: command,   type: uint8, constant: 0xB8}
+    - {name: level,     type: uint8, range: [1, 3], status_field: active_noise_cancellation}
+  transparent:
+    - {name: report_id, type: uint8, constant: 0x01}
+    - {name: command,   type: uint8, constant: 0xB9}
+    - {name: level,     type: uint8, range: [1, 10], status_field: transparent_level}
+  boom_mic_sidetone:
+    - {name: report_id, type: uint8, constant: 0x01}
+    - {name: command,   type: uint8, constant: 0x38}
+    - {name: state,     type: uint8, range: [0, 1], status_field: boom_sidetone_state}
+    - {name: level,     type: uint8, range: [1, 10], status_field: boom_sidetone_level}
+apis:
+  active_noise_cancellation: {write: {transport: HID_IO, chunk_size: 64}}
+  transparent:               {write: {transport: HID_IO, chunk_size: 64}}
+  boom_mic_sidetone:         {write: {transport: HID_IO, chunk_size: 64}}
+"#,
+        )
+        .unwrap()
+    }
+
+    fn status_field_state(config: DeviceConfig, status: &[(&str, u64)]) -> AppState {
+        let (tx, _rx) = mpsc::channel(1);
+        let status = status
+            .iter()
+            .map(|(k, v)| {
+                (
+                    k.to_string(),
+                    serde_json::json!({"value": v, "type": "uint8"}),
+                )
+            })
+            .collect();
+        let mut devices = HashMap::new();
+        devices.insert(
+            PathBuf::from("/dev/hidraw0"),
+            crate::state::DeviceEntry {
+                config: Arc::new(config),
+                vid: 0,
+                pid: 0,
+                name: String::new(),
+                capabilities: vec![],
+                status,
+                cmd_tx: tx,
+            },
+        );
+        AppState {
+            configs: vec![],
+            devices,
+            config_dirs: vec![PathBuf::from("/tmp")],
+            general_settings: crate::general_settings::GeneralSettings::default(),
+            general_settings_path: PathBuf::from("/tmp/gs.yaml"),
+        }
+    }
+
+    #[test]
+    fn build_settings_json_reads_current_value_from_status_field() {
+        let state = status_field_state(
+            status_field_config(),
+            &[
+                ("active_noise_cancellation", 2),
+                ("transparent_level", 5),
+                ("boom_sidetone_state", 1),
+                ("boom_sidetone_level", 7),
+            ],
+        );
+        let json: JsonValue = serde_json::from_str(&build_settings_json(&state)).unwrap();
+        assert_eq!(json["device"]["active_noise_cancellation"], 2);
+        assert_eq!(json["device"]["transparent_level"], 5);
+        assert_eq!(json["device"]["boom_sidetone_state"], 1);
+        assert_eq!(json["device"]["boom_sidetone_level"], 7);
+        // The ambiguous wire names must not leak out as setting keys.
+        assert!(json["device"].get("level").is_none());
+        assert!(json["device"].get("state").is_none());
+        assert!(json["settings_config"].get("level").is_none());
+        // Each setting gets its own schema entry, with the right range.
+        assert_eq!(json["settings_config"]["transparent_level"]["max"], 10);
+        assert_eq!(
+            json["settings_config"]["active_noise_cancellation"]["max"],
+            3
+        );
+    }
+
+    #[test]
+    fn find_api_for_field_matches_status_field_not_wire_name() {
+        let config = status_field_config();
+        assert_eq!(
+            find_api_for_field(&config, "transparent_level"),
+            Some("transparent".to_string())
+        );
+        assert_eq!(
+            find_api_for_field(&config, "active_noise_cancellation"),
+            Some("active_noise_cancellation".to_string())
+        );
+        assert_eq!(
+            find_api_for_field(&config, "boom_sidetone_level"),
+            Some("boom_mic_sidetone".to_string())
+        );
+        // `level` is shared by three structs: it is no longer a setting key.
+        assert_eq!(find_api_for_field(&config, "level"), None);
+    }
+
+    #[test]
+    fn parse_setting_value_resolves_status_field() {
+        let config = status_field_config();
+        assert!(matches!(
+            parse_setting_value(&config, "transparent", "transparent_level", "7"),
+            Some(FieldValue::U8(7))
+        ));
+        assert!(parse_setting_value(&config, "transparent", "level", "7").is_none());
+    }
+
+    #[test]
+    fn build_write_values_keys_changed_field_by_wire_name() {
+        let config = status_field_config();
+        let values = build_write_values(
+            &config,
+            "transparent",
+            "transparent_level",
+            FieldValue::U8(7),
+            &HashMap::new(),
+        );
+        assert!(matches!(values.get("level"), Some(FieldValue::U8(7))));
+        assert!(!values.contains_key("transparent_level"));
+    }
+
+    #[test]
+    fn build_write_values_fills_siblings_from_their_status_field() {
+        let config = status_field_config();
+        let mut status = HashMap::new();
+        status.insert(
+            "boom_sidetone_state".to_string(),
+            serde_json::json!({"value": 1, "type": "uint8"}),
+        );
+        let values = build_write_values(
+            &config,
+            "boom_mic_sidetone",
+            "boom_sidetone_level",
+            FieldValue::U8(9),
+            &status,
+        );
+        assert!(matches!(values.get("level"), Some(FieldValue::U8(9))));
+        assert!(matches!(values.get("state"), Some(FieldValue::U8(1))));
+    }
+
+    #[test]
+    fn wire_field_name_maps_setting_key_back_to_struct_field() {
+        let config = status_field_config();
+        assert_eq!(
+            wire_field_name(&config, "boom_mic_sidetone", "boom_sidetone_state"),
+            Some("state".to_string())
+        );
+        assert_eq!(wire_field_name(&config, "boom_mic_sidetone", "state"), None);
+    }
+
     /// Builds a `DeviceConfig` shaped like Arctis 7+'s `pairing_mode`: a
     /// one-shot action with two constant fields and one non-constant
     /// `mode` field (`[0, 1]`), registered under an api of the same name
@@ -3021,6 +3208,7 @@ mod tests {
                 values_mapping: None,
                 repeat: None,
                 size: None,
+                status_field: None,
             };
 
         let mut structs = HashMap::new();
@@ -3068,6 +3256,7 @@ mod tests {
             values_mapping: None,
             repeat: None,
             size: None,
+            status_field: None,
         };
 
         let mut structs = HashMap::new();
@@ -3176,6 +3365,7 @@ mod tests {
             values_mapping: None,
             repeat: None,
             size: None,
+            status_field: None,
         };
 
         let mut structs = Map::new();

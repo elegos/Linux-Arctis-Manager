@@ -11,8 +11,8 @@ structs:
   on_ear_sidetone:
     - {name: report_id, type: uint8, constant: 0x01}
     - {name: command,   type: uint8, constant: 0x39}
-    - {name: state,     type: uint8, range: [0, 1]}
-    - {name: level,     type: uint8, range: [1, 10]}
+    - {name: state,     type: uint8, range: [0, 1], status_field: on_ear_sidetone_state}
+    - {name: level,     type: uint8, range: [1, 10], status_field: on_ear_sidetone_level}
 
 apis:
   on_ear_sidetone:

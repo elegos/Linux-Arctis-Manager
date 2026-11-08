@@ -579,6 +579,7 @@ mod tests {
             values_mapping: None,
             repeat: None,
             size: None,
+            status_field: None,
         })
     }
 
@@ -592,6 +593,7 @@ mod tests {
             values_mapping: None,
             repeat: None,
             size: None,
+            status_field: None,
         })
     }
 
@@ -605,6 +607,7 @@ mod tests {
             values_mapping: None,
             repeat: None,
             size: None,
+            status_field: None,
         })
     }
 
@@ -618,6 +621,7 @@ mod tests {
             values_mapping: None,
             repeat: None,
             size: None,
+            status_field: None,
         })
     }
 
@@ -631,6 +635,7 @@ mod tests {
             values_mapping: None,
             repeat: Some(n),
             size: None,
+            status_field: None,
         })
     }
 
@@ -644,6 +649,7 @@ mod tests {
             values_mapping: None,
             repeat: None,
             size: Some(size),
+            status_field: None,
         })
     }
 
@@ -657,6 +663,7 @@ mod tests {
             values_mapping: None,
             repeat: None,
             size: Some(size),
+            status_field: None,
         })
     }
 
@@ -1057,6 +1064,7 @@ mod tests {
                 values_mapping: None,
                 repeat: None,
                 size: None,
+                status_field: None,
             })]),
         );
         let mut constants = HashMap::new();

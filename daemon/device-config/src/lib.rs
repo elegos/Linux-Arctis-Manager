@@ -115,10 +115,32 @@ pub struct FieldDef {
     /// consumes to the end of the buffer.
     #[serde(default)]
     pub size: Option<u32>,
+    /// Setting key for a writable field whose wire name is not the name its
+    /// value is published under (the `sync_events`/`sync_read` field name).
+    /// Many write structs reuse generic wire names (`level`, `state`, `mode`,
+    /// `minutes`) that are ambiguous across structs and never match the
+    /// status field carrying the current value; naming the status field here
+    /// makes it both the setting key exposed over D-Bus (`GetSettings`,
+    /// `SetSetting`, persisted overrides) and the status entry read for the
+    /// current value. Absent: the wire `name` is used for both.
+    #[serde(default)]
+    pub status_field: Option<String>,
+}
+
+impl FieldDef {
+    /// The key this field is exposed under as a setting: `status_field` when
+    /// set, otherwise the wire `name`.
+    pub fn setting_key(&self) -> &str {
+        self.status_field.as_deref().unwrap_or(&self.name)
+    }
 }
 
 /// A struct field is either a concrete field definition or a `{struct: name}`
 /// inline expansion (spec: `fields-from-struct`).
+// Parsed once at load time and held in a handful of struct definitions, so the
+// size gap between the variants is irrelevant; boxing `FieldDef` would only add
+// indirection to every match site.
+#[allow(clippy::large_enum_variant)]
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum FieldOrRef {
@@ -559,6 +581,22 @@ mod tests {
         let mut f = fs::File::create(&path).unwrap();
         f.write_all(content.as_bytes()).unwrap();
         path
+    }
+
+    #[test]
+    fn field_def_status_field_is_optional_and_drives_setting_key() {
+        let plain: FieldDef =
+            serde_yaml::from_str("{name: volume, type: uint8, range: [0, 10]}").unwrap();
+        assert_eq!(plain.status_field, None);
+        assert_eq!(plain.setting_key(), "volume");
+
+        let bridged: FieldDef = serde_yaml::from_str(
+            "{name: level, type: uint8, range: [1, 10], status_field: transparent_level}",
+        )
+        .unwrap();
+        assert_eq!(bridged.status_field.as_deref(), Some("transparent_level"));
+        assert_eq!(bridged.name, "level");
+        assert_eq!(bridged.setting_key(), "transparent_level");
     }
 
     #[test]
@@ -1859,5 +1897,94 @@ mod nova_yaml_tests {
             }
         }
         assert!(checked > 0, "expected at least one device config to check");
+    }
+
+    /// Every status name a device publishes: `sync_events`/`sync_read` field
+    /// names (what `forward_events` stores into `status`).
+    fn collect_status_names(cfg: &crate::DeviceConfig) -> std::collections::HashSet<String> {
+        let mut names = std::collections::HashSet::new();
+        for def in cfg.sync_events.iter().flat_map(|m| m.values()) {
+            for f in def.fields.iter().flatten() {
+                names.insert(f.name.clone());
+            }
+        }
+        for entry in cfg.sync_read.iter().flatten() {
+            for map in &entry.maps {
+                names.extend(map.field.iter().cloned());
+                names.extend(map.fields.iter().flatten().cloned());
+            }
+        }
+        names
+    }
+
+    /// Regression guard for the "Device tab shows only OLED Brightness" bug
+    /// (Nova Pro Omni): `build_settings_json` looks a writable field's
+    /// current value up in `status` by its *setting key* (`status_field`,
+    /// else its wire name). A write struct reusing a generic wire name
+    /// (`level`, `mode`, `minutes`) with no matching status entry never gets
+    /// a value, so the GUI hides the control — and `SetSetting` can't tell
+    /// two structs sharing a name apart. For the device families migrated to
+    /// `status_field` (below) every writable setting key must therefore be
+    /// unique across the device's write structs and published by
+    /// `sync_events`/`sync_read`.
+    ///
+    /// Not yet migrated (same latent defect, tracked separately): the other
+    /// device configs. EQ apis have their own settings pipeline, and the two
+    /// internal flags are not user-facing settings.
+    #[test]
+    fn writable_setting_keys_are_unique_and_have_a_status_source() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../device-configs");
+        const MIGRATED: &[&str] = &["nova_elite.yaml", "nova_pro_omni.yaml"];
+        const NOT_SETTINGS: &[&str] = &[
+            "set_sonar_present",
+            "software_chatmix_status",
+            "parametric_eq",
+            "ten_band_eq_mic",
+            "ten_band_eq_bt",
+        ];
+        let mut problems = Vec::new();
+        for name in MIGRATED {
+            let path = dir.join(name);
+            let name = name.to_string();
+            let cfg = load(&path, &[dir.as_path()])
+                .unwrap_or_else(|e| panic!("{name} failed to parse: {e}"));
+            let (Some(apis), Some(structs)) = (&cfg.apis, &cfg.structs) else {
+                continue;
+            };
+            let status = collect_status_names(&cfg);
+            let mut seen: HashMap<String, String> = HashMap::new();
+            let mut api_names: Vec<_> = apis.keys().collect();
+            api_names.sort();
+            for api_name in api_names {
+                let api = &apis[api_name];
+                if api.write.is_none() || api.action || NOT_SETTINGS.contains(&api_name.as_str()) {
+                    continue;
+                }
+                let Some(sd) = structs.get(api_name.as_str()) else {
+                    continue;
+                };
+                let fields = match sd {
+                    StructDef::Bidir { outgoing, .. } => outgoing,
+                    StructDef::Flat(f) => f,
+                };
+                for fof in fields {
+                    let FieldOrRef::Field(fd) = fof else { continue };
+                    if fd.constant.is_some() {
+                        continue;
+                    }
+                    let key = fd.setting_key().to_string();
+                    if let Some(other) = seen.insert(key.clone(), api_name.clone()) {
+                        problems.push(format!(
+                            "{name}: setting key '{key}' is used by both '{other}' and '{api_name}'"
+                        ));
+                    }
+                    if !status.contains(&key) {
+                        problems.push(format!("{name}: '{api_name}.{key}' has no status source"));
+                    }
+                }
+            }
+        }
+        problems.sort();
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
     }
 }

@@ -497,11 +497,12 @@ async fn run_device(
             for (field, json_val) in &overrides {
                 let raw = serde_json::to_string(json_val).unwrap_or_default();
                 if let Some(api_name) = dbus::find_api_for_field(&config, field) {
-                    if let Some(fv) = dbus::parse_setting_value(&config, &api_name, field, &raw) {
-                        api_groups
-                            .entry(api_name)
-                            .or_default()
-                            .insert(field.clone(), fv);
+                    let wire = dbus::wire_field_name(&config, &api_name, field);
+                    if let (Some(wire), Some(fv)) = (
+                        wire,
+                        dbus::parse_setting_value(&config, &api_name, field, &raw),
+                    ) {
+                        api_groups.entry(api_name).or_default().insert(wire, fv);
                     }
                 }
             }
