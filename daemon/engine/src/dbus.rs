@@ -2180,6 +2180,22 @@ fn status_categories(entry: &crate::state::DeviceEntry) -> Map<String, JsonValue
     result
 }
 
+/// Whether a writable api is an ordinary user-facing setting. Internal flags,
+/// init commands and EQ presets/bands have their own handling (EQ has a
+/// dedicated pipeline), so they are never surfaced from a schema default —
+/// only when a real status value exists for them.
+fn is_user_setting_api(api_name: &str) -> bool {
+    const INTERNAL: &[&str] = &[
+        "set_sonar_present",
+        "software_chatmix_status",
+        "av6x02_init",
+    ];
+    !(INTERNAL.contains(&api_name)
+        || api_name.starts_with("eq")
+        || api_name.contains("_eq")
+        || api_name == "equalizer")
+}
+
 pub(crate) fn build_settings_json(state: &AppState) -> String {
     // Start with the general section, always present regardless of device connection.
     let general_json = state.general_settings.to_json();
@@ -2222,16 +2238,21 @@ pub(crate) fn build_settings_json(state: &AppState) -> String {
             let key = fdef.setting_key();
             let current = entry.status.get(key).and_then(|v| v.get("value")).cloned();
 
-            // device section: plain current value (no {value, type} wrapper)
-            if let Some(val) = &current {
-                device_map
-                    .entry(key.to_string())
-                    .or_insert_with(|| val.clone());
+            let schema = field_to_schema(fdef, current.as_ref());
+
+            // device section: plain current value (no {value, type} wrapper).
+            // Write-only settings have no status source, so the GUI would hide
+            // them; fall back to the schema default so the control still shows.
+            let shown = current.clone().or_else(|| {
+                is_user_setting_api(api_name)
+                    .then(|| schema.get("default_value").cloned())
+                    .flatten()
+            });
+            if let Some(val) = shown {
+                device_map.entry(key.to_string()).or_insert(val);
             }
 
-            config_map
-                .entry(key.to_string())
-                .or_insert_with(|| field_to_schema(fdef, current.as_ref()));
+            config_map.entry(key.to_string()).or_insert(schema);
         }
     }
 
@@ -3116,6 +3137,40 @@ apis:
             json["settings_config"]["active_noise_cancellation"]["max"],
             3
         );
+    }
+
+    #[test]
+    fn build_settings_json_exposes_write_only_settings_with_default_value() {
+        // Only ANC has a status value; `transparent_level` is write-only so far.
+        // The GUI renders a control only for keys present in `device`, so the
+        // control must still appear, seeded with the schema default.
+        let state = status_field_state(status_field_config(), &[("active_noise_cancellation", 2)]);
+        let json: JsonValue = serde_json::from_str(&build_settings_json(&state)).unwrap();
+        assert_eq!(json["device"]["active_noise_cancellation"], 2);
+        assert_eq!(json["device"]["transparent_level"], 1);
+        assert_eq!(json["device"]["boom_sidetone_level"], 1);
+        assert_eq!(json["device"]["boom_sidetone_state"], 0);
+    }
+
+    #[test]
+    fn is_user_setting_api_excludes_internal_and_eq() {
+        for n in [
+            "set_sonar_present",
+            "software_chatmix_status",
+            "av6x02_init",
+            "parametric_eq_bt",
+            "ten_band_eq_mic",
+            "custom_eq",
+            "selected_eq_preset",
+            "select_eq_preset",
+            "eq",
+            "equalizer",
+        ] {
+            assert!(!is_user_setting_api(n), "{n}");
+        }
+        for n in ["mic_volume", "stream_mix", "sidetone", "line_out_mode"] {
+            assert!(is_user_setting_api(n), "{n}");
+        }
     }
 
     #[test]

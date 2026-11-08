@@ -520,6 +520,15 @@ async fn run_device(
             let mut s = app_state.lock().await;
             if let Some(entry) = s.devices.get_mut(&info.hidraw_path) {
                 entry.cmd_tx = cmd_tx;
+                // Write-only settings never get a status event, so show the
+                // value the user last saved (just re-applied above) rather
+                // than a schema default. Real device events overwrite these.
+                for (field, json_val) in &overrides {
+                    entry
+                        .status
+                        .entry(field.clone())
+                        .or_insert_with(|| serde_json::json!({"value": json_val, "type": null}));
+                }
             }
         }
 
