@@ -712,15 +712,22 @@ async fn forward_events(
         debug!(signal = %ev.signal, fields = ?ev.fields, "sync event");
         let mut chatmix_changed = false;
         let mut radio_status: Option<String> = None;
+        let mut setting_changed = false;
         {
             let mut s = state_for_events.lock().await;
             if let Some(entry) = s.devices.get_mut(&hidraw_path) {
                 for (field, val) in &ev.fields {
                     let dt = ev.display_types.get(field).map(String::as_str);
                     let role = ev.roles.get(field).map(String::as_str);
-                    entry
-                        .status
-                        .insert(field.clone(), state::event_value_to_json(val, dt, role));
+                    let new_json = state::event_value_to_json(val, dt, role);
+                    // A user-facing setting changed on the device itself (e.g.
+                    // a button on the headset): the Device tab must follow.
+                    if entry.status.get(field).and_then(|v| v.get("value")) != new_json.get("value")
+                        && dbus::find_api_for_field(&entry.config, field).is_some()
+                    {
+                        setting_changed = true;
+                    }
+                    entry.status.insert(field.clone(), new_json);
                     match field.as_str() {
                         "chatmix_game" | "chatmix_chat" => chatmix_changed = true,
                         "radio_connection_status" => {
@@ -734,6 +741,13 @@ async fn forward_events(
             }
         }
         let _ = signal_tx.send(SignalEvent::StatusChanged);
+        if setting_changed {
+            let json = {
+                let s = state_for_events.lock().await;
+                dbus::build_settings_json(&s)
+            };
+            let _ = signal_tx.send(SignalEvent::SettingsChanged { json });
+        }
 
         // Drive audio sink lifecycle from the wireless connection event.
         // Only react on an actual transition — the device re-sends the
