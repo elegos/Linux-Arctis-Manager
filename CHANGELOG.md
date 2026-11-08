@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Device tab: settings the headset never reports back (write-only ones, e.g. mic volume, line-out mode, stream mix, mic sidetone on cold start) were hidden. They now always show, starting from the value you last saved (or the range minimum if none), and the daemon restores saved values into the tab on connect.
 - Device tab: a setting changed on the headset itself (e.g. the ANC/transparency button) now updates the control right away; the daemon only refreshed the tab after changes made from the app.
 - Status tab: missing labels for stream mix volumes, line-out mode, EQ preset, dim timer, home screen type and GameBuds volumes (they showed the raw field name).
+- Status tab: stream mix volumes now show as a percentage instead of a bare number.
 - The GUI no longer leaks a D-Bus connection on every status poll and one-shot call. Over hours the leaked connections could exhaust the session bus quota and make dbus-broker disconnect unrelated apps (#82).
 - After a USB glitch the virtual sinks could be destroyed and recreated about once a second until the daemon was restarted: a leftover monitoring task for the same headset kept fighting the new one. The stale task is now stopped when the device reappears.
 - Unplugging a headset or dongle is now always noticed: its removal was ignored on systems where udev doesn't expose the vendor/product IDs, so the device's task and virtual sinks lingered until the daemon restarted.

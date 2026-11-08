@@ -363,8 +363,8 @@ sync_events:
     fields:
       - {name: stream_game, byte: 2}
       - {name: stream_chat, byte: 3}
-      - {name: stream_aux,  byte: 4}
-      - {name: stream_mic,  byte: 5}
+      - {name: stream_aux,  byte: 4, display_type: percentage}
+      - {name: stream_mic,  byte: 5, display_type: percentage}
 
   0x85:
     emit: screen_brightness_changed

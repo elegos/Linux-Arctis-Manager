@@ -380,9 +380,9 @@ sync_events:
   0x47:
     emit: stream_mix_changed
     fields:
-      - {name: stream_main, byte: 2}
-      - {name: stream_aux,  byte: 4}
-      - {name: stream_mic,  byte: 5}
+      - {name: stream_main, byte: 2, display_type: percentage}
+      - {name: stream_aux,  byte: 4, display_type: percentage}
+      - {name: stream_mic,  byte: 5, display_type: percentage}
 
   0x83:
     emit: dim_timer_changed
