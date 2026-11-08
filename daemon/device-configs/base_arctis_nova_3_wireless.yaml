@@ -59,7 +59,7 @@ structs:
   audio_mode:
     - {name: report_id,     type: uint8, constant: 0x00}
     - {name: write_command, type: uint8, constant: 0xAA}
-    - {name: mode,          type: uint8, range: [0, 1]}
+    - {name: mode,          type: uint8, range: [0, 1], status_field: audio_mode}
 
   get_audio_mode:
     outgoing:
@@ -73,17 +73,17 @@ structs:
   mic_volume:
     - {name: report_id,     type: uint8, constant: 0x00}
     - {name: write_command, type: uint8, constant: 0x37}
-    - {name: level,         type: uint8, range: [0, 15]}
+    - {name: level,         type: uint8, range: [0, 15], status_field: mic_volume}
 
   sidetone:
     - {name: report_id, type: uint8, constant: 0x00}
     - {name: command,   type: uint8, constant: 0x39}
-    - {name: level,     type: uint8, range: [0, 10]}
+    - {name: level,     type: uint8, range: [0, 10], status_field: sidetone}
 
   volume_limiter:
     - {name: report_id, type: uint8, constant: 0x00}
     - {name: command,   type: uint8, constant: 0x27}
-    - {name: enabled,   type: uint8, range: [0, 1]}
+    - {name: enabled,   type: uint8, range: [0, 1], status_field: volume_limiter}
 
   headset_status:
     outgoing:

@@ -9,6 +9,7 @@ structs:
     - {name: report_id, type: uint8, constant: 0x00}
     - {name: command,   type: uint8, constant: 0x39}
     - name: level
+      status_field: sidetone
       type: uint8
       range: [0, 3]
       values_mapping: {"0": "off", "1": "low", "2": "medium", "3": "high"}

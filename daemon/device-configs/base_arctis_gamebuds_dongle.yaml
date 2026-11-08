@@ -92,7 +92,7 @@ structs:
     - {name: report_id,     type: uint8, constant: 0x00}
     - {name: write_command, type: uint8, constant: 0xAA}
     # [0] 2.4G dongle  [1] Bluetooth
-    - {name: mode, type: uint8, range: [0, 1]}
+    - {name: mode, type: uint8, range: [0, 1], status_field: audio_mode}
 
   inactivity_timer:
     - {name: report_id, type: uint8, constant: 0x00}
@@ -140,12 +140,12 @@ structs:
   volume_24g:
     - {name: report_id, type: uint8, constant: 0x00}
     - {name: command,   type: uint8, constant: 0x25}
-    - {name: level, type: uint8, range: [0, 15]}
+    - {name: level, type: uint8, range: [0, 15], status_field: volume_24g_level}
 
   volume_bt:
     - {name: report_id, type: uint8, constant: 0x00}
     - {name: command,   type: uint8, constant: 0x23}
-    - {name: level, type: uint8, range: [0, 15]}
+    - {name: level, type: uint8, range: [0, 15], status_field: volume_bt_level}
 
   restore_factory_default:
     - {name: report_id, type: uint8, constant: 0x00}
@@ -356,12 +356,12 @@ sync_events:
   0x23:
     emit: volume_bt_changed
     fields:
-      - {name: level, byte: 2}
+      - {name: volume_bt_level, byte: 2}
 
   0x25:
     emit: volume_24g_changed
     fields:
-      - {name: level, byte: 2}
+      - {name: volume_24g_level, byte: 2}
 
   0x27:
     emit: volume_limiter_changed

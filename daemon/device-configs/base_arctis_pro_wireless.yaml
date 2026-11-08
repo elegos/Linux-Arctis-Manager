@@ -12,56 +12,56 @@ structs:
     - {name: report_id,   type: uint8, constant: 0x00}
     - {name: command,     type: uint8, constant: 0x39}
     - {name: error_check, type: uint8, constant: 0xAA}
-    - {name: value,       type: uint8, range: [0, 9]}
+    - {name: value,       type: uint8, range: [0, 9], status_field: sidetone}
 
   oled_brightness:
     - {name: report_id,   type: uint8, constant: 0x00}
     - {name: command,     type: uint8, constant: 0x85}
     - {name: error_check, type: uint8, constant: 0xAA}
-    - {name: value,       type: uint8, range: [0, 10]}
+    - {name: value,       type: uint8, range: [0, 10], status_field: oled_brightness}
 
   volume_limiter:
     - {name: report_id,   type: uint8, constant: 0x00}
     - {name: command,     type: uint8, constant: 0x27}
     - {name: error_check, type: uint8, constant: 0xAA}
-    - {name: value,       type: uint8, range: [0, 1]}
+    - {name: value,       type: uint8, range: [0, 1], status_field: volume_limiter}
 
   off_time:
     - {name: report_id,   type: uint8, constant: 0x00}
     - {name: command,     type: uint8, constant: 0x3C}
     - {name: error_check, type: uint8, constant: 0xAA}
-    - {name: value,       type: uint8, range: [0, 12]}
+    - {name: value,       type: uint8, range: [0, 12], status_field: off_time}
 
   mute_mic_brightness:
     - {name: report_id,   type: uint8, constant: 0x00}
     - {name: command,     type: uint8, constant: 0x3E}
     - {name: error_check, type: uint8, constant: 0xAA}
-    - {name: value,       type: uint8, range: [0, 10]}
+    - {name: value,       type: uint8, range: [0, 10], status_field: mute_mic_brightness}
 
   bt_startup_mode:
     - {name: report_id,   type: uint8, constant: 0x00}
     - {name: command,     type: uint8, constant: 0x62}
     - {name: error_check, type: uint8, constant: 0xAA}
-    - {name: value,       type: uint8, range: [0, 1]}
+    - {name: value,       type: uint8, range: [0, 1], status_field: bt_startup_mode}
 
   # "0 = duck game audio, 1 = mute game audio" during a BT call.
   bt_gamemute_pref:
     - {name: report_id,   type: uint8, constant: 0x00}
     - {name: command,     type: uint8, constant: 0x63}
     - {name: error_check, type: uint8, constant: 0xAA}
-    - {name: value,       type: uint8, range: [0, 1]}
+    - {name: value,       type: uint8, range: [0, 1], status_field: bt_gamemute_pref}
 
   screensaver_mode:
     - {name: report_id,   type: uint8, constant: 0x00}
     - {name: command,     type: uint8, constant: 0x89}
     - {name: error_check, type: uint8, constant: 0xAA}
-    - {name: value,       type: uint8, range: [0, 2]}
+    - {name: value,       type: uint8, range: [0, 2], status_field: screensaver_mode}
 
   display_timeout:
     - {name: report_id,   type: uint8, constant: 0x00}
     - {name: command,     type: uint8, constant: 0x60}
     - {name: error_check, type: uint8, constant: 0xAA}
-    - {name: value,       type: uint8, range: [3, 60]}
+    - {name: value,       type: uint8, range: [3, 60], status_field: display_timeout}
 
   # DTS Headphone:X toggle. Raw spec declares the state byte with no
   # `(range ...)` at all (unlike every other setting in this file) — left
@@ -72,7 +72,7 @@ structs:
     - {name: report_id,   type: uint8, constant: 0x00}
     - {name: command,     type: uint8, constant: 0x55}
     - {name: error_check, type: uint8, constant: 0xAA}
-    - {name: state,       type: uint8}
+    - {name: state,       type: uint8, status_field: surround}
 
   # 5-band graphic EQ (plain 0-12 integer levels, no biquad math — this
   # chip does its own onboard filtering) bundled with an EQ-preset selector

@@ -1917,6 +1917,111 @@ mod nova_yaml_tests {
         names
     }
 
+    /// Apis that are not user-facing settings: EQ has its own pipeline and
+    /// the two flags are internal.
+    const NOT_SETTINGS: &[&str] = &[
+        "set_sonar_present",
+        "software_chatmix_status",
+        "parametric_eq",
+        "parametric_eq_bt",
+        "parametric_eq_mic",
+        "ten_band_eq_mic",
+        "ten_band_eq_bt",
+    ];
+
+    /// `(api name, setting key)` for every writable, non-constant field of a
+    /// device that `build_settings_json` exposes as a setting.
+    fn writable_setting_keys(cfg: &crate::DeviceConfig) -> Vec<(String, String)> {
+        let (Some(apis), Some(structs)) = (&cfg.apis, &cfg.structs) else {
+            return Vec::new();
+        };
+        let mut api_names: Vec<_> = apis.keys().collect();
+        api_names.sort();
+        let mut out = Vec::new();
+        for api_name in api_names {
+            let api = &apis[api_name];
+            if api.write.is_none() || api.action || NOT_SETTINGS.contains(&api_name.as_str()) {
+                continue;
+            }
+            let Some(sd) = structs.get(api_name.as_str()) else {
+                continue;
+            };
+            let fields = match sd {
+                StructDef::Bidir { outgoing, .. } => outgoing,
+                StructDef::Flat(f) => f,
+            };
+            for fof in fields {
+                let FieldOrRef::Field(fd) = fof else { continue };
+                if fd.constant.is_none() {
+                    out.push((api_name.clone(), fd.setting_key().to_string()));
+                }
+            }
+        }
+        out
+    }
+
+    fn merged_device_configs() -> Vec<(String, crate::DeviceConfig)> {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../device-configs");
+        let mut out = Vec::new();
+        for entry in std::fs::read_dir(&dir).expect("read device-configs dir") {
+            let path = entry.expect("dir entry").path();
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            if path.extension().and_then(|e| e.to_str()) != Some("yaml")
+                || name.starts_with("base_")
+            {
+                continue;
+            }
+            let cfg = load(&path, &[dir.as_path()])
+                .unwrap_or_else(|e| panic!("{name} failed to parse: {e}"));
+            out.push((name, cfg));
+        }
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
+
+    /// Every device: a setting key must identify exactly one write struct
+    /// (`SetSetting` addresses a field by key alone, and `GetSettings` holds
+    /// one schema entry per key), and an api that shares its name with a
+    /// published status field must expose that status name as a setting key,
+    /// otherwise its current value is never found and the control is hidden.
+    /// Fix a violation by naming the status field with `status_field`.
+    #[test]
+    fn setting_keys_are_unique_and_reach_their_status_field() {
+        let mut problems = Vec::new();
+        for (name, cfg) in merged_device_configs() {
+            let status = collect_status_names(&cfg);
+            let keys = writable_setting_keys(&cfg);
+            let mut seen: HashMap<&str, &str> = HashMap::new();
+            for (api, key) in &keys {
+                if let Some(other) = seen.insert(key, api) {
+                    if other != api {
+                        problems.push(format!(
+                            "{name}: setting key '{key}' is used by both '{other}' and '{api}'"
+                        ));
+                    }
+                }
+            }
+            for api in keys
+                .iter()
+                .map(|(a, _)| a)
+                .collect::<std::collections::BTreeSet<_>>()
+            {
+                if status.contains(api.as_str())
+                    && !keys
+                        .iter()
+                        .any(|(a, k)| a == api && status.contains(k.as_str()))
+                {
+                    problems.push(format!(
+                        "{name}: api '{api}' matches a status field of the same name, but none \
+                         of its setting keys does — add `status_field: {api}`"
+                    ));
+                }
+            }
+        }
+        problems.sort();
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+
     /// Regression guard for the "Device tab shows only OLED Brightness" bug
     /// (Nova Pro Omni): `build_settings_json` looks a writable field's
     /// current value up in `status` by its *setting key* (`status_field`,
@@ -1933,54 +2038,16 @@ mod nova_yaml_tests {
     /// internal flags are not user-facing settings.
     #[test]
     fn writable_setting_keys_are_unique_and_have_a_status_source() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../device-configs");
         const MIGRATED: &[&str] = &["nova_elite.yaml", "nova_pro_omni.yaml"];
-        const NOT_SETTINGS: &[&str] = &[
-            "set_sonar_present",
-            "software_chatmix_status",
-            "parametric_eq",
-            "ten_band_eq_mic",
-            "ten_band_eq_bt",
-        ];
         let mut problems = Vec::new();
-        for name in MIGRATED {
-            let path = dir.join(name);
-            let name = name.to_string();
-            let cfg = load(&path, &[dir.as_path()])
-                .unwrap_or_else(|e| panic!("{name} failed to parse: {e}"));
-            let (Some(apis), Some(structs)) = (&cfg.apis, &cfg.structs) else {
+        for (name, cfg) in merged_device_configs() {
+            if !MIGRATED.contains(&name.as_str()) {
                 continue;
-            };
+            }
             let status = collect_status_names(&cfg);
-            let mut seen: HashMap<String, String> = HashMap::new();
-            let mut api_names: Vec<_> = apis.keys().collect();
-            api_names.sort();
-            for api_name in api_names {
-                let api = &apis[api_name];
-                if api.write.is_none() || api.action || NOT_SETTINGS.contains(&api_name.as_str()) {
-                    continue;
-                }
-                let Some(sd) = structs.get(api_name.as_str()) else {
-                    continue;
-                };
-                let fields = match sd {
-                    StructDef::Bidir { outgoing, .. } => outgoing,
-                    StructDef::Flat(f) => f,
-                };
-                for fof in fields {
-                    let FieldOrRef::Field(fd) = fof else { continue };
-                    if fd.constant.is_some() {
-                        continue;
-                    }
-                    let key = fd.setting_key().to_string();
-                    if let Some(other) = seen.insert(key.clone(), api_name.clone()) {
-                        problems.push(format!(
-                            "{name}: setting key '{key}' is used by both '{other}' and '{api_name}'"
-                        ));
-                    }
-                    if !status.contains(&key) {
-                        problems.push(format!("{name}: '{api_name}.{key}' has no status source"));
-                    }
+            for (api, key) in writable_setting_keys(&cfg) {
+                if !status.contains(&key) {
+                    problems.push(format!("{name}: '{api}.{key}' has no status source"));
                 }
             }
         }

@@ -47,7 +47,7 @@ structs:
     - {name: report_id, type: uint8, constant: 0x00}
     - {name: command,   type: uint8, constant: 0x06}
     - {name: selector,  type: uint8, constant: 0x00}
-    - {name: gain,      type: uint8, range: [0, 255]}
+    - {name: gain,      type: uint8, range: [0, 255], status_field: sidetone_gain}
 
   surround_sound:
     - {name: report_id, type: uint8, constant: 0x00}
@@ -59,7 +59,7 @@ structs:
     - {name: report_id, type: uint8, constant: 0x00}
     - {name: command,   type: uint8, constant: 0x05}
     - {name: selector,  type: uint8, constant: 0x00}
-    - {name: gain,      type: uint8, range: [0, 255]}
+    - {name: gain,      type: uint8, range: [0, 255], status_field: microphone_gain}
 
   # Wire format is big-endian, confirmed by the raw spec's own comment
   # ("firmware expects the time value to be big-endian") and a manual
@@ -79,6 +79,7 @@ structs:
     - {name: command,   type: uint8, constant: 0x2C}
     - {name: selector,  type: uint8, constant: 0x00}
     - name: mode
+      status_field: bt_call_muting
       type: uint8
       range: [0, 2]
       values_mapping: {"0": "default", "1": "mute", "2": "lower_12db"}
@@ -87,7 +88,7 @@ structs:
     - {name: report_id, type: uint8, constant: 0x00}
     - {name: command,   type: uint8, constant: 0x2B}
     - {name: selector,  type: uint8, constant: 0x00}
-    - {name: mode,      type: uint8, range: [0, 1]}
+    - {name: mode,      type: uint8, range: [0, 1], status_field: bt_startup_mode}
 
   # One-shot RF pairing trigger — an action, not a persisted setting, same
   # treatment as Arctis 7+'s `pairing_mode`.

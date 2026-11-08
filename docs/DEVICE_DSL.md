@@ -130,7 +130,7 @@ sync_events:
 The wire `name` is still what the codec uses to build the message; `status_field` only renames the setting. Setting keys must be unique within a device, and the translation files need a `[settings]` entry per key.
 
 > [!NOTE]
-> Only the Nova Elite and Nova Pro Omni configs use `status_field` so far; the other devices' write structs still rely on the wire name matching the status name.
+> `status_field` is only needed where the wire name collides with another struct's or differs from the status name. Convention for a single-value struct: use the api name (`sidetone`, `volume_limiter`, …). A device-config test fails on duplicate setting keys, and on an api that shares its name with a published status field but doesn't expose it as a setting key.
 
 ### Nested struct reference
 
