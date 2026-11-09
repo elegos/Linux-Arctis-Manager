@@ -5,31 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [3.0.0-beta3]
 
 ### Added
 
-- New "Remove Virtual Sinks After (seconds)" general setting (default 2, 0 = immediately, up to 5): when the headset drops and comes straight back (flaky USB port or power glitch), the `Arctis_Media`/`Arctis_Chat` sinks are kept instead of being destroyed and recreated. "Redirect Audio on Disconnect" now applies when the delay expires.
+- New "Remove Virtual Sinks After (seconds)" setting keeps the virtual sinks across brief headset disconnects.
 
 ### Changed
 
-- The prebuilt tarball now ships in two variants, `generic` (OpenSSL 3) and `generic-ossl4` (OpenSSL 4); `scripts/install.sh` picks the one matching the host's `libssl` (e.g. Fedora 45 ships OpenSSL 4 only), and its preflight reports the installed and installable OpenSSL.
+- The prebuilt tarball now ships `generic` (OpenSSL 3) and `generic-ossl4` (OpenSSL 4) variants, and `scripts/install.sh` picks the right one.
 - New application and system tray icons.
-- The ChatMix dial now sets the volume of the `Arctis_Media`/`Arctis_Chat` loopback streams instead of the virtual sinks, so it no longer overwrites the default output volume or triggers the desktop volume OSD on every step. Existing virtual sinks are reset to 100% once (#81).
+- The ChatMix dial no longer changes the default output volume or triggers the desktop volume OSD (#81).
 
 ### Fixed
 
-- Nova Pro Omni and Nova Elite: the ChatMix dial did nothing and no ChatMix appeared in the app, because the daemon never switched the station's ChatMix on at startup (and switched it off on shutdown) (#84).
-- Nova Pro Omni and Nova Elite (and, with the same cause, other devices): the Device tab showed only "OLED Brightness" (the other controls appeared one by one, whenever the headset sent the matching event). The settings list matched each control to its current value by the write command's generic field name (`level`, `mode`, `minutes`…), which never matched the name the headset reports it under. Device configs can now name the status field a writable field maps to (`status_field`), and Nova Elite/Pro Omni use it, so ANC, transparency, sidetone, inactivity timer, screensaver, home screen, Bluetooth defaults, volume limiter and mic noise reduction show up straight away. The same fix covers the Arctis Pro Wireless (whose controls all shared the field name `value`, so a write could hit the wrong setting), Arctis 7+/7X+/9, Nova 3/3 Wireless/4/5 and GameBuds. Settings you had saved under the old names (`level`, `mode`, `minutes`, `enabled`, `state`, `value`, `gain`) are not re-applied once, and the GameBuds volume status fields are now `volume_bt_level`/`volume_24g_level` instead of both being `level`.
-- Device tab: settings the headset never reports back (write-only ones, e.g. mic volume, line-out mode, stream mix, mic sidetone on cold start) were hidden. They now always show, starting from the value you last saved (or the range minimum if none), and the daemon restores saved values into the tab on connect.
-- Device tab: a setting changed on the headset itself (e.g. the ANC/transparency button) now updates the control right away; the daemon only refreshed the tab after changes made from the app.
-- Status tab: missing labels for stream mix volumes, line-out mode, EQ preset, dim timer, home screen type and GameBuds volumes (they showed the raw field name).
-- Status tab: stream mix volumes now show as a percentage instead of a bare number.
-- The GUI no longer leaks a D-Bus connection on every status poll and one-shot call. Over hours the leaked connections could exhaust the session bus quota and make dbus-broker disconnect unrelated apps (#82).
-- After a USB glitch the virtual sinks could be destroyed and recreated about once a second until the daemon was restarted: a leftover monitoring task for the same headset kept fighting the new one. The stale task is now stopped when the device reappears.
-- Unplugging a headset or dongle is now always noticed: its removal was ignored on systems where udev doesn't expose the vendor/product IDs, so the device's task and virtual sinks lingered until the daemon restarted.
-- Unplugging a HID device the daemon does not manage (e.g. the headset's own USB-C charging cable) no longer removes the virtual sinks while the dongle is still connected (#81).
-- Streams that were playing on `Arctis_Chat` are moved back to it when the virtual sinks are recreated after a headset reconnect (#81).
+- Nova Pro Omni and Nova Elite: the ChatMix dial now works (#84).
+- Device tab: all controls show up straight away on Nova Pro Omni, Nova Elite and other devices, and write-only settings are no longer hidden.
+- Device tab: settings changed on the headset itself update immediately.
+- Arctis Pro Wireless: writes could hit the wrong setting.
+- Status tab: added missing labels, and stream mix volumes show as percentages.
+- GUI no longer leaks D-Bus connections that could disconnect unrelated apps (#82).
+- Virtual sinks are no longer recreated every second after a USB glitch.
+- Unplugging a headset or dongle is now always detected.
+- Unplugging an unmanaged HID device (e.g. the charging cable) no longer removes the virtual sinks (#81).
+- Streams playing on `Arctis_Chat` return to it after a reconnect (#81).
 
 ## [3.0.0-beta2]
 
