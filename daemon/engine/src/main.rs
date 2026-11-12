@@ -439,8 +439,15 @@ async fn run_device(
         // Create virtual audio sinks and apply the initial chatmix balance.
         // Must run before redirect so Arctis_Media exists when set_default_sink
         // is called.
+        // Skipped when the dongle is up but the headset is off: the
+        // PAIRED_CONNECTED event creates them later, and creating them now
+        // would just be torn down by the first NOT_CONNECTED transition.
+        let radio_offline = radio_offline_in_events(&init_events);
+        if radio_offline {
+            info!("headset radio offline on {path_str}: deferring virtual sinks until it connects");
+        }
         SINK_RELEASE.cancel();
-        {
+        if !radio_offline {
             let mut guard = audio_shared.lock().await;
             if guard.is_none() {
                 match audio::setup_sinks().await {
@@ -467,7 +474,7 @@ async fn run_device(
                 .await
                 .general_settings
                 .redirect_audio_on_connect;
-            if redirect {
+            if redirect && !radio_offline {
                 audio::set_default_sink(audio::MEDIA_SINK).await;
             }
         }
@@ -759,7 +766,7 @@ async fn forward_events(
             let changed = last_radio_status.as_deref() != Some(status.as_str());
             last_radio_status = Some(status.clone());
             if changed {
-                if status.contains("NOT_CONNECTED") || status == "DISCONNECTED" {
+                if is_radio_offline(status) {
                     schedule_sink_release(&state_for_events, &audio_for_task, &visibility_for_task)
                         .await;
                 } else if status == "PAIRED_CONNECTED" || status == "CONNECTED" {
@@ -904,6 +911,25 @@ async fn cleanup_device(
 ) {
     app_state.lock().await.devices.remove(path);
     let _ = signal_tx.send(SignalEvent::DeviceDisconnected { pid });
+}
+
+/// True when a `radio_connection_status` value means the headset is not on air.
+fn is_radio_offline(status: &str) -> bool {
+    status.contains("NOT_CONNECTED") || status == "DISCONNECTED"
+}
+
+/// True when the init snapshot reports the headset radio as offline (dongle
+/// plugged, headset off). Devices without a radio status report false.
+fn radio_offline_in_events(events: &[EmitEvent]) -> bool {
+    events
+        .iter()
+        .filter_map(|ev| ev.fields.get("radio_connection_status"))
+        .filter_map(|v| match v {
+            EventValue::Str(s) => Some(s.as_str()),
+            _ => None,
+        })
+        .next_back()
+        .is_some_and(is_radio_offline)
 }
 
 /// Extract the initial chatmix_game and chatmix_chat values from device init events.
@@ -1709,5 +1735,42 @@ mod tests {
         assert!(open_sync_transport(&cfg, 0xFFFF, Path::new("/nonexistent"))
             .await
             .is_none());
+    }
+
+    fn radio_event(status: &str) -> EmitEvent {
+        EmitEvent {
+            signal: "radio_connection".to_string(),
+            fields: HashMap::from([(
+                "radio_connection_status".to_string(),
+                EventValue::Str(status.to_string()),
+            )]),
+            display_types: HashMap::new(),
+            roles: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn offline_radio_statuses_are_detected() {
+        assert!(is_radio_offline("NOT_CONNECTED"));
+        assert!(is_radio_offline("DISCONNECTED"));
+        assert!(!is_radio_offline("PAIRED_CONNECTED"));
+        assert!(!is_radio_offline("CONNECTED"));
+    }
+
+    #[test]
+    fn init_events_with_offline_radio_skip_sink_setup() {
+        assert!(radio_offline_in_events(&[radio_event("NOT_CONNECTED")]));
+        assert!(radio_offline_in_events(&[radio_event("DISCONNECTED")]));
+    }
+
+    #[test]
+    fn init_events_with_connected_radio_allow_sink_setup() {
+        assert!(!radio_offline_in_events(&[radio_event("PAIRED_CONNECTED")]));
+    }
+
+    #[test]
+    fn init_events_without_radio_status_allow_sink_setup() {
+        // Wired devices never report radio_connection_status.
+        assert!(!radio_offline_in_events(&[]));
     }
 }
