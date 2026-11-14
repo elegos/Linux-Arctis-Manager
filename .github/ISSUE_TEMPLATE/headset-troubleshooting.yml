@@ -8,6 +8,7 @@ body:
       value: |
         This form is built around the **debug bundle** - without it we can rarely tell what is going on.
 
+        0. First run `scripts/doctor.sh` (same download method as below). It often finds the problem and prints the fix, with no issue needed.
         1. Plug in / power on the headset and reproduce the problem.
         2. Run `scripts/collect-debug-info.sh` (from a checkout, or `curl -fsSLO https://raw.githubusercontent.com/elegos/Linux-Arctis-Manager/develop/scripts/collect-debug-info.sh`).
         3. Attach the `.tar.gz` it prints (nothing is uploaded by the script).
