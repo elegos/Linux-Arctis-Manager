@@ -327,6 +327,7 @@ rm -rf ~/.config/arctis_manager
 
 ## ⚠️ Troubleshooting
 
+- **Start here:** run `scripts/doctor.sh` (or, without a checkout: `curl -fsSLO https://raw.githubusercontent.com/elegos/Linux-Arctis-Manager/develop/scripts/doctor.sh && bash doctor.sh`). It checks your install, services, device support, audio sinks and v1/v2 leftovers without changing anything, and prints the fix for each problem it finds.
 - App or headset becomes unresponsive: `systemctl --user restart lam-hidraw-helper.service lam-daemon.service`
 - Newly supported device does not appear after an update: `systemctl --user daemon-reload && systemctl --user restart lam-daemon.service`, or call the `ReloadConfigs` D-Bus method to pick up new/changed device YAML files without a restart.
 - App fails to start with a Qt xcb platform error: install `libxcb-cursor0` (Debian/Ubuntu) or `xcb-util-cursor` (Arch/Fedora). Required on non-Qt desktop environments like Cinnamon.

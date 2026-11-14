@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `scripts/doctor.sh`: a read-only health check that tells you why your headset isn't working (not installed, helper missing its capability, services down, missing ChatMix sinks, leftovers from v1/v2, unsupported device) and prints the fix for each problem.
+- `AGENTS.md`: a guide for coding agents (Claude Code, Codex, ...) helping someone set up their headset or contributing to the project.
+
 ### Fixed
 
 - Virtual sinks are no longer created and immediately removed when the dongle is plugged in with the headset turned off.

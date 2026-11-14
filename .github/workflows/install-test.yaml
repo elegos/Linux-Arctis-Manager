@@ -20,7 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - run: shellcheck --severity=warning scripts/install.sh scripts/build-release-tarball.sh tests/installer/dry-run.sh
+      - run: shellcheck --severity=warning scripts/install.sh scripts/build-release-tarball.sh tests/installer/dry-run.sh scripts/doctor.sh tests/doctor/run.sh
+      - run: tests/doctor/run.sh
 
   # scripts/install.sh's verification + preflight against the prebuilt
   # tarball on every distro of the matrix (nothing is installed: --dry-run).
