@@ -78,23 +78,28 @@ jobs:
 
             rpm)
               dnf install -y rpm-build rpmdevtools tar gzip
-              rpmdev-setuptree
+              # Only the dependency install needs root; the build itself runs
+              # as an unprivileged user, like the make container-build-* targets.
+              useradd -m builder
+              RPMTOP=/home/builder/rpmbuild
+              su builder -c rpmdev-setuptree
               PKGNAME=linux-arctis-manager
               VERSION=$(echo "$VERSION_RAW" | sed 's/-/~/g')
-              tar czf "$HOME/rpmbuild/SOURCES/${PKGNAME}-${VERSION}.tar.gz" \
+              tar czf "$RPMTOP/SOURCES/${PKGNAME}-${VERSION}.tar.gz" \
                   --transform "s,^\./,${PKGNAME}-${VERSION}/," \
                   --exclude='./.git' --exclude='./.venv' --exclude='./dist' --exclude='./daemon/target' \
                   .
               sed "s/^Version:.*/Version:        ${VERSION}/" \
                   packaging/fedora/linux-arctis-manager.spec \
-                  > "$HOME/rpmbuild/SPECS/${PKGNAME}.spec"
+                  > "$RPMTOP/SPECS/${PKGNAME}.spec"
+              chown -R builder:builder "$RPMTOP"
 
               # Build deps come straight from the spec's own BuildRequires:,
               # not a list maintained separately in this workflow.
-              BUILD_DEPS=$(grep -E '^BuildRequires:' "$HOME/rpmbuild/SPECS/${PKGNAME}.spec" | awk '{print $2}')
+              BUILD_DEPS=$(grep -E '^BuildRequires:' "$RPMTOP/SPECS/${PKGNAME}.spec" | awk '{print $2}')
               dnf install -y $BUILD_DEPS
 
-              rpmbuild -ba "$HOME/rpmbuild/SPECS/${PKGNAME}.spec"
+              su builder -c "rpmbuild -ba $RPMTOP/SPECS/${PKGNAME}.spec"
               mkdir -p /out
               # %{?dist} in the spec's Release already makes the built
               # filename version-unique per Fedora release (.fc41/.fc42/...),
@@ -102,14 +107,14 @@ jobs:
               # "${PKGNAME}*.rpm", not "${PKGNAME}-[0-9]*.rpm": the spec now
               # also builds a linux-arctis-manager-plasma-widget subpackage,
               # whose filename has no digit right after ${PKGNAME}-.
-              find "$HOME/rpmbuild/RPMS" -name "${PKGNAME}*.rpm" \
+              find "$RPMTOP/RPMS" -name "${PKGNAME}*.rpm" \
                   ! -name '*debuginfo*' ! -name '*debugsource*' -exec cp {} /out/ \;
               ;;
 
             deb)
               apt-get update
               DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-                devscripts debhelper equivs dpkg-dev
+                devscripts debhelper equivs dpkg-dev fakeroot
               PKGNAME=linux-arctis-manager
               VERSION=$(echo "$VERSION_RAW" | sed 's/-/~/g')
               mkdir -p /tmp/build
@@ -138,7 +143,10 @@ jobs:
               mk-build-deps --tool 'apt-get -y --no-install-recommends' debian/control
               apt-get -y --no-install-recommends install ./linux-arctis-manager-build-deps_*.deb
 
-              dpkg-buildpackage -us -uc -b
+              # Build as an unprivileged user; only the dep install needs root.
+              useradd -m builder
+              chown -R builder:builder /tmp/build
+              su builder -c 'dpkg-buildpackage -us -uc -b'
               mkdir -p /out
               cp /tmp/build/*.deb /out/
               ;;
