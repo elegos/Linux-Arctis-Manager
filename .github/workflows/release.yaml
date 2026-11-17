@@ -41,30 +41,44 @@ jobs:
     if: ${{ github.event_name == 'push' }}
     uses: ./.github/workflows/build-tarball.yaml
 
-  # Signs SHA256SUMS of the prebuilt tarball(s) with the maintainer's SSH
-  # signing key (verified by scripts/install.sh with `ssh-keygen -Y verify`).
-  # Runs in the protected `release-signing` environment so the key is only
-  # reachable by an approved release run. See docs/release-pipeline.md.
-  sign-tarball:
+  # Signs SHA256SUMS - covering every asset the release ships (tarballs,
+  # distro packages, install.sh) - with the maintainer's SSH signing key
+  # (verified by scripts/install.sh with `ssh-keygen -Y verify`). Runs in the
+  # protected `release-signing` environment so the key is only reachable by
+  # an approved release run. See docs/release-pipeline.md.
+  sign-release:
     if: ${{ github.event_name == 'push' }}
-    needs: build-tarball
+    needs: [build-pkg, build-tarball]
     runs-on: ubuntu-latest
     environment: release-signing
     steps:
+      - uses: actions/checkout@v5
+
       - uses: actions/download-artifact@v8
         with:
-          pattern: tarball-generic*
+          pattern: tarball-*
           merge-multiple: true
-          path: signed
+          path: assets/tarballs
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: pkg-*
+          path: assets/pkg
+
+      # Same layout the `release` job assembles, so both see the same files.
+      - name: Add the user-level installer
+        run: install -Dm755 scripts/install.sh assets/installer/install.sh
 
       - name: Checksum and sign
-        working-directory: signed
         env:
           SIGNING_KEY: ${{ secrets.LAM_RELEASE_SIGNING_KEY }}
           SIGNING_KEY_PASSPHRASE: ${{ secrets.LAM_RELEASE_SIGNING_KEY_PASSPHRASE }}
         run: |
           set -e
-          sha256sum -- *.tar.gz > SHA256SUMS
+          mkdir signed
+          python3 .github/scripts/release_assets.py sums assets > signed/SHA256SUMS
+          test -s signed/SHA256SUMS
+          cd signed
           if [ -z "$SIGNING_KEY" ]; then
             echo "::warning::LAM_RELEASE_SIGNING_KEY is not set: SHA256SUMS is NOT signed, so scripts/install.sh will refuse to install this release."
             exit 0
@@ -80,7 +94,7 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: tarball-signed
+          name: release-signed
           path: |
             signed/SHA256SUMS
             signed/SHA256SUMS.sig
@@ -88,7 +102,7 @@ jobs:
 
   release:
     if: ${{ github.event_name == 'push' }}
-    needs: [build-pkg, build-tarball, sign-tarball]
+    needs: [build-pkg, build-tarball, sign-release]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -117,27 +131,11 @@ jobs:
       - name: Add the user-level installer
         run: install -Dm755 scripts/install.sh pkg/installer/install.sh
 
-      # Debug symbol packages (makepkg's auto-split "-debug-*" pkg.tar.zst,
-      # dpkg's auto-generated "*-dbgsym_*.deb"; rpm's debuginfo/debugsource
-      # are already dropped in build-pkg.yaml) aren't something end users
-      # install. Source packages (rpm SRPM, a debian source upload's
-      # .dsc/.orig.tar.*/.debian.tar.*) are redundant with the tag's own
-      # source archive GitHub already offers on every release.
+      # Debug symbol and source packages aren't release assets. The filter
+      # lives in release_assets.py, shared with sign-release so the signed
+      # SHA256SUMS covers exactly what is attached here.
       - name: Drop debug and source packages from release assets
-        run: |
-          set -e
-          find pkg -type f \
-            ! -iname '*-debug-*.pkg.tar.zst' \
-            ! -iname '*dbgsym*.deb' \
-            ! -iname '*debuginfo*' \
-            ! -iname '*debugsource*' \
-            ! -iname '*.src.rpm' \
-            ! -iname '*.src.tar.*' \
-            ! -iname '*.dsc' \
-            ! -iname '*.orig.tar.*' \
-            ! -iname '*.debian.tar.*' \
-            ! -iname '*_source.changes' \
-            -print0 > /tmp/release-assets.list
+        run: python3 .github/scripts/release_assets.py list pkg > /tmp/release-assets.list
 
       - name: Create draft release
         env:

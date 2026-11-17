@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The signed `SHA256SUMS` of a release now covers the distro packages and `install.sh` too, not just the tarballs (#87).
 - Virtual sinks are no longer created and immediately removed when the dongle is plugged in with the headset turned off.
 
 ## [3.0.0-beta3]

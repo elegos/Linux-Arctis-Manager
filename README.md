@@ -109,11 +109,11 @@ Releases are signed with this SSH key (`lam-release`), fingerprint:
 SHA256:ACwAZQm1Pfgrg2gv3CpS7jShGtASZKgmlaCYGsFoDA0
 ```
 
-`install.sh` checks the signature of `SHA256SUMS` and then the tarball's checksum before extracting or running anything. To do the same yourself:
+`SHA256SUMS` lists every file attached to the release: the tarballs, the distro packages and `install.sh`. `install.sh` checks its signature and then the tarball's checksum before extracting or running anything. To do the same yourself (swap the tarball for the package you downloaded, if you installed one):
 
 ```bash
 V=https://github.com/elegos/Linux-Arctis-Manager/releases/download/<tag>
-curl -fsSLO $V/SHA256SUMS -O $V/SHA256SUMS.sig -O $V/lam-<version>-x86_64-generic.tar.gz
+curl -fsSLO $V/SHA256SUMS -O $V/SHA256SUMS.sig -O $V/lam-<version>-x86_64-generic.tar.gz   # or the .deb/.rpm/.pkg.tar.zst you want
 echo 'lam-release namespaces="lam-release" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGEJRaTQKrVoLHoNLxtYs4s5TXt6KILaEEElIi83LYfH' > allowed_signers
 ssh-keygen -Y verify -f allowed_signers -I lam-release -n lam-release -s SHA256SUMS.sig < SHA256SUMS
 sha256sum -c --ignore-missing SHA256SUMS

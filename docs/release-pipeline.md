@@ -338,7 +338,7 @@ target before trusting the channel:
 
 Besides the distro packages, each tag ships a prebuilt tarball per architecture/target
 (`lam-<version>-<arch>-<target>.tar.gz`, built by `build-tarball.yaml` on the oldest supported
-glibc), plus `SHA256SUMS` and `SHA256SUMS.sig`, and `install.sh` itself. `scripts/install.sh`
+glibc), plus `SHA256SUMS` and `SHA256SUMS.sig`, and `install.sh` itself. `SHA256SUMS` lists every asset the release ships (tarballs, Arch/Fedora/Debian/Ubuntu packages and `install.sh`); `.github/scripts/release_assets.py` is the single definition of that set, shared by the signing and release jobs. `scripts/install.sh`
 verifies the signature with `ssh-keygen -Y verify` against the public key embedded in the
 script (`SIGNING_PUBKEY`) and the tarball against the signed checksum, before extracting or
 running anything.
@@ -359,7 +359,7 @@ One-time setup of the signing key:
 3. GitHub -> Settings -> Environments -> new environment `release-signing`, with yourself as
    required reviewer. Add secrets `LAM_RELEASE_SIGNING_KEY` (the whole private key file) and
    `LAM_RELEASE_SIGNING_KEY_PASSPHRASE` to that environment.
-4. Without the secret the `sign-tarball` job only warns and ships an unsigned `SHA256SUMS`
+4. Without the secret the `sign-release` job only warns and ships an unsigned `SHA256SUMS`
    (the installer then refuses to install that release).
 
 Key rotation = new key pair + new `SIGNING_PUBKEY` in a new `install.sh` release.
