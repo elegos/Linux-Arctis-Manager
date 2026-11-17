@@ -16,13 +16,6 @@ body:
     validations:
       required: true
   - type: textarea
-    id: devices
-    attributes:
-      label: Output of `lam-cli tools arctis-devices`
-      render: text
-    validations:
-      required: true
-  - type: textarea
     id: bundle
     attributes:
       label: Debug bundle

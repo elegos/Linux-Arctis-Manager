@@ -154,7 +154,7 @@ Join us on:
 
 ### Missing a Device?
 
-If your headset isn't listed in the support table, we likely just need your hardware IDs to get started. Run `lam-cli tools arctis-devices` and share the output on [Discord](https://discord.gg/FXfvUXWXt4) or [Fluxer](https://fluxer.gg/beALFGJK).
+If your headset isn't listed in the support table, we likely just need your hardware IDs to get started. [Open a new-device request](https://github.com/elegos/Linux-Arctis-Manager/issues/new?template=new-device.yml) and follow the guided form, or ask on [Discord](https://discord.gg/FXfvUXWXt4) or [Fluxer](https://fluxer.gg/beALFGJK).
 
 ---
 
