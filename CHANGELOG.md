@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- "Create debug bundle..." on the Diagnostics page: runs the support-bundle script and saves the `.tar.gz` where you choose, with a reminder to attach it to the issue. The script now ships inside the Python package (`collect_debug_info.sh`, with `scripts/collect-debug-info.sh` kept as a symlink), takes `--output FILE` and always removes its scratch directory.
 - Diagnostics page in the GUI (button at the bottom of the sidebar): lists the SteelSeries devices the system exposes and whether each is supported, with a "Copy details" button and, for audio devices without a config, a button that opens the new-device issue form pre-filled with the hardware IDs. The form gained a "Hardware details" field for it.
 - `GetDiagnostics` D-Bus method (Config interface): read-only report of the SteelSeries hidraw nodes, using the same checks as `lam-hidraw-helper`, flagging each as supported, unsupported or ignored. First building block of the in-app troubleshooting page that will replace `lam-cli tools arctis-devices`.
 - `scripts/bump_version.py` writes a release version into every file that carries it (`VERSION`, `pyproject.toml`, `uv.lock`, PKGBUILD, RPM spec, Debian changelog, `CHANGELOG.md`).

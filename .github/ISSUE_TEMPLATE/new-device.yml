@@ -27,7 +27,7 @@ body:
     id: bundle
     attributes:
       label: Debug bundle
-      description: Run `scripts/collect-debug-info.sh` with the headset connected and attach the `.tar.gz` (it contains the HID descriptors).
+      description: In the app open Diagnostics → "Create debug bundle..." with the headset connected and attach the `.tar.gz` (it contains the HID descriptors). Without the GUI, run `collect-debug-info.sh` (see `scripts/`).
     validations:
       required: true
   - type: textarea

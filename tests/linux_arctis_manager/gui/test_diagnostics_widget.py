@@ -60,3 +60,41 @@ def test_report_replaces_previous_cards():
     w._on_report([DEVICE, {**DEVICE, 'node': 'hidraw4'}])
     w._on_report([DEVICE])
     assert w._list_layout.count() == 1
+
+
+def test_cancelling_the_save_dialog_starts_nothing(monkeypatch):
+    from PySide6.QtWidgets import QFileDialog
+    monkeypatch.setattr(QFileDialog, 'getSaveFileName', lambda *a, **k: ('', ''))
+    w = _widget()
+    w._create_bundle()
+    assert w._process is None
+    assert w._bundle_button.isEnabled()
+
+
+def test_finished_bundle_reports_success_or_failure(monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    shown: list[tuple[str, str]] = []
+    monkeypatch.setattr(QMessageBox, 'information', lambda _p, _t, msg: shown.append(('info', msg)))
+    monkeypatch.setattr(QMessageBox, 'warning', lambda _p, _t, msg: shown.append(('warn', msg)))
+    w = _widget()
+    from pathlib import Path
+    w._bundle_path = Path('/tmp/x.tar.gz')
+    w._bundle_button.setEnabled(False)
+    w._on_bundle_finished(0)
+    w._on_bundle_finished(1)
+    assert shown[0][0] == 'info' and '/tmp/x.tar.gz' in shown[0][1]
+    assert shown[1][0] == 'warn'
+    assert w._bundle_button.isEnabled()
+
+
+def test_a_real_bundle_is_written_to_the_chosen_file(monkeypatch, tmp_path):
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+    out = tmp_path / 'b.tar.gz'
+    monkeypatch.setattr(QFileDialog, 'getSaveFileName', lambda *a, **k: (str(out), ''))
+    monkeypatch.setattr(QMessageBox, 'information', lambda *a, **k: None)
+    monkeypatch.setattr(QMessageBox, 'warning', lambda *a, **k: None)
+    w = _widget()
+    w._create_bundle()
+    assert w._process is not None
+    assert w._process.waitForFinished(120000)
+    assert out.is_file() and out.stat().st_size > 0

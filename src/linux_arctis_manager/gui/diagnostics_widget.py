@@ -1,8 +1,13 @@
-from PySide6.QtCore import Qt, QUrl, Signal
+from datetime import datetime
+from pathlib import Path
+
+from PySide6.QtCore import QProcess, Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
+    QFileDialog,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -10,6 +15,11 @@ from PySide6.QtWidgets import (
 )
 
 from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
+from linux_arctis_manager.gui.debug_bundle import (
+    build_command,
+    default_file_name,
+    script_path,
+)
 from linux_arctis_manager.gui.diagnostics_logic import describe_device, issue_url
 from linux_arctis_manager.i18n import I18n
 from linux_arctis_manager.utils import project_version
@@ -50,6 +60,13 @@ class QDiagnosticsWidget(QWidget):
         hint = QLabel(_t('diag_hint'))
         hint.setWordWrap(True)
         outer.addWidget(hint)
+
+        self._process: QProcess | None = None
+        self._bundle_path: Path | None = None
+        self._bundle_button = QPushButton(_t('diag_bundle'))
+        self._bundle_button.setToolTip(_t('diag_bundle_hint'))
+        self._bundle_button.clicked.connect(self._create_bundle)
+        outer.addWidget(self._bundle_button, 0, Qt.AlignmentFlag.AlignLeft)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -128,3 +145,30 @@ class QDiagnosticsWidget(QWidget):
             buttons.addWidget(report)
         layout.addLayout(buttons)
         return card
+
+    def _create_bundle(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, _t('diag_bundle_save_title'),
+            str(Path.home() / default_file_name(datetime.now())), 'tar.gz (*.tar.gz)',
+        )
+        if not path:
+            return
+        self._bundle_path = Path(path)
+        program, args = build_command(script_path(), self._bundle_path)
+        self._process = QProcess(self)
+        self._process.finished.connect(self._on_bundle_finished)
+        self._process.errorOccurred.connect(lambda _err: self._on_bundle_finished(-1))
+        self._bundle_button.setEnabled(False)
+        self._bundle_button.setText(_t('diag_bundle_running'))
+        self._process.start(program, args)
+
+    def _on_bundle_finished(self, exit_code: int, *_ignored) -> None:
+        self._bundle_button.setEnabled(True)
+        self._bundle_button.setText(_t('diag_bundle'))
+        if exit_code == 0:
+            QMessageBox.information(
+                self, _t('diag_bundle'),
+                _t('diag_bundle_done').replace('{path}', str(self._bundle_path)),
+            )
+        else:
+            QMessageBox.warning(self, _t('diag_bundle'), _t('diag_bundle_failed'))

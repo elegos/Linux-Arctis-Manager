@@ -51,4 +51,4 @@ body:
     id: bundle
     attributes:
       label: Debug bundle (optional, helpful for anything involving the headset)
-      description: Output of `scripts/collect-debug-info.sh`.
+      description: From the app's Diagnostics page ("Create debug bundle..."), or the output of `collect_debug_info.sh`.

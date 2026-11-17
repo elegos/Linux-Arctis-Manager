@@ -9,8 +9,8 @@ body:
         This form is built around the **debug bundle** - without it we can rarely tell what is going on.
 
         1. Plug in / power on the headset and reproduce the problem.
-        2. Run `scripts/collect-debug-info.sh` (from a checkout, or `curl -fsSLO https://raw.githubusercontent.com/elegos/Linux-Arctis-Manager/develop/scripts/collect-debug-info.sh`).
-        3. Attach the `.tar.gz` it prints (nothing is uploaded by the script).
+        2. In the app open **Diagnostics** and click "Create debug bundle...". Without the GUI, run `bash collect_debug_info.sh` (from a checkout: `src/linux_arctis_manager/scripts/`, or `curl -fsSLO https://raw.githubusercontent.com/elegos/Linux-Arctis-Manager/develop/src/linux_arctis_manager/scripts/collect_debug_info.sh`).
+        3. Attach the `.tar.gz` (nothing is uploaded automatically).
 
         We may ask you to run it again with an opt-in capture. **Review those before attaching**: `--usb-capture` records the whole USB bus, so another device on the same bus appears in it too.
   - type: input
