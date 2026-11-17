@@ -1,18 +1,21 @@
 # Maintainer: Giacomo Furlan <g.furlan@accenture.com>
 pkgbase=linux-arctis-manager
 pkgname=(linux-arctis-manager linux-arctis-manager-lang linux-arctis-manager-plasma-widget linux-arctis-manager-gnome-extension)
-pkgver=3.0.0alpha1
+# Upstream version as tagged (v${_upstreamver}); Arch pkgver can't contain "-".
+# Written by scripts/bump_version.py - don't edit by hand.
+_upstreamver=3.0.0-beta3
+pkgver=${_upstreamver//-/}
 pkgrel=1
 arch=('x86_64')
 url="https://github.com/elegos/Linux-Arctis-Manager"
 license=('MIT')
 makedepends=('rust' 'cargo' 'python' 'glib2' 'libpulse')
-# Update tag and sha256sum for each release.
-source=("$pkgbase-$pkgver.tar.gz::https://github.com/elegos/Linux-Arctis-Manager/archive/refs/tags/v${pkgver}.tar.gz")
-sha256sums=('SKIP')
+# sha256sums: scripts/bump_version.py resets it to SKIP; run its --update-checksum once the tag is pushed.
+source=("$pkgbase-$pkgver.tar.gz::https://github.com/elegos/Linux-Arctis-Manager/archive/refs/tags/v${_upstreamver}.tar.gz")
+sha256sums=('6affb7b62d816f910fe4393c3b986c343f369eee9b077b4faa782b82027322db')
 
 build() {
-    cd "Linux-Arctis-Manager-${pkgver}"
+    cd "Linux-Arctis-Manager-${_upstreamver}"
     make build PREFIX=/usr
 }
 
@@ -29,7 +32,7 @@ package_linux-arctis-manager() {
     conflicts=('linux-arctis-manager-git')
     install=lam.install
 
-    cd "Linux-Arctis-Manager-${pkgver}"
+    cd "Linux-Arctis-Manager-${_upstreamver}"
     make install-core PREFIX=/usr DESTDIR="$pkgdir"
 }
 
@@ -39,7 +42,7 @@ package_linux-arctis-manager-lang() {
     arch=('any')
     depends=('linux-arctis-manager')
 
-    cd "Linux-Arctis-Manager-${pkgver}"
+    cd "Linux-Arctis-Manager-${_upstreamver}"
     make install-lang PREFIX=/usr DESTDIR="$pkgdir"
 }
 
@@ -49,7 +52,7 @@ package_linux-arctis-manager-plasma-widget() {
     arch=('any')
     depends=('linux-arctis-manager' 'linux-arctis-manager-lang' 'plasma-workspace')
 
-    cd "Linux-Arctis-Manager-${pkgver}"
+    cd "Linux-Arctis-Manager-${_upstreamver}"
     make install-plasmoid PREFIX=/usr DESTDIR="$pkgdir"
 }
 
@@ -59,6 +62,6 @@ package_linux-arctis-manager-gnome-extension() {
     arch=('any')
     depends=('linux-arctis-manager' 'linux-arctis-manager-lang' 'gnome-shell')
 
-    cd "Linux-Arctis-Manager-${pkgver}"
+    cd "Linux-Arctis-Manager-${_upstreamver}"
     make install-gnome-extension PREFIX=/usr DESTDIR="$pkgdir"
 }

@@ -54,6 +54,16 @@ GitHub Actions terms). This is deliberately not hardcoded to the literal strings
 `alpha`/`beta`, so a future `-rc1` tag (or any other SemVer prerelease label) is
 classified correctly without touching the pipeline.
 
+### Cutting a release
+
+1. `scripts/bump_version.py X.Y.Z[-pre]` writes the version into `VERSION`, `pyproject.toml`,
+   `uv.lock`, the PKGBUILD (`_upstreamver`, `pkgrel=1`, checksum reset to `SKIP`), the RPM spec,
+   the top `debian/changelog` entry, and turns CHANGELOG's `[Unreleased]` into `[X.Y.Z[-pre]]`.
+   Commit it, tag `vX.Y.Z[-pre]`, push the tag.
+2. Once the tag exists, `scripts/bump_version.py --update-checksum` downloads its source archive
+   and pins the sha256 in `packaging/arch/PKGBUILD`; commit that as a follow-up (the archive
+   can't be checksummed before the tag exists, so the tagged PKGBUILD itself carries `SKIP`).
+
 ### Naming: `testing`, not `fast-ring` or `-git`
 
 - **`fast-ring`/`slow-ring`** is Windows Insider terminology, not a Linux packaging

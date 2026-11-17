@@ -1,5 +1,5 @@
 Name:           linux-arctis-manager
-Version:        3.0.0~alpha1
+Version:        3.0.0~beta3
 Release:        1%{?dist}
 Summary:        SteelSeries Arctis manager for Linux
 
