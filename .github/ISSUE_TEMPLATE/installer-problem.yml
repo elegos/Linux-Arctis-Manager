@@ -12,6 +12,9 @@ body:
         **Quickest way to give us everything:** run
         `curl --proto '=https' --tlsv1.2 -fsSL https://github.com/elegos/Linux-Arctis-Manager/releases/latest/download/install.sh | sh -s -- --diagnose`
         and paste its output below.
+
+        While every release is still a pre-release that URL returns 404; use a tag instead (newest one on the releases page):
+        `curl --proto '=https' --tlsv1.2 -fsSL https://github.com/elegos/Linux-Arctis-Manager/releases/download/<tag>/install.sh | sh -s -- --diagnose --pre-release`
   - type: textarea
     id: diagnose
     attributes:

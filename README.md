@@ -77,253 +77,65 @@ Cross-checked against SteelSeries' own device specs, not just the previous v2 li
 - `lam-hidraw-helper`: a minimal privileged sidecar that opens `/dev/hidraw*` on the daemon's behalf — the only process that needs elevated capability
 - `lam-gui`: the graphical interface (Python/Qt6) to configure your headset and view its status
 
-## 📦 Install & Setup
+## 📦 Install
 
-Choose the installation method that fits your setup:
+The short version for each distro. Details, signature verification and the other methods are in
+**[docs/install.md](docs/install.md)**.
 
-- **[Arch Linux (AUR)](#arch-linux-aur)** - community-maintained package for Arch users
-- **[Fedora (COPR)](#fedora-copr)** - prebuilt RPM packages for Fedora/Bazzite
-- **[User-level installer](#user-level-installer-steamos-and-any-distro)** - prebuilt, installs into `~/.local` (works on SteamOS, no package manager needed)
-- **[Build from source](#build-from-source)** - for all other Linux distros (Debian, Ubuntu, ...)
+| Your system | Install |
+|---|---|
+| Arch Linux | `yay -S linux-arctis-manager` |
+| Fedora / Bazzite | `sudo dnf copr enable elegos/linux-arctis-manager && sudo dnf install linux-arctis-manager` |
+| Debian / Ubuntu / Mint | download the `.deb` for your distro from the [releases page](https://github.com/elegos/Linux-Arctis-Manager/releases), then `sudo apt install ./<file>.deb` |
+| SteamOS, or anything else | the user-level installer below (no root, installs into `~/.local`) |
 
----
+The distro packages ship the services but don't start them; enable them once:
 
-### User-level installer (SteamOS and any distro)
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now lam-hidraw-helper.service lam-daemon.service
+```
 
-Installs everything under `~/.local` (and `~/.config` for the systemd user units), from signed prebuilt binaries. It also works on SteamOS, whose read-only root filesystem rules out normal packages.
+### User-level installer
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL https://github.com/elegos/Linux-Arctis-Manager/releases/latest/download/install.sh | sh
 ```
 
-- Installing again upgrades. `--pre-release` includes pre-releases, `--version X.Y.Z` pins one, `--dry-run` only verifies and checks prerequisites, `--diagnose` prints a report for bug reports.
-- `... | sh -s -- uninstall` removes everything it installed (`--purge` also deletes your settings).
-- The release checksums are signed (SSH signature) and verified before anything is run. Every security-relevant step is announced and waits for you to press Enter (or Ctrl+C to abort); the only step needing root is giving the HID helper its capability (`setcap`), via `pkexec`/`sudo`.
-- Needs `systemd` (user session), `libpulse`, a PipeWire/PulseAudio server and glibc >= the version shown by `--dry-run`; if something is missing the installer stops before changing anything and tells you what.
-
-#### Verifying a release by hand
-
-Releases are signed with this SSH key (`lam-release`), fingerprint:
-
-```
-SHA256:ACwAZQm1Pfgrg2gv3CpS7jShGtASZKgmlaCYGsFoDA0
-```
-
-`SHA256SUMS` lists every file attached to the release: the tarballs, the distro packages and `install.sh`. `install.sh` checks its signature and then the tarball's checksum before extracting or running anything. To do the same yourself (swap the tarball for the package you downloaded, if you installed one):
-
-```bash
-V=https://github.com/elegos/Linux-Arctis-Manager/releases/download/<tag>
-curl -fsSLO $V/SHA256SUMS -O $V/SHA256SUMS.sig -O $V/lam-<version>-x86_64-generic.tar.gz   # or the .deb/.rpm/.pkg.tar.zst you want
-echo 'lam-release namespaces="lam-release" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGEJRaTQKrVoLHoNLxtYs4s5TXt6KILaEEElIi83LYfH' > allowed_signers
-ssh-keygen -Y verify -f allowed_signers -I lam-release -n lam-release -s SHA256SUMS.sig < SHA256SUMS
-sha256sum -c --ignore-missing SHA256SUMS
-```
-
-The `ssh-keygen` command must print `Good "lam-release" signature` with the fingerprint above. The installer itself is only protected by TLS (it is the root of this chain), so you can download `install.sh` from the release page and read it before running it.
-
----
-
-### Arch Linux (AUR)
-
-Arch Linux users can install the community-maintained package from the [Arch User Repository (AUR)](https://aur.archlinux.org/packages/linux-arctis-manager):
-
-Install with your preferred AUR helper:
-
-```bash
-yay -S linux-arctis-manager
-
-# using paru: paru -S linux-arctis-manager
-```
-
-The package's post-install hook applies the required capability to
-`lam-hidraw-helper` and prints the two commands to enable the services:
-
-```bash
-systemctl --user daemon-reload
-systemctl --user enable --now lam-hidraw-helper.service lam-daemon.service
-```
-
-> [!TIP]
-> To launch the system tray app automatically on login:
+> [!IMPORTANT]
+> **Until the first stable release** that URL returns *404*: `releases/latest` ignores
+> pre-releases, and every v3 release so far is one. For now, run the installer from a tag (the
+> newest one on the [releases page](https://github.com/elegos/Linux-Arctis-Manager/releases)) and
+> add `--pre-release`:
 >
 > ```bash
-> ln -sf /usr/share/applications/ArctisManagerSystray.desktop ~/.config/autostart/
+> TAG=v3.0.0-beta3   # the newest tag on the releases page
+> curl --proto '=https' --tlsv1.2 -fsSL "https://github.com/elegos/Linux-Arctis-Manager/releases/download/$TAG/install.sh" | sh -s -- --pre-release
 > ```
 
-> For packaging-specific issues, report directly to the AUR maintainers: [@tonitch](https://aur.archlinux.org/account/tonitch) and [@Aiyahhh](https://aur.archlinux.org/account/Aiyahhh).
+Installing again upgrades; it starts the services itself. See
+[docs/install.md](docs/install.md#user-level-installer-steamos-and-any-distro) for the options.
 
----
+### Build it yourself
 
-### Fedora (COPR)
-
-Prebuilt RPM packages are published on [COPR](https://copr.fedorainfracloud.org/),
-split into two channels:
-
-- `elegos/linux-arctis-manager` - stable, tagged releases only
-- `elegos/linux-arctis-manager-testing` - every alpha/beta/rc build, ahead of stable
-
-Enable the channel you want and install the main package:
+Fastest is a container, which needs only Podman or Docker and produces a real package for your distro:
 
 ```bash
-sudo dnf copr enable elegos/linux-arctis-manager
-# or, for the testing channel:
-# sudo dnf copr enable elegos/linux-arctis-manager-testing
-
-sudo dnf install linux-arctis-manager
+git clone https://github.com/elegos/Linux-Arctis-Manager.git && cd Linux-Arctis-Manager
+make container-build-debian-deb      # or -ubuntu-deb, container-build-rpm, container-build-pkg
 ```
 
-Optionally add whichever UI shell(s) you want, on top of the main package:
-
-```bash
-sudo dnf install linux-arctis-manager-plasma-widget    # KDE Plasma 6 widget
-sudo dnf install linux-arctis-manager-gnome-extension  # GNOME Shell 45+ extension
-```
-
-The package's post-install scriptlet applies the required capability to
-`lam-hidraw-helper` - just enable the services:
-
-```bash
-systemctl --user daemon-reload
-systemctl --user enable --now lam-hidraw-helper.service lam-daemon.service
-```
-
-> [!TIP]
-> To launch the system tray app automatically on login:
->
-> ```bash
-> ln -sf /usr/share/applications/ArctisManagerSystray.desktop ~/.config/autostart/
-> ```
->
-> On KDE Plasma 6, `linux-arctis-manager-plasma-widget` adds a native widget
-> to a panel like any other widget ("Add Widgets..." → "Arctis Manager");
-> right-click it for its Configure dialog. On GNOME Shell 45+,
-> `linux-arctis-manager-gnome-extension` adds an equivalent extension - enable
-> it with the Extensions app (or
-> `gnome-extensions enable arctis-manager@giacomofurlan.name`); its
-> Preferences page picks which status fields and quick settings it shows.
-
----
-
-### Build from source
-
-Fedora/Bazzite users: prefer the [COPR packages](#fedora-copr) above. Building
-straight from source with the provided `Makefile` is the supported path for
-every other distro (Debian, Ubuntu, ...).
-
-#### Prerequisites
-
-- [`cargo`/`rustc`](https://rustup.rs/) (stable toolchain)
-- [`uv`](https://docs.astral.sh/uv/getting-started/installation/)
-- Python 3.10+
-- `libcap` (for `setcap`) — usually already installed
-- Kernel headers for `hidraw`/`udev`: `libudev-dev` (Debian/Ubuntu), `systemd-devel` (Fedora), `udev` (Arch, already present)
-
-#### Install
-
-```bash
-git clone https://github.com/elegos/Linux-Arctis-Manager.git
-cd Linux-Arctis-Manager
-
-make build            # cargo build --release + uv sync
-sudo make install     # installs binaries, systemd units, desktop entries; applies setcap
-make enable           # enable + start lam-hidraw-helper and lam-daemon (no sudo)
-```
-
-`make install` accepts the usual `PREFIX`/`DESTDIR` overrides — see `make help`
-for the full variable list, or the packaging recipes in `packaging/arch/PKGBUILD`
-and `packaging/fedora/linux-arctis-manager.spec` for reference.
-
-> [!WARNING]
-> `PREFIX` defaults to `/usr/local`, not `/usr` — the AUR/COPR packages'
-> prefix. The two installs coexist on disk without file conflicts, but you'll
-> end up with two separate sets of binaries, systemd units and desktop
-> entries. Uninstall one before installing the other (see
-> [Uninstall / Cleanup](#-uninstall--cleanup)) rather than running both side
-> by side.
-
-> [!TIP]
-> To launch the system tray app automatically on login:
->
-> ```bash
-> ln -sf /usr/share/applications/ArctisManagerSystray.desktop ~/.config/autostart/
-> # or, if installed with PREFIX=/usr/local:
-> ln -sf /usr/local/share/applications/ArctisManagerSystray.desktop ~/.config/autostart/
-> ```
-
-> [!TIP]
-> On KDE Plasma 6, `make install` also installs a native Plasma widget
-> (`packaging/plasma6/`) that talks directly to the daemon over D-Bus — no
-> separate tray process needed. Add it to a panel like any other widget
-> ("Add Widgets..." → "Arctis Manager"); right-click it for its Configure
-> dialog to pick which status fields and quick settings it shows.
->
-> On GNOME Shell 45+, `make install` also installs an equivalent GNOME
-> Shell extension (`packaging/gnome-shell/`). Enable it with the Extensions
-> app (or `gnome-extensions enable arctis-manager@giacomofurlan.name`); its
-> Preferences page picks which status fields and quick settings it shows.
-
-## 🧹 Uninstall / Cleanup
-
-Choose the method that matches your installation method:
-
-- **[Arch Linux (AUR)](#arch-linux-aur-1)**
-- **[Fedora (COPR)](#fedora-copr-1)**
-- **[Build from source](#build-from-source-1)**
-
-### Arch Linux (AUR)
-Use the system package manager — the pre-removal hook stops and disables the services for you:
-
-```bash
-sudo pacman -Rns linux-arctis-manager
-```
-
-### Fedora (COPR)
-
-Removing the main package also pulls in whichever UI-shell subpackages you
-installed, since they `Requires:` it:
-
-```bash
-sudo dnf remove linux-arctis-manager
-```
-
-### Build from source
-
-From the cloned repository:
-
-```bash
-make disable          # stop + disable the services (no sudo)
-sudo make uninstall   # remove binaries, systemd units, desktop entries
-```
-
-Then remove your local settings if you don't intend to reinstall:
-
-```bash
-rm -rf ~/.config/arctis_manager
-```
-
-> [!NOTE]
-> If you're coming from a v2 install, also remove the old udev rule — v3 doesn't need one:
-> `sudo rm -f /etc/udev/rules.d/91-steelseries-arctis.rules /usr/lib/udev/rules.d/91-steelseries-arctis.rules`
+Bare-metal builds, `BASE_IMAGE=` and the rest: [docs/build-from-source.md](docs/build-from-source.md).
+To remove it again: [docs/uninstall.md](docs/uninstall.md).
 
 ## 🛠️ Development
-
-### Basic Commands
 
 - Run the daemon: `cargo run --release --manifest-path daemon/Cargo.toml --bin lam-daemon`
 - Run the GUI against it: `uv run lam-gui --no-enforce-systemd` (skips the systemd-managed-daemon check, since you're running one by hand)
 - Run the daemon's tests: `cargo test --manifest-path daemon/Cargo.toml`
 
-### Documentation
-
-- [Architecture overview](docs/ARCHITECTURE.md)
-- [Device DSL reference](docs/DEVICE_DSL.md) — the YAML format used to describe a device
-- [D-Bus interface reference](docs/dbus.md)
-- [Device compatibility matrix](docs/device_compatibility.md) — auto-generated from the v3 device configs; the table above is the human-curated summary, this is the exhaustive per-capability one
-- [Equalizer](docs/eq.md) — band modes, backends, presets, per-app overrides
-- [Voice Changer](docs/voice-changing-feature.md) — usage and architecture
-- [Wireshark tutorial](https://www.youtube.com/watch?v=zWbdnHwTr3M)
-- [Migrating from v2 to v3](docs/migration-v2-to-v3.md)
-- [Release & distribution pipeline](docs/release-pipeline.md) — versioning/channels, the COPR/PPA/OBS publishing design, and the manual setup checklist
+Architecture, the device DSL, the D-Bus interface and the release pipeline are documented in
+[docs/](docs/README.md).
 
 ## ⚠️ Troubleshooting
 

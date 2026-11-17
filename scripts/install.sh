@@ -4,6 +4,10 @@
 #   curl --proto '=https' --tlsv1.2 -fsSL \
 #     https://github.com/elegos/Linux-Arctis-Manager/releases/latest/download/install.sh | sh
 #
+# "latest" skips pre-releases, so while every release is one, fetch the script
+# from a tag instead and pass --pre-release:
+#   .../releases/download/<tag>/install.sh | sh -s -- --pre-release
+#
 # Everything lands under ~/.local (and ~/.config for the systemd units and
 # the WirePlumber drop-in); nothing is installed system-wide. The only step
 # that needs root is giving the HID helper its capability (setcap) - it is

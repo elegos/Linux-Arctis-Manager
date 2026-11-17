@@ -29,7 +29,7 @@ migration.
    ```
 
 3. **Install v3** using whichever method matches your distro — see
-   [README.md](../README.md#-install--setup).
+   [Installing](install.md).
 
 4. **Enable the new units.**
 
