@@ -1,7 +1,18 @@
 FROM lam-builder-base-fedora
 
-WORKDIR /build
-COPY . .
+# Build deps straight from the spec (as root), so this can't drift from it.
+COPY packaging/fedora/linux-arctis-manager.spec /tmp/lam.spec
+RUN dnf builddep -y /tmp/lam.spec && dnf clean all
+
+# Unprivileged build user (rpmbuild never needs root). UID matches the host
+# user so the bind-mounted /out stays writable.
+ARG BUILDER_UID=1000
+ARG BUILDER_GID=1000
+RUN groupadd -o -g ${BUILDER_GID} builder && useradd -m -o -u ${BUILDER_UID} -g ${BUILDER_GID} builder
+
+COPY --chown=builder:builder . /home/builder/source
+USER builder
+WORKDIR /home/builder/source
 
 RUN set -e && \
     # Transform version: 3.0.0-alpha1 → 3.0.0~alpha1 (RPM pre-release convention)
@@ -24,5 +35,5 @@ RUN set -e && \
 
 # docker run copies artefacts to the host-mounted /out volume
 CMD ["sh", "-c", \
-    "find /root/rpmbuild/RPMS /root/rpmbuild/SRPMS -name '*.rpm' \
+    "find /home/builder/rpmbuild/RPMS /home/builder/rpmbuild/SRPMS -name '*.rpm' \
          -exec cp -v {} /out/ \\; && echo 'RPMs written to /out'"]

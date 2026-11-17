@@ -11,7 +11,3 @@ RUN pacman -Syu --noconfirm && \
         base-devel \
         git && \
     pacman -Sc --noconfirm
-
-# makepkg refuses to run as root; create a dedicated build user
-RUN useradd -m builder && \
-    echo 'builder ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers

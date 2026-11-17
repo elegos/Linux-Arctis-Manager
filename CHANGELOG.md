@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `make container-build-debian-deb` and `make container-build-ubuntu-deb` build the `.deb` in a container on a real Debian or Ubuntu image (override with `BASE_IMAGE=`), using the same recipe as CI. They replace `container-build-deb`.
+
 ### Fixed
 
 - Virtual sinks are no longer created and immediately removed when the dongle is plugged in with the headset turned off.

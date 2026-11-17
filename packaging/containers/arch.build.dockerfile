@@ -1,5 +1,13 @@
 FROM lam-builder-base-arch
 
+# makepkg refuses to run as root; create a dedicated build user. UID matches
+# the host user so the bind-mounted /out stays writable. sudo is only for
+# makepkg -s installing the declared makedepends.
+ARG BUILDER_UID=1000
+ARG BUILDER_GID=1000
+RUN groupadd -o -g ${BUILDER_GID} builder && useradd -m -o -u ${BUILDER_UID} -g ${BUILDER_GID} builder && \
+    echo 'builder ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
+
 # Copy source tree as root, then hand ownership to builder
 COPY --chown=builder:builder . /home/builder/source
 

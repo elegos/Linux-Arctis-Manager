@@ -41,7 +41,6 @@ override_dh_makeshlibs:
 	# files aren't public shared libraries this package provides.
 	dh_makeshlibs -X venv
 
-override_dh_fixperms-arch:
-	dh_fixperms
-	chown root:root $(CURDIR)/debian/linux-arctis-manager/usr/libexec/lam-hidraw-helper
-	setcap cap_dac_override+eip $(CURDIR)/debian/linux-arctis-manager/usr/libexec/lam-hidraw-helper
+# No chown/setcap on lam-hidraw-helper here: the build is unprivileged
+# (Rules-Requires-Root: no), dpkg-deb doesn't keep file capabilities anyway,
+# and the postinst applies both at install time.

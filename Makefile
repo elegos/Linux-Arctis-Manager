@@ -88,14 +88,21 @@ CONTAINER_ENGINE ?= $(shell command -v podman 2>/dev/null || echo docker)
 
 # ── Container build variables ──────────────────────────────────────────────────
 FEDORA_VERSION  ?= 44
-DEBIAN_VERSION  ?= 24.04
+# Base image for container-build-{debian,ubuntu}-deb (each has its own default).
+BASE_SLUG        = $(shell echo '$(BASE_IMAGE)' | tr -cd 'a-z0-9.')
 CONTAINER_DIR   := packaging/containers
 DIST_DIR        := dist
+
+# Container builds run as an unprivileged user whose UID matches the host's, so
+# the bind-mounted dist/ stays writable (and its files stay yours). Rootless
+# podman needs keep-id to map that UID straight through.
+CONTAINER_UID   ?= $(shell u=$$(id -u); [ $$u -eq 0 ] && echo 1000 || echo $$u)
+CONTAINER_GID   ?= $(shell g=$$(id -g); [ $$g -eq 0 ] && echo 1000 || echo $$g)
+CONTAINER_RUN_FLAGS := --user $(CONTAINER_UID):$(CONTAINER_GID) $(if $(findstring podman,$(CONTAINER_ENGINE)),--userns=keep-id)
 
 # Sentinel files: Make uses these as proxies for "base image is built locally".
 # Delete a sentinel (or run container-refresh-*) to force an OS update + dep rebuild.
 _SENTINEL_FEDORA := .container-base-fedora
-_SENTINEL_DEBIAN := .container-base-debian
 _SENTINEL_ARCH   := .container-base-arch
 
 # ── Build inputs / outputs ─────────────────────────────────────────────────────
@@ -115,8 +122,8 @@ DEVICE_YAMLS := $(wildcard daemon/device-configs/*.yaml)
 
 .PHONY: build build-python sync-version generate-services generate-gui-wrapper generate-plasmoid-lang \
         install install-core install-lang install-plasmoid install-gnome-extension install-python uninstall enable disable \
-        container-build-rpm container-build-deb container-build-pkg container-build-all \
-        container-refresh-fedora container-refresh-debian container-refresh-arch container-refresh-all \
+        container-build-rpm container-build-debian-deb container-build-ubuntu-deb container-build-pkg container-build-all \
+        container-refresh-fedora container-refresh-arch container-refresh-all \
         help
 
 # ── Default target ─────────────────────────────────────────────────────────────
@@ -146,16 +153,16 @@ help:
 	@echo ""
 	@echo "Container build targets (Docker/Podman):"
 	@echo "  container-build-rpm    Build RPM inside Fedora container → dist/"
-	@echo "  container-build-deb    Build .deb inside Ubuntu container → dist/"
+	@echo "  container-build-debian-deb  Build .deb on Debian (BASE_IMAGE=debian:stable-slim) → dist/"
+	@echo "  container-build-ubuntu-deb  Build .deb on Ubuntu (BASE_IMAGE=ubuntu:24.04) → dist/"
 	@echo "  container-build-pkg    Build .pkg.tar.zst inside Arch container → dist/"
 	@echo "  container-build-all    Build all three package formats"
-	@echo "  container-refresh-fedora|debian|arch   Force OS update in base image"
+	@echo "  container-refresh-fedora|arch   Force OS update in base image"
 	@echo "  container-refresh-all  Force OS update in all base images"
 	@echo ""
 	@echo "Container variables (defaults shown):"
 	@echo "  CONTAINER_ENGINE=$(CONTAINER_ENGINE)"
 	@echo "  FEDORA_VERSION=$(FEDORA_VERSION)"
-	@echo "  DEBIAN_VERSION=$(DEBIAN_VERSION)"
 
 # ── Build ──────────────────────────────────────────────────────────────────────
 build:
@@ -372,12 +379,6 @@ $(_SENTINEL_FEDORA): $(CONTAINER_DIR)/fedora.base.dockerfile
 		-f $< -t lam-builder-base-fedora $(CONTAINER_DIR)
 	@touch $@
 
-$(_SENTINEL_DEBIAN): $(CONTAINER_DIR)/debian.base.dockerfile
-	$(CONTAINER_ENGINE) build \
-		--build-arg DEBIAN_VERSION=$(DEBIAN_VERSION) \
-		-f $< -t lam-builder-base-debian $(CONTAINER_DIR)
-	@touch $@
-
 $(_SENTINEL_ARCH): $(CONTAINER_DIR)/arch.base.dockerfile
 	$(CONTAINER_ENGINE) build \
 		-f $< -t lam-builder-base-arch $(CONTAINER_DIR)
@@ -388,39 +389,49 @@ container-refresh-fedora:
 	rm -f $(_SENTINEL_FEDORA)
 	$(MAKE) $(_SENTINEL_FEDORA)
 
-container-refresh-debian:
-	rm -f $(_SENTINEL_DEBIAN)
-	$(MAKE) $(_SENTINEL_DEBIAN)
-
 container-refresh-arch:
 	rm -f $(_SENTINEL_ARCH)
 	$(MAKE) $(_SENTINEL_ARCH)
 
-container-refresh-all: container-refresh-fedora container-refresh-debian container-refresh-arch
+container-refresh-all: container-refresh-fedora container-refresh-arch
 
 # ── Package build targets ──────────────────────────────────────────────────────
 container-build-rpm: $(_SENTINEL_FEDORA) | $(DIST_DIR)
 	$(CONTAINER_ENGINE) build \
+		--build-arg BUILDER_UID=$(CONTAINER_UID) \
+		--build-arg BUILDER_GID=$(CONTAINER_GID) \
 		-f $(CONTAINER_DIR)/fedora.build.dockerfile \
 		-t lam-builder-fedora .
-	$(CONTAINER_ENGINE) run --rm \
+	$(CONTAINER_ENGINE) run --rm $(CONTAINER_RUN_FLAGS) \
 		-v "$(CURDIR)/$(DIST_DIR):/out:z" \
 		lam-builder-fedora
 
-container-build-deb: $(_SENTINEL_DEBIAN) | $(DIST_DIR)
+# Real distro image, build deps read from debian/control: same recipe as the
+# CI workflow (.github/workflows/build-pkg.yaml). Override the image with
+#   make container-build-debian-deb BASE_IMAGE=debian:trixie-slim
+#   make container-build-ubuntu-deb BASE_IMAGE=ubuntu:26.04
+container-build-debian-deb: BASE_IMAGE ?= debian:stable-slim
+container-build-ubuntu-deb: BASE_IMAGE ?= ubuntu:24.04
+container-build-debian-deb container-build-ubuntu-deb: | $(DIST_DIR)
 	$(CONTAINER_ENGINE) build \
-		-f $(CONTAINER_DIR)/debian.build.dockerfile \
-		-t lam-builder-debian .
-	$(CONTAINER_ENGINE) run --rm \
+		--build-arg BASE_IMAGE=$(BASE_IMAGE) \
+		--build-arg DEB_SLUG=$(BASE_SLUG) \
+		--build-arg BUILDER_UID=$(CONTAINER_UID) \
+		--build-arg BUILDER_GID=$(CONTAINER_GID) \
+		-f $(CONTAINER_DIR)/deb.build.dockerfile \
+		-t lam-builder-deb-$(BASE_SLUG) .
+	$(CONTAINER_ENGINE) run --rm $(CONTAINER_RUN_FLAGS) \
 		-v "$(CURDIR)/$(DIST_DIR):/out:z" \
-		lam-builder-debian
+		lam-builder-deb-$(BASE_SLUG)
 
 container-build-pkg: $(_SENTINEL_ARCH) | $(DIST_DIR)
 	$(CONTAINER_ENGINE) build \
+		--build-arg BUILDER_UID=$(CONTAINER_UID) \
+		--build-arg BUILDER_GID=$(CONTAINER_GID) \
 		-f $(CONTAINER_DIR)/arch.build.dockerfile \
 		-t lam-builder-arch .
-	$(CONTAINER_ENGINE) run --rm \
+	$(CONTAINER_ENGINE) run --rm $(CONTAINER_RUN_FLAGS) \
 		-v "$(CURDIR)/$(DIST_DIR):/out:z" \
 		lam-builder-arch
 
-container-build-all: container-build-rpm container-build-deb container-build-pkg
+container-build-all: container-build-rpm container-build-debian-deb container-build-ubuntu-deb container-build-pkg
