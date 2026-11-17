@@ -39,8 +39,9 @@ rand = { workspace = true }
 rand_distr = { workspace = true }
 rubato = { workspace = true }
 audioadapter-buffers = { workspace = true }
+# Read-only hidraw scan for the diagnostics page; also used by tests.
+lam-hidraw-helper = { workspace = true }
 
 [dev-dependencies]
-lam-hidraw-helper = { workspace = true }
 tempfile = "3"
 tokio = { workspace = true, features = ["test-util"] }

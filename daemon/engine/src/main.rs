@@ -1,6 +1,7 @@
 mod audio;
 mod dbus;
 mod deferred;
+mod diagnostics;
 mod device_persistence;
 mod device_session;
 mod engine_error;

@@ -815,6 +815,18 @@ impl ConfigInterface {
         let _ = self.signal_tx.send(SE::SettingsChanged { json });
         true
     }
+
+    /// JSON report of the SteelSeries hidraw nodes and whether each is
+    /// supported (see `diagnostics::build_report`). Read-only.
+    async fn get_diagnostics(&self) -> String {
+        let configs = self.state.lock().await.configs.clone();
+        let nodes = tokio::task::spawn_blocking(|| {
+            lam_hidraw_helper::scan::scan(std::path::Path::new("/sys"))
+        })
+        .await
+        .unwrap_or_default();
+        to_json_or(&crate::diagnostics::build_report(&nodes, &configs), "{}")
+    }
 }
 
 // ── NC interface ──────────────────────────────────────────────────────────────

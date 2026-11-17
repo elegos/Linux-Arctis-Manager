@@ -162,3 +162,22 @@ Each setting has two required attributes, plus one optional one:
 - **Specs**:
 
 Reload the configuration files, useful to test new devices support during the development phase. Return boolean (success / failure).
+
+### Method: GetDiagnostics
+
+- **Parameters**: (none)
+- **Response format**: JSON
+- **Specs**:
+
+Read-only report of the SteelSeries `hidraw` nodes the system exposes, for the troubleshooting page. It never opens a device node and says nothing about non-SteelSeries hardware. Shape:
+
+```json
+{"version": 1, "devices": [{
+  "node": "hidraw3", "vendor_id": "1038", "product_id": "2202",
+  "manufacturer": "SteelSeries", "product": "Arctis ...", "interface": 5,
+  "usb_audio": true, "audio_accessory": false,
+  "status": "supported", "config_name": "Arctis ...", "report_descriptor": "06c0ff..."
+}]}
+```
+
+`status` is `supported` (a device config lists this product ID), `unsupported` (an audio product with no config: the case for a new-device request) or `ignored` (SteelSeries but not an audio product, such as a keyboard or mouse, which the helper refuses to open). `report_descriptor` is the HID report descriptor as lowercase hex, or `null` when sysfs does not expose it.

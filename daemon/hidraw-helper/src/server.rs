@@ -164,7 +164,7 @@ fn vid_is_allowed(vid: u16) -> bool {
     vid == STEELSERIES_VID
 }
 
-fn hid_device_path(sysfs_base: &Path, hidraw_name: &str) -> std::io::Result<PathBuf> {
+pub(crate) fn hid_device_path(sysfs_base: &Path, hidraw_name: &str) -> std::io::Result<PathBuf> {
     let symlink = sysfs_base
         .join("class/hidraw")
         .join(hidraw_name)
@@ -174,7 +174,7 @@ fn hid_device_path(sysfs_base: &Path, hidraw_name: &str) -> std::io::Result<Path
 
 // The USB device that owns a HID function: sysfs nests it two levels up
 // (usb_dev/interface/hid_fn).
-fn usb_device_of(hid_dev: &Path) -> std::io::Result<&Path> {
+pub(crate) fn usb_device_of(hid_dev: &Path) -> std::io::Result<&Path> {
     hid_dev
         .parent()
         .and_then(Path::parent)
