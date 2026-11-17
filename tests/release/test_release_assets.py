@@ -45,19 +45,19 @@ def test_list_keeps_shipped_assets_and_drops_debug_and_source(tmp_path: Path) ->
 def test_sums_cover_every_shipped_asset_by_basename(tmp_path: Path) -> None:
     _tree(tmp_path, SHIPPED + DROPPED)
     lines = _run("sums", str(tmp_path)).splitlines()
-    got = dict(reversed(l.split("  ", 1)) for l in lines)
+    got = dict(reversed(line.split("  ", 1)) for line in lines)
     assert set(got) == {Path(n).name for n in SHIPPED}
     for n in SHIPPED:
         assert got[Path(n).name] == hashlib.sha256(n.encode()).hexdigest()
 
 
 def test_sums_exclude_the_checksum_files_themselves(tmp_path: Path) -> None:
-    _tree(tmp_path, SHIPPED + ["tarball-signed/SHA256SUMS", "tarball-signed/SHA256SUMS.sig"])
-    names = {l.split("  ", 1)[1] for l in _run("sums", str(tmp_path)).splitlines()}
+    _tree(tmp_path, [*SHIPPED, "tarball-signed/SHA256SUMS", "tarball-signed/SHA256SUMS.sig"])
+    names = {line.split("  ", 1)[1] for line in _run("sums", str(tmp_path)).splitlines()}
     assert "SHA256SUMS" not in names and "SHA256SUMS.sig" not in names
 
 
 def test_sums_fail_on_duplicate_basenames(tmp_path: Path) -> None:
     _tree(tmp_path, ["a/x.deb", "b/x.deb"])
-    r = subprocess.run([sys.executable, "-I", str(SCRIPT), "sums", str(tmp_path)], capture_output=True, text=True)
+    r = subprocess.run([sys.executable, "-I", str(SCRIPT), "sums", str(tmp_path)], capture_output=True, text=True, check=False)
     assert r.returncode != 0 and "x.deb" in r.stderr

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 from linux_arctis_manager.constants import SYSTEMD_SERVICE_NAME
 from linux_arctis_manager.gui.base_app import QBaseDesktopApp
 from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
+from linux_arctis_manager.gui.diagnostics_widget import QDiagnosticsWidget
 from linux_arctis_manager.gui.eq_widget import QEQWidget
 from linux_arctis_manager.gui.main_app_proto_widget import QMainAppProtoWidget
 from linux_arctis_manager.gui.mic_widget import QMicWidget
@@ -67,6 +68,7 @@ class QMainApp(QBaseDesktopApp):
         self.device_settings_widget = QSettingsWidget(self.main_panel, 'device', 'device')
         self.eq_widget = QEQWidget(self.main_panel)
         self.mic_widget = QMicWidget(self.main_panel)
+        self.diagnostics_widget = QDiagnosticsWidget(self.main_panel)
 
         self.main_panel_widgets: dict[str, QWidget] = {
             'status': self.status_widget,
@@ -74,6 +76,7 @@ class QMainApp(QBaseDesktopApp):
             'device': self.device_settings_widget,
             'eq': self.eq_widget,
             'mic': self.mic_widget,
+            'diagnostics': self.diagnostics_widget,
         }
 
         for widget in self.main_panel_widgets.values():
@@ -154,12 +157,14 @@ class QMainApp(QBaseDesktopApp):
         btn_group.setExclusive(True)
 
         # (key, label, icon candidates in priority order)
-        nav_items: list[tuple[Literal['status', 'general', 'device', 'eq', 'mic'], str, list[str]]] = [
+        nav_items: list[tuple[Literal['status', 'general', 'device', 'eq', 'mic', 'diagnostics'], str, list[str]]] = [
             ('status',  I18n.get_instance().translate('ui', 'status'),  ['dialog-information-symbolic', 'audio-headset', 'computer']),
             ('general', I18n.get_instance().translate('ui', 'general'), ['itmages-settings', 'preferences-system',     'configure']),
             ('device',  I18n.get_instance().translate('ui', 'device'),  ['audio-headset-symbolic',  'input-gaming', 'audio-headset']),
             ('eq',      I18n.get_instance().translate('ui', 'eq'),      ['adjustrgb', 'multimedia-equalizer', 'audio-card']),
             ('mic',     I18n.get_instance().translate('ui', 'mic'),     ['audio-input-microphone-medium-symbolic', 'audio-input-microphone', 'microphone']),
+            # Last on purpose: it sits at the very bottom of the sidebar, below the stretch.
+            ('diagnostics', I18n.get_instance().translate('ui', 'diagnostics'), ['help-about-symbolic', 'dialog-question', 'help-about']),
         ]
 
         def _first_icon(names: list[str]) -> QIcon:
@@ -170,11 +175,13 @@ class QMainApp(QBaseDesktopApp):
             return QIcon()
 
         def _switch_panel_handler(
-            panel: Literal['status', 'general', 'device', 'eq', 'mic'],
+            panel: Literal['status', 'general', 'device', 'eq', 'mic', 'diagnostics'],
         ) -> Callable[[bool], None]:
             return lambda _checked: self.switch_panel(panel)
 
         for key, label, icon_names in nav_items:
+            if key == 'diagnostics':
+                side_layout.addStretch()
             btn = QToolButton()
             btn.setText(label)
             btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
@@ -202,7 +209,6 @@ class QMainApp(QBaseDesktopApp):
             side_layout.addWidget(btn)
             self._nav_buttons[key] = btn
 
-        side_layout.addStretch()
         self.side_panel.setFixedWidth(110)
         main_layout.addWidget(self.side_panel)
 
@@ -246,7 +252,7 @@ class QMainApp(QBaseDesktopApp):
 
         return window
     
-    def switch_panel(self, panel: Literal['status', 'general', 'device', 'eq', 'mic']) -> None:
+    def switch_panel(self, panel: Literal['status', 'general', 'device', 'eq', 'mic', 'diagnostics']) -> None:
         if not self.main_panel_widgets[panel].isHidden():
             return
 

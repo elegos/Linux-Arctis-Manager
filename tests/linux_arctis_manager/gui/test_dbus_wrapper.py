@@ -353,3 +353,49 @@ def test_vc_signal_disconnects_bus_on_stop():
     finally:
         patcher.stop()
     bus.disconnect.assert_called_once()
+
+
+# ── request_diagnostics ──────────────────────────────────────────────────────
+
+
+def _diag_bus(reply):
+    from contextlib import asynccontextmanager
+    bus = MagicMock()
+    bus.call = AsyncMock(return_value=reply)
+
+    @asynccontextmanager
+    async def fake_bus():
+        yield bus
+    return fake_bus, bus
+
+
+def test_request_diagnostics_emits_the_device_list():
+    from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
+    reply = MagicMock(message_type=MessageType.METHOD_RETURN,
+                      body=[json.dumps({'version': 1, 'devices': [{'node': 'hidraw1'}]})])
+    fake_bus, bus = _diag_bus(reply)
+    signal = MagicMock()
+    with patch('linux_arctis_manager.gui.dbus_wrapper._bus', fake_bus):
+        _run(DbusWrapper._request_diagnostics_async(signal))
+    signal.emit.assert_called_once_with([{'node': 'hidraw1'}])
+    assert bus.call.call_args.args[0].member == 'GetDiagnostics'
+
+
+def test_request_diagnostics_emits_none_when_the_service_is_unreachable():
+    from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
+    fake_bus, bus = _diag_bus(None)
+    bus.call = AsyncMock(side_effect=OSError('no bus'))
+    signal = MagicMock()
+    with patch('linux_arctis_manager.gui.dbus_wrapper._bus', fake_bus):
+        _run(DbusWrapper._request_diagnostics_async(signal))
+    signal.emit.assert_called_once_with(None)
+
+
+def test_request_diagnostics_emits_none_on_a_dbus_error():
+    from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
+    reply = MagicMock(message_type=MessageType.ERROR, body=['UnknownMethod'])
+    fake_bus, _ = _diag_bus(reply)
+    signal = MagicMock()
+    with patch('linux_arctis_manager.gui.dbus_wrapper._bus', fake_bus):
+        _run(DbusWrapper._request_diagnostics_async(signal))
+    signal.emit.assert_called_once_with(None)

@@ -31,7 +31,7 @@ def root(tmp_path: Path) -> Path:
 
 
 def _run(root: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run([sys.executable, "-I", str(SCRIPT), "--root", str(root), *args], capture_output=True, text=True)
+    return subprocess.run([sys.executable, "-I", str(SCRIPT), "--root", str(root), *args], capture_output=True, text=True, check=False)
 
 
 def _read(root: Path, name: str) -> str:

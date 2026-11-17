@@ -11,6 +11,8 @@ from PySide6.QtCore import QObject, Signal, SignalInstance
 
 from linux_arctis_manager.constants import (
     DBUS_BUS_NAME,
+    DBUS_CONFIG_INTERFACE_NAME,
+    DBUS_CONFIG_OBJECT_PATH,
     DBUS_EQ_INTERFACE_NAME,
     DBUS_EQ_OBJECT_PATH,
     DBUS_NC_INTERFACE_NAME,
@@ -22,6 +24,7 @@ from linux_arctis_manager.constants import (
     DBUS_VC_INTERFACE_NAME,
     DBUS_VC_OBJECT_PATH,
 )
+from linux_arctis_manager.gui.diagnostics_logic import parse_report
 
 
 @asynccontextmanager
@@ -442,6 +445,33 @@ class DbusWrapper(QObject):
                 DbusWrapper.logger.warning('GetVersion failed: %s', e)
                 qt_signal.emit('')
         Thread(target=lambda: asyncio.run(_call())).start()
+
+    @staticmethod
+    def request_diagnostics(qt_signal: SignalInstance) -> None:
+        """Emit the daemon's device list (``list[dict]``), or ``None`` if it can't be read."""
+        Thread(target=lambda: asyncio.run(DbusWrapper._request_diagnostics_async(qt_signal))).start()
+
+    @staticmethod
+    async def _request_diagnostics_async(qt_signal: SignalInstance) -> None:
+        try:
+            async with _bus() as bus:
+                reply = await bus.call(Message(
+                    destination=DBUS_BUS_NAME,
+                    path=DBUS_CONFIG_OBJECT_PATH,
+                    interface=DBUS_CONFIG_INTERFACE_NAME,
+                    member='GetDiagnostics',
+                    message_type=MessageType.METHOD_CALL,
+                    signature='',
+                    body=[],
+                ))
+            if reply is None or reply.message_type == MessageType.ERROR:
+                # Older daemon without GetDiagnostics, or the call failed.
+                qt_signal.emit(None)
+                return
+            qt_signal.emit(parse_report(reply.body[0]))
+        except Exception as e:
+            DbusWrapper.logger.warning('GetDiagnostics failed: %s', e)
+            qt_signal.emit(None)
 
     def request_settings(self) -> None:
         request_thread = Thread(target=lambda: asyncio.run(self._request_settings_async()))

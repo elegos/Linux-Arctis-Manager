@@ -16,6 +16,14 @@ body:
     validations:
       required: true
   - type: textarea
+    id: hardware
+    attributes:
+      label: Hardware details
+      description: Filled in by the app's Diagnostics page. If you opened this form by hand, open Diagnostics in the app and paste its "Copy details" text here.
+      render: text
+    validations:
+      required: true
+  - type: textarea
     id: bundle
     attributes:
       label: Debug bundle
