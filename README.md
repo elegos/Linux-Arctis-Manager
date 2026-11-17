@@ -85,7 +85,7 @@ The short version for each distro. Details, signature verification and the other
 | Your system | Install |
 |---|---|
 | Arch Linux | `yay -S linux-arctis-manager` |
-| Fedora / Bazzite | `sudo dnf copr enable elegos/linux-arctis-manager && sudo dnf install linux-arctis-manager` |
+| Fedora / Bazzite | `sudo dnf copr enable elegos/linux-arctis-manager-testing && sudo dnf install linux-arctis-manager` (the stable channel is empty until the first stable release) |
 | Debian / Ubuntu / Mint | download the `.deb` for your distro from the [releases page](https://github.com/elegos/Linux-Arctis-Manager/releases), then `sudo apt install ./<file>.deb` |
 | SteamOS, or anything else | the user-level installer below (no root, installs into `~/.local`) |
 

@@ -128,15 +128,19 @@ channels:
 - `elegos/linux-arctis-manager` - stable, tagged releases only
 - `elegos/linux-arctis-manager-testing` - every alpha/beta/rc build, ahead of stable
 
-Enable the channel you want and install the main package:
+> [!IMPORTANT]
+> **Until the first stable release, use the testing channel.** The stable channel only receives
+> tagged non-pre-release versions, so it is still empty and `dnf install` from it finds nothing.
+> Every v3 release so far is a pre-release and lands in `-testing`.
 
 ```bash
-sudo dnf copr enable elegos/linux-arctis-manager
-# or, for the testing channel:
-# sudo dnf copr enable elegos/linux-arctis-manager-testing
-
+sudo dnf copr enable elegos/linux-arctis-manager-testing
 sudo dnf install linux-arctis-manager
 ```
+
+Once a stable release is out, switch to the stable channel with
+`sudo dnf copr enable elegos/linux-arctis-manager` (disable the testing one first:
+`sudo dnf copr disable elegos/linux-arctis-manager-testing`).
 
 Optionally add whichever UI shell(s) you want, on top of the main package:
 
