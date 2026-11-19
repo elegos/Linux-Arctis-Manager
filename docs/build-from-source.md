@@ -26,16 +26,25 @@ family and drops it, with the `-lang`, `-plasma-widget` and `-gnome-extension` s
 |---|---|---|
 | `make container-build-debian-deb` | `.deb` | `debian:stable-slim` |
 | `make container-build-ubuntu-deb` | `.deb` | `ubuntu:24.04` |
-| `make container-build-rpm` | `.rpm` | Fedora (`FEDORA_VERSION=`) |
+| `make container-build-rpm` | `.rpm` | `fedora:latest` |
 | `make container-build-pkg` | `.pkg.tar.zst` | `archlinux:latest` |
 | `make container-build-all` | all of the above | |
 
 > [!IMPORTANT]
 > Build on the image that matches the system you will install on. The package links against that
 > distro's libraries, so a `.deb` built on Ubuntu 24.04 may not install or run on Debian.
-> Pick the release explicitly when it isn't the default:
+> The simplest way is `CURRENT_VERSION=1`, which reads your own release from `/etc/os-release`
+> (Fedora 45 gives `fedora:45`, Ubuntu 24.04 gives `ubuntu:24.04`). It works for the target that
+> matches your distro and stops with a message for the others:
 >
 > ```bash
+> make container-build-rpm CURRENT_VERSION=1
+> ```
+>
+> Or pick any release explicitly:
+>
+> ```bash
+> make container-build-rpm BASE_IMAGE=fedora:44
 > make container-build-debian-deb BASE_IMAGE=debian:trixie-slim
 > make container-build-ubuntu-deb BASE_IMAGE=ubuntu:26.04
 > ```
@@ -57,9 +66,9 @@ and enable the services as described in [Installing](install.md).
 > rootless Podman the `Makefile` adds `--userns=keep-id` for this. If `dist/` already holds files
 > that a previous root build created, remove them first or the copy fails with *Permission denied*.
 
-The `.deb` build mirrors the CI job, so what you get is what a release ships. The Debian and Ubuntu
-images are not cached between runs, so every run re-installs the build dependencies; Fedora and Arch
-keep a cached base image (`make container-refresh-fedora`, `-arch` or `-all` to refresh it).
+The `.deb` and `.rpm` builds mirror the CI jobs, so what you get is what a release ships. Their
+images are not cached between runs, so every run re-installs the build dependencies; only Arch keeps a
+cached base image (`make container-refresh-arch` to refresh it).
 
 ## Bare metal
 

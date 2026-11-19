@@ -87,8 +87,15 @@ PYTHON3 ?= $(shell readlink -f $$(command -v python3))
 CONTAINER_ENGINE ?= $(shell command -v podman 2>/dev/null || echo docker)
 
 # ── Container build variables ──────────────────────────────────────────────────
-FEDORA_VERSION  ?= 44
-# Base image for container-build-{debian,ubuntu}-deb (each has its own default).
+# Base image for container-build-{rpm,debian-deb,ubuntu-deb} (each has its own default).
+# CURRENT_VERSION=1 builds on this machine's own release instead, read from
+# /etc/os-release (e.g. on Fedora 45: fedora:45), so the package matches the
+# system it is going to be installed on.
+HOST_ID         := $(shell . /etc/os-release 2>/dev/null && echo $$ID)
+HOST_VERSION_ID := $(shell . /etc/os-release 2>/dev/null && echo $$VERSION_ID)
+# $(call host_image,<distro id>,<image>): <image> if this host is that distro
+# with a version, else a clear error.
+host_image = $(if $(and $(filter $(1),$(HOST_ID)),$(HOST_VERSION_ID)),$(2),$(error CURRENT_VERSION=1 needs a $(1) host with a VERSION_ID in /etc/os-release (this one is '$(HOST_ID)' '$(HOST_VERSION_ID)'); pass BASE_IMAGE= instead))
 BASE_SLUG        = $(shell echo '$(BASE_IMAGE)' | tr -cd 'a-z0-9.')
 CONTAINER_DIR   := packaging/containers
 DIST_DIR        := dist
@@ -101,8 +108,7 @@ CONTAINER_GID   ?= $(shell g=$$(id -g); [ $$g -eq 0 ] && echo 1000 || echo $$g)
 CONTAINER_RUN_FLAGS := --user $(CONTAINER_UID):$(CONTAINER_GID) $(if $(findstring podman,$(CONTAINER_ENGINE)),--userns=keep-id)
 
 # Sentinel files: Make uses these as proxies for "base image is built locally".
-# Delete a sentinel (or run container-refresh-*) to force an OS update + dep rebuild.
-_SENTINEL_FEDORA := .container-base-fedora
+# Delete the sentinel (or run container-refresh-arch) to force an OS update + dep rebuild.
 _SENTINEL_ARCH   := .container-base-arch
 
 # ── Build inputs / outputs ─────────────────────────────────────────────────────
@@ -123,7 +129,7 @@ DEVICE_YAMLS := $(wildcard daemon/device-configs/*.yaml)
 .PHONY: build build-python sync-version generate-services generate-gui-wrapper generate-plasmoid-lang \
         install install-core install-lang install-plasmoid install-gnome-extension install-python uninstall enable disable \
         container-build-rpm container-build-debian-deb container-build-ubuntu-deb container-build-pkg container-build-all \
-        container-refresh-fedora container-refresh-arch container-refresh-all \
+        container-refresh-arch container-refresh-all \
         help
 
 # ── Default target ─────────────────────────────────────────────────────────────
@@ -152,17 +158,16 @@ help:
 	@echo "  DESTDIR (empty by default; used by packaging tools for staged installs)"
 	@echo ""
 	@echo "Container build targets (Docker/Podman):"
-	@echo "  container-build-rpm    Build RPM inside Fedora container → dist/"
+	@echo "  container-build-rpm    Build RPM on Fedora (BASE_IMAGE=fedora:latest) → dist/"
 	@echo "  container-build-debian-deb  Build .deb on Debian (BASE_IMAGE=debian:stable-slim) → dist/"
 	@echo "  container-build-ubuntu-deb  Build .deb on Ubuntu (BASE_IMAGE=ubuntu:24.04) → dist/"
 	@echo "  container-build-pkg    Build .pkg.tar.zst inside Arch container → dist/"
 	@echo "  container-build-all    Build all three package formats"
-	@echo "  container-refresh-fedora|arch   Force OS update in base image"
-	@echo "  container-refresh-all  Force OS update in all base images"
+	@echo "  container-refresh-arch   Force OS update in the Arch base image"
 	@echo ""
 	@echo "Container variables (defaults shown):"
 	@echo "  CONTAINER_ENGINE=$(CONTAINER_ENGINE)"
-	@echo "  FEDORA_VERSION=$(FEDORA_VERSION)"
+	@echo "  CURRENT_VERSION=1  build rpm/deb on this machine's own release (from /etc/os-release)"
 
 # ── Build ──────────────────────────────────────────────────────────────────────
 build:
@@ -373,51 +378,47 @@ disable:
 #      produces the package, then runs it to copy artifacts into dist/
 #
 # To force a full OS re-update (e.g. after a month):
-#   make container-refresh-fedora   (or -debian / -arch / -all)
+#   make container-refresh-arch
 
 $(DIST_DIR):
 	mkdir -p $(DIST_DIR)
 
 # ── Base image sentinels ───────────────────────────────────────────────────────
-$(_SENTINEL_FEDORA): $(CONTAINER_DIR)/fedora.base.dockerfile
-	$(CONTAINER_ENGINE) build \
-		--build-arg FEDORA_VERSION=$(FEDORA_VERSION) \
-		-f $< -t lam-builder-base-fedora $(CONTAINER_DIR)
-	@touch $@
-
 $(_SENTINEL_ARCH): $(CONTAINER_DIR)/arch.base.dockerfile
 	$(CONTAINER_ENGINE) build \
 		-f $< -t lam-builder-base-arch $(CONTAINER_DIR)
 	@touch $@
 
 # ── Force-refresh targets ──────────────────────────────────────────────────────
-container-refresh-fedora:
-	rm -f $(_SENTINEL_FEDORA)
-	$(MAKE) $(_SENTINEL_FEDORA)
-
 container-refresh-arch:
 	rm -f $(_SENTINEL_ARCH)
 	$(MAKE) $(_SENTINEL_ARCH)
 
-container-refresh-all: container-refresh-fedora container-refresh-arch
+container-refresh-all: container-refresh-arch
 
 # ── Package build targets ──────────────────────────────────────────────────────
-container-build-rpm: $(_SENTINEL_FEDORA) | $(DIST_DIR)
+# Real Fedora image, build deps read from the spec's BuildRequires. Override with
+#   make container-build-rpm BASE_IMAGE=fedora:44
+#   make container-build-rpm CURRENT_VERSION=1     (this machine's own release)
+container-build-rpm: BASE_IMAGE ?= $(if $(CURRENT_VERSION),$(call host_image,fedora,fedora:$(HOST_VERSION_ID)),fedora:latest)
+container-build-rpm: | $(DIST_DIR)
 	$(CONTAINER_ENGINE) build \
+		--build-arg BASE_IMAGE=$(BASE_IMAGE) \
 		--build-arg BUILDER_UID=$(CONTAINER_UID) \
 		--build-arg BUILDER_GID=$(CONTAINER_GID) \
 		-f $(CONTAINER_DIR)/fedora.build.dockerfile \
-		-t lam-builder-fedora .
+		-t lam-builder-rpm-$(BASE_SLUG) .
 	$(CONTAINER_ENGINE) run --rm $(CONTAINER_RUN_FLAGS) \
 		-v "$(CURDIR)/$(DIST_DIR):/out:z" \
-		lam-builder-fedora
+		lam-builder-rpm-$(BASE_SLUG)
 
 # Real distro image, build deps read from debian/control: same recipe as the
 # CI workflow (.github/workflows/build-pkg.yaml). Override the image with
 #   make container-build-debian-deb BASE_IMAGE=debian:trixie-slim
 #   make container-build-ubuntu-deb BASE_IMAGE=ubuntu:26.04
-container-build-debian-deb: BASE_IMAGE ?= debian:stable-slim
-container-build-ubuntu-deb: BASE_IMAGE ?= ubuntu:24.04
+# or CURRENT_VERSION=1 to match this machine's own release.
+container-build-debian-deb: BASE_IMAGE ?= $(if $(CURRENT_VERSION),$(call host_image,debian,debian:$(HOST_VERSION_ID)-slim),debian:stable-slim)
+container-build-ubuntu-deb: BASE_IMAGE ?= $(if $(CURRENT_VERSION),$(call host_image,ubuntu,ubuntu:$(HOST_VERSION_ID)),ubuntu:24.04)
 container-build-debian-deb container-build-ubuntu-deb: | $(DIST_DIR)
 	$(CONTAINER_ENGINE) build \
 		--build-arg BASE_IMAGE=$(BASE_IMAGE) \

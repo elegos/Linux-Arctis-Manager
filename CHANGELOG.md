@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Diagnostics page in the GUI (button at the bottom of the sidebar): lists the SteelSeries devices the system exposes and whether each is supported, with a "Copy details" button and, for audio devices without a config, a button that opens the new-device issue form pre-filled with the hardware IDs. The form gained a "Hardware details" field for it.
 - `GetDiagnostics` D-Bus method (Config interface): read-only report of the SteelSeries hidraw nodes, using the same checks as `lam-hidraw-helper`, flagging each as supported, unsupported or ignored. First building block of the in-app troubleshooting page that will replace `lam-cli tools arctis-devices`.
 - `scripts/bump_version.py` writes a release version into every file that carries it (`VERSION`, `pyproject.toml`, `uv.lock`, PKGBUILD, RPM spec, Debian changelog, `CHANGELOG.md`).
+- `CURRENT_VERSION=1` for `make container-build-{rpm,debian-deb,ubuntu-deb}` builds on this machine's own release, read from `/etc/os-release`. `container-build-rpm` now takes `BASE_IMAGE=` too (default `fedora:latest`) and replaces `FEDORA_VERSION` and `container-refresh-fedora`.
 - `make container-build-debian-deb` and `make container-build-ubuntu-deb` build the `.deb` in a container on a real Debian or Ubuntu image (override with `BASE_IMAGE=`), using the same recipe as CI. They replace `container-build-deb`.
 
 ### Fixed
