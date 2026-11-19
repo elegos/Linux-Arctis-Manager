@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The bundled Python venv pinned `bin/python3` to the generic `/usr/bin/python3`, which floats across Python minor versions: a package built for one Fedora release and installed on the next (python3 3.14 → 3.15) failed with `No module named 'linux_arctis_manager'`. It now points at the exact interpreter that built the venv.
 - `packaging/arch/PKGBUILD` now builds the current tag (it was stuck on `3.0.0alpha1`) and pins the source archive's sha256 instead of `SKIP` (#87).
 - The signed `SHA256SUMS` of a release now covers the distro packages and `install.sh` too, not just the tarballs (#87).
 - Virtual sinks are no longer created and immediately removed when the dongle is plugged in with the headset turned off.

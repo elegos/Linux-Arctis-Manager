@@ -243,6 +243,12 @@ install-python: generate-gui-wrapper sync-version
 	# installed file. pyvenv.cfg's `command =` line (Python 3.11+, records
 	# the exact `python -m venv <path>` invocation) leaks the same buildroot
 	# path and is just as cosmetic — nothing reads it back at runtime.
+	# `python3 -m venv` links bin/python3 to the generic /usr/bin/python3 when
+	# invoked that way. That name floats: after the distro moves python3 to a
+	# newer minor (or when a package built for one release is installed on the
+	# next), the venv's site-packages (lib/python3.X) no longer matches and
+	# every import fails. Pin it to the exact interpreter that built the venv.
+	ln -sf "$$(readlink -f $(PYTHON3))" $(DESTDIR)$(VENVDIR)/bin/python3
 	rm -f $(DESTDIR)$(VENVDIR)/bin/activate*
 	sed -i '/^command = /d' $(DESTDIR)$(VENVDIR)/pyvenv.cfg
 	$(DESTDIR)$(VENVDIR)/bin/pip install --disable-pip-version-check -q --upgrade pip
