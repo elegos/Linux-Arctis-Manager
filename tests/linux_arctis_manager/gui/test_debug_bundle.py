@@ -39,28 +39,52 @@ def test_estimated_seconds_covers_the_listen_window():
     assert estimated_seconds(0) > 0
 
 
-def test_script_writes_the_bundle_to_the_chosen_file_and_cleans_up(tmp_path: Path):
+def _sandbox(tmp_path: Path) -> tuple[dict[str, str], Path, Path]:
+    """Environment for running the real script without ever escalating privileges.
+
+    `LAM_NO_PRIVILEGE` turns escalation off in the script, and stub
+    `pkexec`/`sudo`/`hid-recorder` come first on PATH as a second line of defence, so a machine with a
+    real SteelSeries dongle never gets a password prompt (nor does CI). Every
+    call to a stub is logged, so tests can assert nothing privileged ran."""
     scratch = tmp_path / 'scratch'
     scratch.mkdir()
-    out = tmp_path / 'bundle.tar.gz'
-    program, args = build_command(script_path(), out)
-    result = subprocess.run(
-        [program, *args], env={'PATH': '/usr/bin:/bin', 'TMPDIR': str(scratch), 'HOME': str(tmp_path)},
+    fakebin = tmp_path / 'fakebin'
+    fakebin.mkdir()
+    calls = tmp_path / 'privileged-calls.log'
+    for name in ('pkexec', 'sudo', 'hid-recorder'):
+        stub = fakebin / name
+        stub.write_text(f'#!/bin/sh\necho "{name} $*" >> "{calls}"\nexit 1\n')
+        stub.chmod(0o755)
+    env = {
+        'PATH': f'{fakebin}:/usr/bin:/bin', 'LAM_NO_PRIVILEGE': '1', 'TMPDIR': str(scratch), 'HOME': str(tmp_path),
+    }
+    return env, scratch, calls
+
+
+def _run_script(args: list[str], env: dict[str, str]) -> subprocess.CompletedProcess:
+    # stdin=DEVNULL: the script picks sudo over pkexec when stdin is a terminal.
+    return subprocess.run(
+        ['bash', *args], env=env, stdin=subprocess.DEVNULL,
         capture_output=True, text=True, timeout=120, check=False,
     )
+
+
+def test_script_writes_the_bundle_to_the_chosen_file_and_cleans_up(tmp_path: Path):
+    env, scratch, calls = _sandbox(tmp_path)
+    out = tmp_path / 'bundle.tar.gz'
+    program, args = build_command(script_path(), out)
+    result = _run_script(args, env)
     assert result.returncode == 0, result.stderr
     with tarfile.open(out) as tar:
         assert 'bundle/report.txt' in tar.getnames()
     assert list(scratch.glob('lam-debug-info.*')) == [], 'scratch directory must be removed'
+    assert not calls.exists(), f'privileged tool was invoked: {calls.read_text()}'
 
 
 def test_script_fails_cleanly_when_the_output_cannot_be_written(tmp_path: Path):
-    scratch = tmp_path / 'scratch'
-    scratch.mkdir()
+    env, scratch, calls = _sandbox(tmp_path)
     program, args = build_command(script_path(), tmp_path / 'missing-dir' / 'x.tar.gz')
-    result = subprocess.run(
-        [program, *args], env={'PATH': '/usr/bin:/bin', 'TMPDIR': str(scratch), 'HOME': str(tmp_path)},
-        capture_output=True, text=True, timeout=120, check=False,
-    )
+    result = _run_script(args, env)
     assert result.returncode != 0
     assert list(scratch.glob('lam-debug-info.*')) == []
+    assert not calls.exists()

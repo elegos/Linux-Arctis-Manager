@@ -137,8 +137,11 @@ run() {
 }
 
 # Run a command as root: sudo from a terminal, pkexec (graphical prompt) otherwise.
+# LAM_NO_PRIVILEGE=1 disables it altogether (used by the tests, so they never prompt).
 priv() {
-    if [[ -t 0 ]] && have sudo; then
+    if [[ -n "${LAM_NO_PRIVILEGE:-}" ]]; then
+        return 126
+    elif [[ -t 0 ]] && have sudo; then
         sudo "$@"
     elif have pkexec; then
         pkexec "$@"
