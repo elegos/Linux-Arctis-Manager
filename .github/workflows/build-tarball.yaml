@@ -39,13 +39,13 @@ jobs:
           if [ "${{ matrix.family }}" = rpm ]; then
             dnf install -y ca-certificates curl git make binutils gcc pkgconf-pkg-config \
               systemd-devel openssl-devel pulseaudio-libs-devel glib2-devel \
-              python3 python3-pip tar gzip findutils
+              python3 python3-pip tar gzip findutils mold
           else
             apt-get update
             DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
               ca-certificates curl git make binutils build-essential pkg-config \
               libudev-dev libssl-dev libpulse-dev libglib2.0-bin \
-              python3 python3-pip
+              python3 python3-pip mold
           fi
           # Same reason as packaging/debian/rules: the distro's rustc is
           # behind this project's MSRV.

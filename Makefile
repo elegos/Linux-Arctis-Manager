@@ -170,6 +170,13 @@ help:
 	@echo "  CURRENT_VERSION=1  build rpm/deb on this machine's own release (from /etc/os-release)"
 
 # ── Build ──────────────────────────────────────────────────────────────────────
+# Link with mold when present *and* the C compiler can drive it (-fuse-ld=mold
+# needs gcc >= 12 / clang), otherwise keep the default linker: the distro
+# recipes don't require mold, so it stays an opt-in speed-up.
+MOLD_USABLE := $(shell echo 'int main(void){return 0;}' | $(or $(CC),cc) -x c - -fuse-ld=mold -o /dev/null 2>/dev/null && echo yes)
+ifeq ($(MOLD_USABLE),yes)
+build: export RUSTFLAGS := $(RUSTFLAGS) -C link-arg=-fuse-ld=mold
+endif
 build:
 	LAM_DATADIR=$(LAM_DATADIR) $(CARGO) build --release --manifest-path $(MANIFEST)
 

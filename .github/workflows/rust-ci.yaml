@@ -13,6 +13,10 @@ jobs:
   rust-ci:
     runs-on: ubuntu-latest
 
+    env:
+      # mold links noticeably faster than GNU ld (gcc >= 12 on ubuntu-latest).
+      RUSTFLAGS: -C link-arg=-fuse-ld=mold
+
     defaults:
       run:
         working-directory: daemon
@@ -33,7 +37,7 @@ jobs:
       # hidapi (linux-native) and tokio-udev both require libudev at link time.
       # libpulse-dev is required for the libpulse-binding link-time dependency.
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev libhidapi-dev libpulse-dev
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev libhidapi-dev libpulse-dev mold
 
       - name: Check formatting
         run: cargo fmt --all -- --check

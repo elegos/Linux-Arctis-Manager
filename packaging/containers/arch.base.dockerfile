@@ -9,5 +9,6 @@ RUN pacman -Syu --noconfirm && \
         cargo \
         python \
         base-devel \
-        git && \
+        git \
+        mold && \
     pacman -Sc --noconfirm

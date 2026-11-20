@@ -83,6 +83,9 @@ source with the provided `Makefile` is for everyone else.
 - `libcap` (for `setcap`), usually already installed
 - Kernel headers for `hidraw`/`udev`: `libudev-dev` (Debian/Ubuntu), `systemd-devel` (Fedora),
   `udev` (Arch, already present)
+- [`mold`](https://github.com/rui314/mold) linker (`mold` on Debian/Ubuntu/Fedora/Arch), with
+  `gcc` ≥ 12 or `clang`. `make build` links with it when it is usable and silently falls back to the
+  default linker otherwise; the CI and container build images install it.
 
 ### Install
 
