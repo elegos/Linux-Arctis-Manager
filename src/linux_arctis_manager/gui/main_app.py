@@ -29,7 +29,12 @@ from linux_arctis_manager.gui.mic_widget import QMicWidget
 from linux_arctis_manager.gui.settings_widget import QSettingsWidget
 from linux_arctis_manager.gui.status_widget import QStatusWidget
 from linux_arctis_manager.i18n import I18n
-from linux_arctis_manager.update_check import RELEASES_PAGE_URL, UpdateInfo, check_for_update, fetch_releases
+from linux_arctis_manager.update_check import (
+    RELEASES_PAGE_URL,
+    UpdateInfo,
+    check_for_update,
+    fetch_releases,
+)
 from linux_arctis_manager.utils import compare_versions, project_version
 
 

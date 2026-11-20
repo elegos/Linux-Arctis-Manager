@@ -66,7 +66,7 @@ def check_for_update(current: str, releases: list[dict[str, Any]]) -> UpdateInfo
         return UpdateInfo(stable, pre, False, None)
 
     candidates = [c for c in ([stable, pre] if cur.is_prerelease else [stable]) if c]
-    best = max(candidates, key=lambda c: Version(c), default=None)
+    best = max(candidates, key=Version, default=None)
     if best is not None and Version(best) > cur:
         return UpdateInfo(stable, pre, True, best)
     return UpdateInfo(stable, pre, False, None)

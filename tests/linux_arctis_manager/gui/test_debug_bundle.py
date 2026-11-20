@@ -72,7 +72,7 @@ def _run_script(args: list[str], env: dict[str, str]) -> subprocess.CompletedPro
 def test_script_writes_the_bundle_to_the_chosen_file_and_cleans_up(tmp_path: Path):
     env, scratch, calls = _sandbox(tmp_path)
     out = tmp_path / 'bundle.tar.gz'
-    program, args = build_command(script_path(), out)
+    _program, args = build_command(script_path(), out)
     result = _run_script(args, env)
     assert result.returncode == 0, result.stderr
     with tarfile.open(out) as tar:
@@ -83,7 +83,7 @@ def test_script_writes_the_bundle_to_the_chosen_file_and_cleans_up(tmp_path: Pat
 
 def test_script_fails_cleanly_when_the_output_cannot_be_written(tmp_path: Path):
     env, scratch, calls = _sandbox(tmp_path)
-    program, args = build_command(script_path(), tmp_path / 'missing-dir' / 'x.tar.gz')
+    _program, args = build_command(script_path(), tmp_path / 'missing-dir' / 'x.tar.gz')
     result = _run_script(args, env)
     assert result.returncode != 0
     assert list(scratch.glob('lam-debug-info.*')) == []

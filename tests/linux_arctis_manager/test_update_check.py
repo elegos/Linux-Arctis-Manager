@@ -1,7 +1,5 @@
-import pytest
 
 from linux_arctis_manager.update_check import (
-    UpdateInfo,
     check_for_update,
     fetch_releases,
     parse_releases,
