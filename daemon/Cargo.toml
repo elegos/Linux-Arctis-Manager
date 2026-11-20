@@ -13,6 +13,14 @@ edition = "2021"
 license = "GPL-3.0-only"
 authors = ["Giacomo 'Mr. Wolf' Furlan <g.furlan@accenture.com>"]
 
+[profile.dev]
+# Backtraces keep file/line numbers, but no full DWARF: keeps target/debug small.
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
+
+[profile.dev.package."*"]
+debug = false
+
 # Declare all expected workspace dependencies here so member crates can
 # reference them with `{ workspace = true }` without updating this file.
 [workspace.dependencies]
