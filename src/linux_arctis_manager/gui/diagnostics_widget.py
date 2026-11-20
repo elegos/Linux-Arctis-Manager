@@ -35,7 +35,11 @@ from linux_arctis_manager.gui.debug_bundle import (
     estimated_seconds,
     script_path,
 )
-from linux_arctis_manager.gui.diagnostics_logic import describe_device, issue_url
+from linux_arctis_manager.gui.diagnostics_logic import (
+    ISSUE_CHOOSER_URL,
+    describe_device,
+    issue_url,
+)
 from linux_arctis_manager.i18n import I18n
 from linux_arctis_manager.utils import project_version
 
@@ -70,6 +74,10 @@ class QDiagnosticsWidget(QWidget):
         self._refresh_button = QPushButton(_t('diag_refresh'))
         self._refresh_button.clicked.connect(self.refresh)
         header.addWidget(self._refresh_button)
+        self._report_button = QPushButton(_t('diag_report_bug'))
+        self._report_button.setToolTip(_t('diag_report_bug_hint'))
+        self._report_button.clicked.connect(self._report_bug)
+        header.addWidget(self._report_button)
         outer.addLayout(header)
 
         hint = QLabel(_t('diag_hint'))
@@ -78,13 +86,14 @@ class QDiagnosticsWidget(QWidget):
 
         self._process: QProcess | None = None
         self._bundle_path: Path | None = None
+        self._open_issues_after_bundle = False
         self._bundle_button = QPushButton(_t('diag_bundle'))
         self._bundle_button.setToolTip(_t('diag_bundle_hint'))
         self._bundle_button.clicked.connect(self._create_bundle)
         self._listen_spin = QSpinBox()
         self._listen_spin.setRange(0, 600)
         self._listen_spin.setValue(DEFAULT_LISTEN_SECONDS)
-        self._listen_spin.setSuffix(' s')
+        self._listen_spin.setSuffix(f' {_t("diag_unit_seconds")}')
         self._listen_spin.setToolTip(_t('diag_bundle_listen_hint'))
         bundle_row = QHBoxLayout()
         bundle_row.addWidget(self._bundle_button)
@@ -160,7 +169,9 @@ class QDiagnosticsWidget(QWidget):
         state.setWordWrap(True)
         layout.addWidget(state)
 
-        details = QLabel(describe_device(device))
+        details = QLabel(describe_device(
+            device, node_label=_t('diag_node'), interface_label=_t('diag_interface'), include_status=False,
+        ))
         details.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         details.setWordWrap(True)
         layout.addWidget(details)
@@ -181,6 +192,18 @@ class QDiagnosticsWidget(QWidget):
         layout.addLayout(buttons)
         return card
 
+    def _report_bug(self) -> None:
+        answer = QMessageBox.question(
+            self, _t('diag_report_bug'), _t('diag_report_bug_ask'),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self._open_issues_after_bundle = True
+            self._create_bundle()
+        elif answer == QMessageBox.StandardButton.No:
+            QDesktopServices.openUrl(QUrl(ISSUE_CHOOSER_URL))
+
     def _create_bundle(self) -> None:
         # Collect into a private scratch directory first: the save dialog only
         # opens once the (possibly long) run is over, and nothing is left behind.
@@ -196,6 +219,7 @@ class QDiagnosticsWidget(QWidget):
         self._process.finished.connect(self._on_bundle_finished)
         self._process.errorOccurred.connect(lambda _err: self._on_bundle_finished(-1))
         self._bundle_button.setEnabled(False)
+        self._report_button.setEnabled(False)
         self._listen_spin.setEnabled(False)
         self._bundle_button.setText(_t('diag_bundle_running'))
         self._progress_total_ms = estimated_seconds(listen) * 1000
@@ -213,9 +237,18 @@ class QDiagnosticsWidget(QWidget):
         self._progress.setValue(min(self._progress_clock.elapsed(), self._progress_total_ms - 1))
 
     def _on_bundle_finished(self, exit_code: int, *_ignored) -> None:
+        open_issues, self._open_issues_after_bundle = self._open_issues_after_bundle, False
+        try:
+            self._finish_bundle(exit_code)
+        finally:
+            if open_issues:
+                QDesktopServices.openUrl(QUrl(ISSUE_CHOOSER_URL))
+
+    def _finish_bundle(self, exit_code: int) -> None:
         self._progress_timer.stop()
         self._progress.setVisible(False)
         self._bundle_button.setEnabled(True)
+        self._report_button.setEnabled(True)
         self._listen_spin.setEnabled(True)
         self._bundle_button.setText(_t('diag_bundle'))
         scratch, self._scratch = self._scratch, None

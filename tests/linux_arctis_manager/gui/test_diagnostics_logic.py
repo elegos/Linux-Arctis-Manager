@@ -74,3 +74,9 @@ def test_issue_url_drops_the_descriptor_when_too_long():
 def test_issue_url_without_product_name_leaves_model_empty():
     q = _query(issue_url({**DEVICE, 'product': None}, 'v'))
     assert 'model' not in q or q['model'] == ''
+
+
+def test_describe_device_takes_translated_labels_and_can_skip_the_status():
+    text = describe_device(DEVICE, node_label='nodo', interface_label='interfaccia', include_status=False)
+    assert 'nodo hidraw3' in text and 'interfaccia 5' in text
+    assert 'node' not in text and 'status' not in text

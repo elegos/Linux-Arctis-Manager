@@ -5,6 +5,7 @@ import json
 from urllib.parse import urlencode
 
 ISSUE_NEW_URL = 'https://github.com/elegos/Linux-Arctis-Manager/issues/new'
+ISSUE_CHOOSER_URL = f'{ISSUE_NEW_URL}/choose'
 # GitHub rejects very long query strings; stay well below the ~8 KB limit.
 ISSUE_URL_MAX_LENGTH = 6000
 
@@ -28,14 +29,19 @@ def _ids(device: dict) -> str:
     return f"{device.get('vendor_id', '????')}:{device.get('product_id', '????')}"
 
 
-def describe_device(device: dict) -> str:
-    """One-paragraph plain-text description, suitable for the clipboard."""
+def describe_device(
+    device: dict, node_label: str = 'node', interface_label: str = 'interface', include_status: bool = True,
+) -> str:
+    """One-paragraph plain-text description. The defaults (English, with the
+    status) are what goes to the clipboard, for the issue; the GUI card passes
+    translated labels."""
     name = ' '.join(p for p in (device.get('manufacturer'), device.get('product')) if p)
     parts = [f'{_ids(device)}' + (f' {name}' if name else '')]
-    parts.append(f"node {device.get('node', '?')}")
+    parts.append(f"{node_label} {device.get('node', '?')}")
     if device.get('interface') is not None:
-        parts.append(f"interface {device['interface']}")
-    parts.append(f"status: {device.get('status', 'unknown')}")
+        parts.append(f"{interface_label} {device['interface']}")
+    if include_status:
+        parts.append(f"status: {device.get('status', 'unknown')}")
     return ', '.join(parts)
 
 

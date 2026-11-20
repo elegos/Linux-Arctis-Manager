@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Diagnostics page in the GUI: lists the SteelSeries devices the system sees and whether each is supported, with a "Copy details" button and, for unsupported audio devices, a shortcut to the new-device issue form pre-filled with the hardware IDs.
 - Debug bundle: "Create debug bundle..." on the Diagnostics page collects everything needed for a bug report into a `.tar.gz`. An optional "Listen time" records what the headset sends while you reproduce the problem, and a graphical prompt asks for the privileges it needs when there is no terminal.
+- "🪲 Report bug" button on the Diagnostics page: offers to create a debug bundle first, then opens the GitHub issue page so you can attach it.
 - Update check: the GUI tells you when a newer GitHub release exists; clicking the version in the footer checks on demand.
 - `make container-build-{rpm,debian-deb,ubuntu-deb}` build the distro packages in containers on real Fedora, Debian and Ubuntu images, optionally for this machine's own release (`CURRENT_VERSION=1`).
 
