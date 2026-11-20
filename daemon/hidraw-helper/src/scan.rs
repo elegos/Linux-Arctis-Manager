@@ -89,7 +89,11 @@ pub fn scan(sysfs_base: &Path) -> Vec<HidrawNode> {
         .filter_map(|e| e.ok()?.file_name().into_string().ok())
         .filter(|n| n.starts_with("hidraw"))
         .collect();
-    names.sort_by_key(|n| n.trim_start_matches("hidraw").parse::<u32>().unwrap_or(u32::MAX));
+    names.sort_by_key(|n| {
+        n.trim_start_matches("hidraw")
+            .parse::<u32>()
+            .unwrap_or(u32::MAX)
+    });
     names
         .iter()
         .filter_map(|n| describe(sysfs_base, n))
@@ -108,7 +112,11 @@ mod tests {
         std::fs::create_dir_all(&hid_fn).unwrap();
         std::fs::write(usb_dev.join("idVendor"), format!("{vid:04x}\n")).unwrap();
         std::fs::write(usb_dev.join("idProduct"), format!("{pid:04x}\n")).unwrap();
-        std::fs::write(usb_dev.join(format!("iface{iface}/bInterfaceNumber")), format!("{iface}\n")).unwrap();
+        std::fs::write(
+            usb_dev.join(format!("iface{iface}/bInterfaceNumber")),
+            format!("{iface}\n"),
+        )
+        .unwrap();
         if audio {
             let a = usb_dev.join("audio_iface");
             std::fs::create_dir_all(&a).unwrap();
@@ -169,7 +177,11 @@ mod tests {
         add_node(&dir, 4, "usb_a", 0x1038, 0x2202, true, "00");
         std::fs::write(dir.path().join("usb_a/product"), "Arctis Nova X\n").unwrap();
         std::fs::write(dir.path().join("usb_a/manufacturer"), "SteelSeries\n").unwrap();
-        std::fs::write(dir.path().join("usb_a/iface00/hid_fn4/report_descriptor"), [0x06, 0xc0, 0xff]).unwrap();
+        std::fs::write(
+            dir.path().join("usb_a/iface00/hid_fn4/report_descriptor"),
+            [0x06, 0xc0, 0xff],
+        )
+        .unwrap();
         let n = &scan(dir.path())[0];
         assert_eq!(n.product.as_deref(), Some("Arctis Nova X"));
         assert_eq!(n.manufacturer.as_deref(), Some("SteelSeries"));

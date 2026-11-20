@@ -15,8 +15,17 @@ fn classify(node: &HidrawNode, configs: &[Arc<DeviceConfig>]) -> (&'static str, 
     }
     let found = configs.iter().find_map(|c| {
         let d = c.device.as_ref()?;
-        let v = d.variants.as_ref()?.iter().find(|v| v.product_id == node.pid)?;
-        Some(v.name.clone().or_else(|| d.name.clone()).unwrap_or_default())
+        let v = d
+            .variants
+            .as_ref()?
+            .iter()
+            .find(|v| v.product_id == node.pid)?;
+        Some(
+            v.name
+                .clone()
+                .or_else(|| d.name.clone())
+                .unwrap_or_default(),
+        )
     });
     match found {
         Some(name) => ("supported", Some(name)),

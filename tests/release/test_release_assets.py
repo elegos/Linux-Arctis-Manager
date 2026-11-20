@@ -45,7 +45,7 @@ def test_list_keeps_shipped_assets_and_drops_debug_and_source(tmp_path: Path) ->
 def test_sums_cover_every_shipped_asset_by_basename(tmp_path: Path) -> None:
     _tree(tmp_path, SHIPPED + DROPPED)
     lines = _run("sums", str(tmp_path)).splitlines()
-    got = dict(reversed(line.split("  ", 1)) for line in lines)
+    got = {name: digest for digest, name in (line.split("  ", 1) for line in lines)}
     assert set(got) == {Path(n).name for n in SHIPPED}
     for n in SHIPPED:
         assert got[Path(n).name] == hashlib.sha256(n.encode()).hexdigest()

@@ -120,7 +120,7 @@ def update_checksum(root: Path, archive: Path | None) -> None:
 
 
 def main(argv: list[str]) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     ap.add_argument("version", nargs="?", help="new version, e.g. 3.0.0-beta4 (no leading v)")
     ap.add_argument("--update-checksum", action="store_true", help="pin the tag archive's sha256 in the PKGBUILD")
     ap.add_argument("--archive", type=Path, help="with --update-checksum: use this local file instead of downloading")
