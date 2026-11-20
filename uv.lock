@@ -396,6 +396,23 @@ wheels = [
 ]
 
 [[package]]
+name = "hid-tools"
+version = "0.12"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "libevdev" },
+    { name = "parse" },
+    { name = "pyroute2" },
+    { name = "pyyaml" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f6/a8/efb6a2bb80bfb118fa61f31eef6c22c99c90d2fbd2a6ed91719da7245d79/hid_tools-0.12.tar.gz", hash = "sha256:aa8df2a6924b378891820e3080957c4b16a5bd4939765e24820e71142250cd89", size = 85569, upload-time = "2025-11-20T15:27:38.896Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/64/01/15355c28be151d4fa85e00608b9b9e45c59340bb93f3e7b09315f5c664d3/hid_tools-0.12-py3-none-any.whl", hash = "sha256:37e56369ac88d0b151f7529a77b53bac2f0dbdc2d0845a5d261b22ff0a524680", size = 106012, upload-time = "2025-11-20T15:27:40.409Z" },
+]
+
+[[package]]
 name = "httpcore"
 version = "1.0.9"
 source = { registry = "https://pypi.org/simple" }
@@ -462,6 +479,18 @@ wheels = [
 ]
 
 [[package]]
+name = "libevdev"
+version = "0.13.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/86/ff/4f8ab38330965168be742b772bcd151a7a052ea17b2481c43a607875d4ed/libevdev-0.13.1.tar.gz", hash = "sha256:dc3369cd1401767b9ecb1117cd6b73faba9038e3bd9e1695a710a9e9d9415e8d", size = 61523, upload-time = "2025-11-14T07:27:11.932Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/da/81/a61deef77c83752bb28aac9373676d9f2218a53bfd7bfb9baf10c612dc3c/libevdev-0.13.1-py3-none-any.whl", hash = "sha256:1a15dc796ecb1cba679fc564686f9efab5124efae6e41dba8f4bf377d5a72f4a", size = 33627, upload-time = "2025-11-14T07:27:10.253Z" },
+]
+
+[[package]]
 name = "license-expression"
 version = "30.4.4"
 source = { registry = "https://pypi.org/simple" }
@@ -480,6 +509,7 @@ source = { editable = "." }
 dependencies = [
     { name = "dbus-next" },
     { name = "defusedxml" },
+    { name = "hid-tools" },
     { name = "huggingface-hub" },
     { name = "pulsectl" },
     { name = "pyside6" },
@@ -504,6 +534,7 @@ dev = [
 requires-dist = [
     { name = "dbus-next", specifier = ">=0.2.3" },
     { name = "defusedxml", specifier = ">=0.7.1" },
+    { name = "hid-tools", specifier = ">=0.12" },
     { name = "huggingface-hub", specifier = ">=0.23.0" },
     { name = "pulsectl", specifier = ">=24.12.0" },
     { name = "pyside6", specifier = ">=6.10.1" },
@@ -675,6 +706,15 @@ wheels = [
 ]
 
 [[package]]
+name = "parse"
+version = "1.22.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/9e/0f/4bada23d2848aaa61f3577181dbd83895fa49fb9beb406835ed7eaca1b96/parse-1.22.4.tar.gz", hash = "sha256:706d458feed5a81b02768d3156e8070baf6cee7d150a3a3c0cd43101a875c3b5", size = 40279, upload-time = "2026-10-20T21:16:07.702Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8f/5f/fbe039e06108eefad9e6b1f7d915a9c73ca0451700c7d48ce05eaa3a2833/parse-1.22.4-py2.py3-none-any.whl", hash = "sha256:ae430a4477316eed4a9710f642b2db968ec89d5d82e6b0908b8169673b476847", size = 21919, upload-time = "2026-10-20T21:16:06.547Z" },
+]
+
+[[package]]
 name = "pip"
 version = "26.2.1"
 source = { registry = "https://pypi.org/simple" }
@@ -784,6 +824,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/e4/11/b213bebff182584360cb8d17c72c1677fec5c5c228de439e63bcf8ab1c8f/pyparsing-3.3.3.tar.gz", hash = "sha256:928ae7e20211f3b6f3915a72f06a0cfd29ab9d24279dd6346b6b1a7146397d36", size = 1050487, upload-time = "2026-09-20T20:59:05.609Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/38/bb/d215ee7c73b61497b28a5503f9f53523f294fcc936762b7caf90e0c1c2b5/pyparsing-3.3.3-py3-none-any.whl", hash = "sha256:ece8c00a69cf01b45d0b1dedabb469c90d8caf996d4fda40f147627a122849a4", size = 126420, upload-time = "2026-09-20T20:59:04.025Z" },
+]
+
+[[package]]
+name = "pyroute2"
+version = "0.9.7"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "win-inet-pton", marker = "sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1b/2a/d295013eb67b5bb3a0ebff7c6ae3f635a8f55929b3f5367889ddadd7f4dd/pyroute2-0.9.7.tar.gz", hash = "sha256:a678b098478c46ec51d6bf9a03c3cd2ac0172dffa590e9e8c1eeab633d0c17c6", size = 493409, upload-time = "2026-10-23T15:27:48.964Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6c/4e/d9ce0ff4b50da558a075a647ccb39074b7943cff26e8450a35a32c6e2948/pyroute2-0.9.7-py3-none-any.whl", hash = "sha256:01a2a3afe565a6acb0a0d5d8ac86c9682b6564407e3d9589070191ae94b737e8", size = 491864, upload-time = "2026-10-23T15:27:43.335Z" },
 ]
 
 [[package]]
@@ -1131,4 +1183,13 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/44/7f/74192f47d67c8bf3c47bf0d8487b3457614c2c98d58b6617721d217f3f79/vdf-3.4.tar.gz", hash = "sha256:fd5419f41e07a1009e5ffd027c7dcbe43d1f7e8ef453aeaa90d9d04b807de2af", size = 11132, upload-time = "2021-05-22T09:26:05.252Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/96/60/6456b687cf55cf60020dcd01f9bc51561c3cc84f05fd8e0feb71ce60f894/vdf-3.4-py2.py3-none-any.whl", hash = "sha256:68c1a125cc49e343d535af2dd25074e9cb0908c6607f073947c4a04bbe234534", size = 10357, upload-time = "2021-05-22T09:26:03.948Z" },
+]
+
+[[package]]
+name = "win-inet-pton"
+version = "1.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d9/da/0b1487b5835497dea00b00d87c2aca168bb9ca2e2096981690239e23760a/win_inet_pton-1.1.0.tar.gz", hash = "sha256:dd03d942c0d3e2b1cf8bab511844546dfa5f74cb61b241699fa379ad707dea4f", size = 2949, upload-time = "2019-02-19T17:46:23.925Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/be/31/ff772a44aa56319df8afbb0b34f1a856f66f05b9d5f1fed917849e47fdae/win_inet_pton-1.1.0-py2.py3-none-any.whl", hash = "sha256:eaf0193cbe7152ac313598a0da7313fb479f769343c0c16c5308f64887dc885b", size = 4848, upload-time = "2019-02-19T17:46:22.182Z" },
 ]

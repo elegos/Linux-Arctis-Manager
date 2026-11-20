@@ -101,6 +101,16 @@ mkdir -p "${BUNDLE}/hid-descriptors" "${BUNDLE}/config"
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# hid-recorder: the app's own venv ships one (hid-tools is a Python dependency),
+# and the GUI points LAM_HID_RECORDER at it. Fall back to one on PATH. An
+# absolute path is needed because pkexec runs with a minimal PATH.
+HID_RECORDER=""
+if [[ -n "${LAM_HID_RECORDER:-}" && -x "$LAM_HID_RECORDER" ]]; then
+    HID_RECORDER="$LAM_HID_RECORDER"
+elif have hid-recorder; then
+    HID_RECORDER="$(command -v hid-recorder)"
+fi
+
 section() {
     {
         echo
@@ -278,8 +288,8 @@ fi
 section "HID report descriptors"
 if ((${#MATCHED_DEVS[@]} == 0)); then
     echo "[skipped: no matching hidraw devices found above]" >>"$REPORT"
-elif ! have hid-recorder; then
-    missing "hid-recorder" "hid-tools (Fedora: hid-replay)"
+elif [[ -z "$HID_RECORDER" ]]; then
+    missing "hid-recorder" "hid-tools (pip install hid-tools)"
 else
     CAP_SECONDS="${HIDRAW_CAPTURE_SECONDS:-2}"
     CAP_SUFFIX=""
@@ -291,13 +301,13 @@ else
         echo "hidraw nodes are root-only — you may be asked for your password." >&2
     fi
     if priv bash -c '
-        secs="$1"; owner="$2"; outdir="$3"; suffix="$4"; shift 4
+        secs="$1"; owner="$2"; outdir="$3"; suffix="$4"; recorder="$5"; shift 5
         for dev in "$@"; do
-            timeout "$secs" hid-recorder "$dev" >"${outdir}/$(basename "$dev")${suffix}.txt" 2>&1 &
+            timeout "$secs" "$recorder" "$dev" >"${outdir}/$(basename "$dev")${suffix}.txt" 2>&1 &
         done
         wait
         chown -R "$owner" "$outdir"
-    ' _ "$CAP_SECONDS" "$(id -u):$(id -g)" "${BUNDLE}/hid-descriptors" "$CAP_SUFFIX" "${MATCHED_DEVS[@]}"; then
+    ' _ "$CAP_SECONDS" "$(id -u):$(id -g)" "${BUNDLE}/hid-descriptors" "$CAP_SUFFIX" "$HID_RECORDER" "${MATCHED_DEVS[@]}"; then
         {
             for dev in "${MATCHED_DEVS[@]}"; do
                 name="$(basename "$dev")"

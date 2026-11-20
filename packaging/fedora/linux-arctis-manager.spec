@@ -77,9 +77,6 @@ Requires:       python3
 Requires:       libcap
 Requires:       pulseaudio-libs
 Requires:       hicolor-icon-theme
-# hid-recorder, used only by the GUI's Diagnostics debug bundle (the headless
-# daemon never needs it), so a weak dependency. Fedora ships it as hid-replay.
-Recommends:     hid-replay
 
 # Only needed for the AI voice changer's one-shot .pth -> ONNX voice-model
 # conversion tool (E10-S6a/S7) — a soft dependency since the rest of the

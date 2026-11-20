@@ -1,9 +1,18 @@
 import shutil
+import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QElapsedTimer, QProcess, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import (
+    QElapsedTimer,
+    QProcess,
+    QProcessEnvironment,
+    Qt,
+    QTimer,
+    QUrl,
+    Signal,
+)
 from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -179,6 +188,11 @@ class QDiagnosticsWidget(QWidget):
         listen = self._listen_spin.value()
         program, args = build_command(script_path(), self._scratch / 'bundle.tar.gz', listen)
         self._process = QProcess(self)
+        recorder = Path(sys.executable).parent / 'hid-recorder'
+        if recorder.is_file():
+            env = QProcessEnvironment.systemEnvironment()
+            env.insert('LAM_HID_RECORDER', str(recorder))
+            self._process.setProcessEnvironment(env)
         self._process.finished.connect(self._on_bundle_finished)
         self._process.errorOccurred.connect(lambda _err: self._on_bundle_finished(-1))
         self._bundle_button.setEnabled(False)
