@@ -11,7 +11,7 @@ pkgrel=1
 arch=('x86_64')
 url="https://github.com/elegos/Linux-Arctis-Manager"
 license=('MIT')
-makedepends=('rust' 'cargo' 'python' 'glib2' 'libpulse')
+makedepends=('rust' 'cargo' 'mold' 'python' 'glib2' 'libpulse')
 
 # No source array — the Dockerfile has already placed the tree at /home/builder/source
 source=()

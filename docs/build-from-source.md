@@ -84,8 +84,9 @@ source with the provided `Makefile` is for everyone else.
 - Kernel headers for `hidraw`/`udev`: `libudev-dev` (Debian/Ubuntu), `systemd-devel` (Fedora),
   `udev` (Arch, already present)
 - [`mold`](https://github.com/rui314/mold) linker (`mold` on Debian/Ubuntu/Fedora/Arch), with
-  `gcc` ≥ 12 or `clang`. `make build` links with it when it is usable and silently falls back to the
-  default linker otherwise; the CI and container build images install it.
+  `gcc` ≥ 12 or `clang`. It is a declared build dependency of every package recipe; `make build`
+  links with it when the C compiler can drive it and falls back to the default linker otherwise
+  (e.g. gcc 11 on Ubuntu 22.04).
 
 ### Install
 

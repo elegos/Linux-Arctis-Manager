@@ -9,7 +9,7 @@ pkgrel=1
 arch=('x86_64')
 url="https://github.com/elegos/Linux-Arctis-Manager"
 license=('MIT')
-makedepends=('rust' 'cargo' 'python' 'glib2' 'libpulse')
+makedepends=('rust' 'cargo' 'mold' 'python' 'glib2' 'libpulse')
 # sha256sums: scripts/bump_version.py resets it to SKIP; run its --update-checksum once the tag is pushed.
 source=("$pkgbase-$pkgver.tar.gz::https://github.com/elegos/Linux-Arctis-Manager/archive/refs/tags/v${_upstreamver}.tar.gz")
 sha256sums=('SKIP')

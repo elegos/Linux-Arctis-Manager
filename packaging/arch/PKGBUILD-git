@@ -6,7 +6,7 @@ pkgrel=1
 arch=('x86_64')
 url="https://github.com/elegos/Linux-Arctis-Manager"
 license=('MIT')
-makedepends=('rust' 'cargo' 'uv' 'python' 'git' 'glib2')
+makedepends=('rust' 'cargo' 'mold' 'uv' 'python' 'git' 'glib2')
 source=("$pkgbase::git+https://github.com/elegos/Linux-Arctis-Manager.git#branch=main")
 sha256sums=('SKIP')
 

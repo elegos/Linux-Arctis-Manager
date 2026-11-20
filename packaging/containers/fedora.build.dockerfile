@@ -3,7 +3,7 @@ FROM ${BASE_IMAGE}
 
 # Only the tools to run rpmbuild and resolve BuildRequires; everything the
 # build itself needs comes from the spec below.
-RUN dnf install -y rpm-build rpmdevtools mold 'dnf-command(builddep)' && dnf clean all
+RUN dnf install -y rpm-build rpmdevtools 'dnf-command(builddep)' && dnf clean all
 
 # Build deps straight from the spec (as root), so this can't drift from it.
 COPY packaging/fedora/linux-arctis-manager.spec /tmp/lam.spec

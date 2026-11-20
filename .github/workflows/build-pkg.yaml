@@ -48,7 +48,7 @@ jobs:
           case "${{ matrix.family }}" in
             arch)
               pacman -Syu --noconfirm
-              pacman -S --noconfirm --needed base-devel git sudo mold
+              pacman -S --noconfirm --needed base-devel git sudo
               # makepkg.conf may default CFLAGS to -march=native, correct
               # for a real user (same machine builds and runs it), wrong
               # here: build-pkg and install-test land on different runner
@@ -97,7 +97,7 @@ jobs:
               # Build deps come straight from the spec's own BuildRequires:,
               # not a list maintained separately in this workflow.
               BUILD_DEPS=$(grep -E '^BuildRequires:' "$RPMTOP/SPECS/${PKGNAME}.spec" | awk '{print $2}')
-              dnf install -y $BUILD_DEPS mold
+              dnf install -y $BUILD_DEPS
 
               su builder -c "rpmbuild -ba $RPMTOP/SPECS/${PKGNAME}.spec"
               mkdir -p /out
@@ -114,7 +114,7 @@ jobs:
             deb)
               apt-get update
               DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-                devscripts debhelper equivs dpkg-dev fakeroot mold
+                devscripts debhelper equivs dpkg-dev fakeroot
               PKGNAME=linux-arctis-manager
               VERSION=$(echo "$VERSION_RAW" | sed 's/-/~/g')
               mkdir -p /tmp/build

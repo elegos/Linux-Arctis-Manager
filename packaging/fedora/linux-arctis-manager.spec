@@ -38,6 +38,7 @@ Source0:        %{name}-%{version}.tar.gz
 # with unvendored dependencies.
 BuildRequires:  cargo
 BuildRequires:  rust
+BuildRequires:  mold
 
 # Fedora 45+ (and rawhide) default `python3` to 3.15, which PySide6 has no
 # published wheel for yet (confirmed via a real COPR build failure: "Could

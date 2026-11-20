@@ -12,7 +12,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        devscripts debhelper equivs dpkg-dev fakeroot ca-certificates mold && \
+        devscripts debhelper equivs dpkg-dev fakeroot ca-certificates && \
     apt-get clean
 
 # Unprivileged build user. UID matches the host user so the bind-mounted

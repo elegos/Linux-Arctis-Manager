@@ -4,6 +4,7 @@ Priority: optional
 Maintainer: Giacomo Furlan <g.furlan@accenture.com>
 Build-Depends: debhelper-compat (= 13),
                curl,
+               mold,
                pkg-config,
                libudev-dev,
                libssl-dev,
