@@ -62,39 +62,71 @@ def test_report_replaces_previous_cards():
     assert w._list_layout.count() == 1
 
 
-def test_cancelling_the_save_dialog_starts_nothing(monkeypatch):
+def test_listen_time_defaults_to_sixty_seconds():
+    assert _widget()._listen_spin.value() == 60
+
+
+def test_progress_bar_is_hidden_until_a_bundle_runs():
+    w = _widget()
+    assert w._progress.isHidden()
+
+
+def test_cancelling_the_save_dialog_discards_the_bundle_and_the_scratch(monkeypatch, tmp_path):
+    from pathlib import Path
+
     from PySide6.QtWidgets import QFileDialog
     monkeypatch.setattr(QFileDialog, 'getSaveFileName', lambda *a, **k: ('', ''))
     w = _widget()
-    w._create_bundle()
-    assert w._process is None
-    assert w._bundle_button.isEnabled()
-
-
-def test_finished_bundle_reports_success_or_failure(monkeypatch):
-    from PySide6.QtWidgets import QMessageBox
-    shown: list[tuple[str, str]] = []
-    monkeypatch.setattr(QMessageBox, 'information', lambda _p, _t, msg: shown.append(('info', msg)))
-    monkeypatch.setattr(QMessageBox, 'warning', lambda _p, _t, msg: shown.append(('warn', msg)))
-    w = _widget()
-    from pathlib import Path
-    w._bundle_path = Path('/tmp/x.tar.gz')
-    w._bundle_button.setEnabled(False)
+    scratch = tmp_path / 'scratch'
+    scratch.mkdir()
+    (scratch / 'bundle.tar.gz').write_bytes(b'x')
+    w._scratch = Path(scratch)
     w._on_bundle_finished(0)
-    w._on_bundle_finished(1)
-    assert shown[0][0] == 'info' and '/tmp/x.tar.gz' in shown[0][1]
-    assert shown[1][0] == 'warn'
+    assert not scratch.exists()
     assert w._bundle_button.isEnabled()
 
 
-def test_a_real_bundle_is_written_to_the_chosen_file(monkeypatch, tmp_path):
+def test_the_save_dialog_only_opens_after_the_run_ends(monkeypatch):
+    from PySide6.QtWidgets import QFileDialog
+    calls: list[int] = []
+    monkeypatch.setattr(QFileDialog, 'getSaveFileName', lambda *a, **k: calls.append(1) or ('', ''))
+    w = _widget()
+    w._listen_spin.setValue(0)
+    w._create_bundle()
+    assert calls == [], 'dialog must not open before the script finishes'
+    assert w._process is not None
+    assert w._process.waitForFinished(120000)
+    _app.processEvents()
+    assert calls == [1]
+    assert not w._progress_timer.isActive()
+
+
+def test_failed_run_warns_and_cleans_up(monkeypatch, tmp_path):
+    from pathlib import Path
+
+    from PySide6.QtWidgets import QMessageBox
+    shown: list[str] = []
+    monkeypatch.setattr(QMessageBox, 'warning', lambda _p, _t, msg: shown.append(msg))
+    w = _widget()
+    scratch = tmp_path / 's'
+    scratch.mkdir()
+    w._scratch = Path(scratch)
+    w._on_bundle_finished(1)
+    assert shown and not scratch.exists()
+
+
+def test_a_real_bundle_is_moved_to_the_chosen_file(monkeypatch, tmp_path):
     from PySide6.QtWidgets import QFileDialog, QMessageBox
     out = tmp_path / 'b.tar.gz'
     monkeypatch.setattr(QFileDialog, 'getSaveFileName', lambda *a, **k: (str(out), ''))
     monkeypatch.setattr(QMessageBox, 'information', lambda *a, **k: None)
     monkeypatch.setattr(QMessageBox, 'warning', lambda *a, **k: None)
     w = _widget()
+    w._listen_spin.setValue(0)
     w._create_bundle()
+    scratch = w._scratch
     assert w._process is not None
     assert w._process.waitForFinished(120000)
+    _app.processEvents()
     assert out.is_file() and out.stat().st_size > 0
+    assert scratch is not None and not scratch.exists()

@@ -77,6 +77,8 @@ Requires:       python3
 Requires:       libcap
 Requires:       pulseaudio-libs
 Requires:       hicolor-icon-theme
+# hid-recorder, used by the Diagnostics page's debug bundle (provides /usr/bin/hid-recorder)
+Requires:       hid-replay
 
 # Only needed for the AI voice changer's one-shot .pth -> ONNX voice-model
 # conversion tool (E10-S6a/S7) — a soft dependency since the rest of the

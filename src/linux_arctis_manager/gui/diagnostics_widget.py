@@ -1,23 +1,29 @@
+import shutil
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QProcess, Qt, QUrl, Signal
+from PySide6.QtCore import QElapsedTimer, QProcess, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QScrollArea,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
 from linux_arctis_manager.gui.debug_bundle import (
+    DEFAULT_LISTEN_SECONDS,
     build_command,
     default_file_name,
+    estimated_seconds,
     script_path,
 )
 from linux_arctis_manager.gui.diagnostics_logic import describe_device, issue_url
@@ -66,7 +72,27 @@ class QDiagnosticsWidget(QWidget):
         self._bundle_button = QPushButton(_t('diag_bundle'))
         self._bundle_button.setToolTip(_t('diag_bundle_hint'))
         self._bundle_button.clicked.connect(self._create_bundle)
-        outer.addWidget(self._bundle_button, 0, Qt.AlignmentFlag.AlignLeft)
+        self._listen_spin = QSpinBox()
+        self._listen_spin.setRange(0, 600)
+        self._listen_spin.setValue(DEFAULT_LISTEN_SECONDS)
+        self._listen_spin.setSuffix(' s')
+        self._listen_spin.setToolTip(_t('diag_bundle_listen_hint'))
+        bundle_row = QHBoxLayout()
+        bundle_row.addWidget(self._bundle_button)
+        bundle_row.addWidget(QLabel(_t('diag_bundle_listen')))
+        bundle_row.addWidget(self._listen_spin)
+        bundle_row.addStretch()
+        outer.addLayout(bundle_row)
+        self._scratch: Path | None = None
+        self._progress_total_ms = 1
+        self._progress_clock = QElapsedTimer()
+        self._progress_timer = QTimer(self)
+        self._progress_timer.setInterval(200)
+        self._progress_timer.timeout.connect(self._tick_progress)
+        self._progress = QProgressBar()
+        self._progress.setTextVisible(True)
+        self._progress.setVisible(False)
+        outer.addWidget(self._progress)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -147,28 +173,60 @@ class QDiagnosticsWidget(QWidget):
         return card
 
     def _create_bundle(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(
-            self, _t('diag_bundle_save_title'),
-            str(Path.home() / default_file_name(datetime.now())), 'tar.gz (*.tar.gz)',
-        )
-        if not path:
-            return
-        self._bundle_path = Path(path)
-        program, args = build_command(script_path(), self._bundle_path)
+        # Collect into a private scratch directory first: the save dialog only
+        # opens once the (possibly long) run is over, and nothing is left behind.
+        self._scratch = Path(tempfile.mkdtemp(prefix='lam-debug-'))
+        listen = self._listen_spin.value()
+        program, args = build_command(script_path(), self._scratch / 'bundle.tar.gz', listen)
         self._process = QProcess(self)
         self._process.finished.connect(self._on_bundle_finished)
         self._process.errorOccurred.connect(lambda _err: self._on_bundle_finished(-1))
         self._bundle_button.setEnabled(False)
+        self._listen_spin.setEnabled(False)
         self._bundle_button.setText(_t('diag_bundle_running'))
+        self._progress_total_ms = estimated_seconds(listen) * 1000
+        self._progress_clock.start()
+        self._progress.setRange(0, self._progress_total_ms)
+        self._progress.setValue(0)
+        self._progress.setVisible(True)
+        self._progress_timer.start()
+        if listen > 0:
+            self._progress.setFormat(_t('diag_bundle_reproduce').replace('{seconds}', str(listen)))
         self._process.start(program, args)
 
+    def _tick_progress(self) -> None:
+        # Time-based estimate; never reaches 100% before the process really ends.
+        self._progress.setValue(min(self._progress_clock.elapsed(), self._progress_total_ms - 1))
+
     def _on_bundle_finished(self, exit_code: int, *_ignored) -> None:
+        self._progress_timer.stop()
+        self._progress.setVisible(False)
         self._bundle_button.setEnabled(True)
+        self._listen_spin.setEnabled(True)
         self._bundle_button.setText(_t('diag_bundle'))
-        if exit_code == 0:
+        scratch, self._scratch = self._scratch, None
+        if scratch is None:
+            return
+        try:
+            produced = scratch / 'bundle.tar.gz'
+            if exit_code != 0 or not produced.is_file():
+                QMessageBox.warning(self, _t('diag_bundle'), _t('diag_bundle_failed'))
+                return
+            path, _ = QFileDialog.getSaveFileName(
+                self, _t('diag_bundle_save_title'),
+                str(Path.home() / default_file_name(datetime.now())), 'tar.gz (*.tar.gz)',
+            )
+            if not path:
+                return
+            try:
+                shutil.move(str(produced), path)
+            except OSError:
+                QMessageBox.warning(self, _t('diag_bundle'), _t('diag_bundle_failed'))
+                return
+            self._bundle_path = Path(path)
             QMessageBox.information(
                 self, _t('diag_bundle'),
-                _t('diag_bundle_done').replace('{path}', str(self._bundle_path)),
+                _t('diag_bundle_done').replace('{path}', path),
             )
-        else:
-            QMessageBox.warning(self, _t('diag_bundle'), _t('diag_bundle_failed'))
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)

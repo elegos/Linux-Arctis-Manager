@@ -19,6 +19,18 @@ def default_file_name(now: datetime) -> str:
     return f'lam-debug-info-{now:%Y%m%d-%H%M%S}.tar.gz'
 
 
-def build_command(script: Path, output: Path) -> tuple[str, list[str]]:
+DEFAULT_LISTEN_SECONDS = 60
+
+
+def build_command(script: Path, output: Path, listen_seconds: int = 0) -> tuple[str, list[str]]:
     # Run through bash so it doesn't depend on the package keeping the exec bit.
-    return 'bash', [str(script), '--output', str(output)]
+    args = [str(script), '--output', str(output)]
+    if listen_seconds > 0:
+        args.append(f'--hidraw-capture={listen_seconds}')
+    return 'bash', args
+
+
+def estimated_seconds(listen_seconds: int) -> int:
+    """Rough total run time, to drive the progress bar: the listen window plus
+    the fixed cost of the other collectors."""
+    return max(listen_seconds, 0) + 10

@@ -6,6 +6,7 @@ from pathlib import Path
 from linux_arctis_manager.gui.debug_bundle import (
     build_command,
     default_file_name,
+    estimated_seconds,
     script_path,
 )
 
@@ -24,6 +25,18 @@ def test_build_command_runs_the_script_with_bash_and_the_chosen_output(tmp_path:
     program, args = build_command(Path('/x/collect_debug_info.sh'), tmp_path / 'out.tar.gz')
     assert program == 'bash'
     assert args == ['/x/collect_debug_info.sh', '--output', str(tmp_path / 'out.tar.gz')]
+
+
+def test_build_command_adds_the_listen_time_only_when_positive(tmp_path: Path):
+    _, none = build_command(Path('/x/s.sh'), tmp_path / 'o', 0)
+    _, sixty = build_command(Path('/x/s.sh'), tmp_path / 'o', 60)
+    assert not any(a.startswith('--hidraw-capture') for a in none)
+    assert '--hidraw-capture=60' in sixty
+
+
+def test_estimated_seconds_covers_the_listen_window():
+    assert estimated_seconds(60) > 60
+    assert estimated_seconds(0) > 0
 
 
 def test_script_writes_the_bundle_to_the_chosen_file_and_cleans_up(tmp_path: Path):

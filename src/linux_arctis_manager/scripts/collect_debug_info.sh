@@ -126,6 +126,17 @@ run() {
     } >>"$REPORT"
 }
 
+# Run a command as root: sudo from a terminal, pkexec (graphical prompt) otherwise.
+priv() {
+    if [[ -t 0 ]] && have sudo; then
+        sudo "$@"
+    elif have pkexec; then
+        pkexec "$@"
+    else
+        return 127
+    fi
+}
+
 missing() {
     echo "[skipped: '$1' not found on this system — usually in the '$2' package]" >>"$REPORT"
 }
@@ -253,70 +264,49 @@ else
     missing "udevadm" "systemd/udev"
 fi
 
-# ── HID report descriptors ───────────────────────────────────────────────────
+# ── HID report descriptors + optional live capture ──────────────────────────
+# hidraw nodes are root-only, so this is the one place besides --usb-capture
+# that needs privileges. ONE privileged call handles every node in parallel
+# (a single password prompt). From a terminal that is `sudo`; without one (the
+# GUI runs this script with no tty) it is `pkexec`, which shows a graphical
+# prompt. hid-recorder prints the descriptor immediately and then streams
+# live events until cut off: 2s is enough for the descriptor alone, while
+# --hidraw-capture keeps it running to settle whether the device ever sends
+# anything back on a given interface (a second reader only sees INPUT
+# reports, never lam-daemon's own writes). Reproduce the issue during that
+# window.
 section "HID report descriptors"
 if ((${#MATCHED_DEVS[@]} == 0)); then
     echo "[skipped: no matching hidraw devices found above]" >>"$REPORT"
 elif ! have hid-recorder; then
-    missing "hid-recorder" "hid-tools"
+    missing "hid-recorder" "hid-tools (Fedora: hid-replay)"
 else
-    echo "hidraw nodes are root-only — you may be asked for your sudo password." >&2
-    if sudo -v; then
-        for dev in "${MATCHED_DEVS[@]}"; do
-            name="$(basename "$dev")"
-            out="${BUNDLE}/hid-descriptors/${name}.txt"
-            # hid-recorder prints the descriptor immediately, then blocks
-            # streaming live events forever — cut it off after a couple
-            # seconds, we only need the descriptor (a few real events are a
-            # harmless bonus if the device happens to be chatty).
-            sudo timeout 2 hid-recorder "$dev" >"$out" 2>&1
-            echo "$dev -> hid-descriptors/${name}.txt" >>"$REPORT"
-        done
-    else
-        echo "[skipped: sudo access unavailable]" >>"$REPORT"
-    fi
-fi
-
-# ── Extended hidraw capture (all interfaces, in parallel) ───────────────────
-# Opt-in (--hidraw-capture): doesn't need usbmon/debugfs, works anywhere
-# hidraw does. Can't show lam-daemon's own writes (a second reader on the
-# same node only sees INPUT reports, not another process's writes to it) —
-# but it settles, definitively, whether the device ever replies on a given
-# interface at all. Captures every matched node at once so activity across
-# interfaces (e.g. command vs sync) can be compared from the same window.
-if [[ -n "$HIDRAW_CAPTURE_SECONDS" ]]; then
-    section "Extended hidraw capture (all matched interfaces)"
-    if ((${#MATCHED_DEVS[@]} == 0)); then
-        echo "[skipped: no matching hidraw devices found above]" >>"$REPORT"
-    elif ! have hid-recorder; then
-        missing "hid-recorder" "hid-tools"
-    else
+    CAP_SECONDS="${HIDRAW_CAPTURE_SECONDS:-2}"
+    CAP_SUFFIX=""
+    [[ -n "$HIDRAW_CAPTURE_SECONDS" ]] && CAP_SUFFIX="-capture"
+    if [[ -n "$HIDRAW_CAPTURE_SECONDS" ]]; then
         echo "Capturing all matched hidraw nodes for ${HIDRAW_CAPTURE_SECONDS}s —" >&2
-        echo "reproduce the issue (headset powered on, daemon running/stuck" >&2
-        echo "retrying) during this window." >&2
-        if sudo -v; then
-            pids=()
+        echo "reproduce the issue (headset powered on) during this window." >&2
+    else
+        echo "hidraw nodes are root-only — you may be asked for your password." >&2
+    fi
+    if priv bash -c '
+        secs="$1"; owner="$2"; outdir="$3"; suffix="$4"; shift 4
+        for dev in "$@"; do
+            timeout "$secs" hid-recorder "$dev" >"${outdir}/$(basename "$dev")${suffix}.txt" 2>&1 &
+        done
+        wait
+        chown -R "$owner" "$outdir"
+    ' _ "$CAP_SECONDS" "$(id -u):$(id -g)" "${BUNDLE}/hid-descriptors" "$CAP_SUFFIX" "${MATCHED_DEVS[@]}"; then
+        {
             for dev in "${MATCHED_DEVS[@]}"; do
                 name="$(basename "$dev")"
-                out="${BUNDLE}/hid-descriptors/${name}-capture.txt"
-                sudo timeout "${HIDRAW_CAPTURE_SECONDS}" hid-recorder "$dev" >"$out" 2>&1 &
-                pids+=("$!")
+                out="${BUNDLE}/hid-descriptors/${name}${CAP_SUFFIX}.txt"
+                echo "$dev -> hid-descriptors/${name}${CAP_SUFFIX}.txt ($(wc -l <"$out" 2>/dev/null || echo 0) line(s))"
             done
-            echo "capturing... (this blocks for ${HIDRAW_CAPTURE_SECONDS}s)" >&2
-            wait "${pids[@]}" 2>/dev/null
-            {
-                echo
-                echo "--- capture summary ---"
-                for dev in "${MATCHED_DEVS[@]}"; do
-                    name="$(basename "$dev")"
-                    out="${BUNDLE}/hid-descriptors/${name}-capture.txt"
-                    lines="$(wc -l <"$out" 2>/dev/null || echo 0)"
-                    echo "$dev -> hid-descriptors/${name}-capture.txt (${lines} line(s))"
-                done
-            } >>"$REPORT"
-        else
-            echo "[skipped: sudo access unavailable]" >>"$REPORT"
-        fi
+        } >>"$REPORT"
+    else
+        echo "[skipped: privileged access unavailable or refused]" >>"$REPORT"
     fi
 fi
 

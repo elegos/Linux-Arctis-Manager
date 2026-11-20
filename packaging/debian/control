@@ -24,6 +24,9 @@ Depends: ${shlibs:Depends},
          libcap2-bin,
          libpulse0,
          hicolor-icon-theme
+# hid-recorder (Diagnostics debug bundle) is not packaged by Debian/Ubuntu
+# (hid-tools is PyPI-only there), so it cannot be a dependency; the bundle
+# script notes it as missing and carries on.
 Suggests: python3-torch, wireplumber
 Description: SteelSeries Arctis manager for Linux
  Replaces the SteelSeries GG software to manage SteelSeries Arctis headsets
