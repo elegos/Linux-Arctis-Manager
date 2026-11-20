@@ -9,20 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Update check: the GUI looks for a newer GitHub release on startup and only speaks up when one exists; clicking the version in the footer checks on demand and always shows the latest stable and pre-release versions. Pre-release builds are offered both pre-releases and stable releases, stable builds only stable ones.
-- Debug bundle: a "Listen time" setting (default 60 s, 0 to skip) records what the headset sends while you reproduce the problem, with a progress bar. The bundle is built in a private temporary directory and the save dialog only opens when it is done. HID descriptors/captures now need a single privileged step that works without a terminal (`pkexec` graphical prompt; `sudo` still used from a shell), where before the GUI run silently skipped them. `hid-recorder` comes from `hid-tools`, now a Python dependency installed in the app's own venv, so every distro has it regardless of its repositories (a system `hid-recorder` is used as a fallback).
-- "Create debug bundle..." on the Diagnostics page: runs the support-bundle script and saves the `.tar.gz` where you choose, with a reminder to attach it to the issue. The script now ships inside the Python package (`collect_debug_info.sh`, with `scripts/collect-debug-info.sh` kept as a symlink), takes `--output FILE` and always removes its scratch directory.
-- Diagnostics page in the GUI (button at the bottom of the sidebar): lists the SteelSeries devices the system exposes and whether each is supported, with a "Copy details" button and, for audio devices without a config, a button that opens the new-device issue form pre-filled with the hardware IDs. The form gained a "Hardware details" field for it.
-- `GetDiagnostics` D-Bus method (Config interface): read-only report of the SteelSeries hidraw nodes, using the same checks as `lam-hidraw-helper`, flagging each as supported, unsupported or ignored. First building block of the in-app troubleshooting page that will replace `lam-cli tools arctis-devices`.
-- `scripts/bump_version.py` writes a release version into every file that carries it (`VERSION`, `pyproject.toml`, `uv.lock`, PKGBUILD, RPM spec, Debian changelog, `CHANGELOG.md`).
-- `CURRENT_VERSION=1` for `make container-build-{rpm,debian-deb,ubuntu-deb}` builds on this machine's own release, read from `/etc/os-release`. `container-build-rpm` now takes `BASE_IMAGE=` too (default `fedora:latest`) and replaces `FEDORA_VERSION` and `container-refresh-fedora`.
-- `make container-build-debian-deb` and `make container-build-ubuntu-deb` build the `.deb` in a container on a real Debian or Ubuntu image (override with `BASE_IMAGE=`), using the same recipe as CI. They replace `container-build-deb`.
+- Diagnostics page in the GUI: lists the SteelSeries devices the system sees and whether each is supported, with a "Copy details" button and, for unsupported audio devices, a shortcut to the new-device issue form pre-filled with the hardware IDs.
+- Debug bundle: "Create debug bundle..." on the Diagnostics page collects everything needed for a bug report into a `.tar.gz`. An optional "Listen time" records what the headset sends while you reproduce the problem, and a graphical prompt asks for the privileges it needs when there is no terminal.
+- Update check: the GUI tells you when a newer GitHub release exists; clicking the version in the footer checks on demand.
+- `make container-build-{rpm,debian-deb,ubuntu-deb}` build the distro packages in containers on real Fedora, Debian and Ubuntu images, optionally for this machine's own release (`CURRENT_VERSION=1`).
 
 ### Fixed
 
-- The bundled Python venv pinned `bin/python3` to the generic `/usr/bin/python3`, which floats across Python minor versions: a package built for one Fedora release and installed on the next (python3 3.14 → 3.15) failed with `No module named 'linux_arctis_manager'`. It now points at the exact interpreter that built the venv.
-- `packaging/arch/PKGBUILD` now builds the current tag (it was stuck on `3.0.0alpha1`) and pins the source archive's sha256 instead of `SKIP` (#87).
-- The signed `SHA256SUMS` of a release now covers the distro packages and `install.sh` too, not just the tarballs (#87).
+- A package built for one Fedora release and installed on the next no longer fails with `No module named 'linux_arctis_manager'`.
+- The Arch package builds the current release instead of `3.0.0alpha1` and pins the source checksum (#87).
+- The signed `SHA256SUMS` of a release now also covers the distro packages and `install.sh` (#87).
 - Virtual sinks are no longer created and immediately removed when the dongle is plugged in with the headset turned off.
 
 ## [3.0.0-beta3]
