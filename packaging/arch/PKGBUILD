@@ -3,7 +3,7 @@ pkgbase=linux-arctis-manager
 pkgname=(linux-arctis-manager linux-arctis-manager-lang linux-arctis-manager-plasma-widget linux-arctis-manager-gnome-extension)
 # Upstream version as tagged (v${_upstreamver}); Arch pkgver can't contain "-".
 # Written by scripts/bump_version.py - don't edit by hand.
-_upstreamver=3.0.0-beta3
+_upstreamver=3.0.0-beta4
 pkgver=${_upstreamver//-/}
 pkgrel=1
 arch=('x86_64')
@@ -12,7 +12,7 @@ license=('MIT')
 makedepends=('rust' 'cargo' 'python' 'glib2' 'libpulse')
 # sha256sums: scripts/bump_version.py resets it to SKIP; run its --update-checksum once the tag is pushed.
 source=("$pkgbase-$pkgver.tar.gz::https://github.com/elegos/Linux-Arctis-Manager/archive/refs/tags/v${_upstreamver}.tar.gz")
-sha256sums=('6affb7b62d816f910fe4393c3b986c343f369eee9b077b4faa782b82027322db')
+sha256sums=('SKIP')
 
 build() {
     cd "Linux-Arctis-Manager-${_upstreamver}"
