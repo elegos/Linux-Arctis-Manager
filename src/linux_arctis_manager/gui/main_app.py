@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from linux_arctis_manager.constants import SYSTEMD_SERVICE_NAME
 from linux_arctis_manager.gui.base_app import QBaseDesktopApp
+from linux_arctis_manager.gui.clickable_label import QClickableLabel
 from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
 from linux_arctis_manager.gui.diagnostics_widget import QDiagnosticsWidget
 from linux_arctis_manager.gui.eq_widget import QEQWidget
@@ -28,6 +29,7 @@ from linux_arctis_manager.gui.mic_widget import QMicWidget
 from linux_arctis_manager.gui.settings_widget import QSettingsWidget
 from linux_arctis_manager.gui.status_widget import QStatusWidget
 from linux_arctis_manager.i18n import I18n
+from linux_arctis_manager.update_check import RELEASES_PAGE_URL, UpdateInfo, check_for_update, fetch_releases
 from linux_arctis_manager.utils import compare_versions, project_version
 
 
@@ -44,6 +46,7 @@ class QMainApp(QBaseDesktopApp):
     # Used by the background restart thread to update the UI safely.
     _sig_set_label       = Signal(str)
     _sig_show_error      = Signal(str, str)   # (title, message)
+    _sig_update_result   = Signal(object, bool)  # (UpdateInfo | None, user_initiated)
 
     def __init__(self, app: QApplication, log_level: int):
         super().__init__(parent=app)
@@ -94,6 +97,8 @@ class QMainApp(QBaseDesktopApp):
         self.sig_service_version.connect(self._on_service_version)
         self._sig_set_label.connect(self._version_label.setText)
         self._sig_show_error.connect(self._show_error_dialog)
+        self._sig_update_result.connect(self._on_update_result)
+        self._version_label.clicked.connect(lambda: self._check_for_updates(user_initiated=True))
         self.dbus_wrapper.sig_ai_progress.connect(self._on_ai_progress)
         self.dbus_wrapper.sig_ai_complete.connect(self._on_ai_complete)
         self.dbus_wrapper.sig_download_progress.connect(self._on_download_progress)
@@ -114,6 +119,7 @@ class QMainApp(QBaseDesktopApp):
         self.switch_panel('status')
         self.dbus_wrapper.start()
         DbusWrapper.request_service_version(self.sig_service_version)
+        self._check_for_updates(user_initiated=False)
 
         self.destroyed.connect(self.sig_stop)
     
@@ -243,9 +249,10 @@ class QMainApp(QBaseDesktopApp):
         self._ai_status_label.setVisible(False)
         footer.addWidget(self._ai_status_label, 1)
 
-        self._version_label = QLabel(
+        self._version_label = QClickableLabel(
             I18n.translate('ui', 'version_footer').format(version=project_version())
         )
+        self._version_label.setToolTip(I18n.translate('ui', 'version_click_hint'))
         self._version_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         footer.addWidget(self._version_label)
         window_layout.addLayout(footer)
@@ -294,6 +301,43 @@ class QMainApp(QBaseDesktopApp):
                 I18n.translate('ui', 'version_mismatch_ui_behind_message').format(
                     service=svc, ui=ui),
             )
+
+    def _check_for_updates(self, user_initiated: bool) -> None:
+        current = self._ui_version
+
+        def work() -> None:
+            releases = fetch_releases()
+            info = check_for_update(current, releases) if releases is not None else None
+            self._sig_update_result.emit(info, user_initiated)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    @Slot(object, bool)
+    def _on_update_result(self, info: UpdateInfo | None, user_initiated: bool) -> None:
+        current = self._ui_version
+        tr = lambda key: I18n.translate('ui', key)  # noqa: E731
+
+        if info is None:
+            if user_initiated:
+                QMessageBox.warning(self.main_window, tr('update_check_title'), tr('update_check_failed'))
+            return
+
+        if info.update_available:
+            message = tr('update_available_message').format(
+                target=info.target, current=current, url=RELEASES_PAGE_URL)
+            if user_initiated:
+                message += '\n\n' + tr('update_check_summary').format(
+                    current=current,
+                    stable=f'v{info.stable}' if info.stable else tr('update_none'),
+                    prerelease=f'v{info.prerelease}' if info.prerelease else tr('update_none'))
+            QMessageBox.information(self.main_window, tr('update_available_title'), message)
+        elif user_initiated:
+            summary = tr('update_check_summary').format(
+                current=current,
+                stable=f'v{info.stable}' if info.stable else tr('update_none'),
+                prerelease=f'v{info.prerelease}' if info.prerelease else tr('update_none'))
+            QMessageBox.information(
+                self.main_window, tr('update_check_title'), f'{summary}\n\n{tr("update_up_to_date")}')
 
     def _restart_service_and_recheck(self) -> None:
         """Background thread — must only touch Qt via signals."""
