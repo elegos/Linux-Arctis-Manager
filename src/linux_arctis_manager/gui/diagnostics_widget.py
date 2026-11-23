@@ -13,7 +13,7 @@ from PySide6.QtCore import (
     QUrl,
     Signal,
 )
-from PySide6.QtGui import QDesktopServices, QGuiApplication
+from PySide6.QtGui import QDesktopServices, QGuiApplication, QIcon
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -76,6 +76,11 @@ class QDiagnosticsWidget(QWidget):
         header.addWidget(self._refresh_button)
         self._report_button = QPushButton(_t('diag_report_bug'))
         self._report_button.setToolTip(_t('diag_report_bug_hint'))
+        for icon_name in ('tools-report-bug', 'bug', 'dialog-warning'):
+            icon = QIcon.fromTheme(icon_name)
+            if not icon.isNull():
+                self._report_button.setIcon(icon)
+                break
         self._report_button.clicked.connect(self._report_bug)
         header.addWidget(self._report_button)
         outer.addLayout(header)

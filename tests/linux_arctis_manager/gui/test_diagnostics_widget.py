@@ -146,9 +146,15 @@ def _stub_open_url(monkeypatch) -> list[str]:
 
 def test_report_bug_button_is_always_offered():
     w = _widget()
-    assert '🪲 Report bug' in _buttons(w)
+    assert 'Report bug' in _buttons(w)
     w._on_report([])
-    assert '🪲 Report bug' in _buttons(w)
+    assert 'Report bug' in _buttons(w)
+
+
+def test_report_bug_button_text_has_no_emoji_glyph():
+    # Emoji glyphs may be missing from the button font: the icon comes from the theme instead.
+    w = _widget()
+    assert w._report_button.text() == 'Report bug'
 
 
 def test_report_bug_without_a_bundle_opens_the_issue_chooser(monkeypatch):
