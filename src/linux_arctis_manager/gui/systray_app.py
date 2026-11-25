@@ -3,7 +3,7 @@ import logging
 from logging import Logger
 
 from PySide6.QtCore import Signal, Slot
-from PySide6.QtGui import QAction, QIcon
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from linux_arctis_manager.gui.ascii_bar import battery_bar, chatmix_balance, chatmix_bar
@@ -11,7 +11,7 @@ from linux_arctis_manager.gui.base_app import QBaseDesktopApp
 from linux_arctis_manager.gui.dbus_wrapper import DbusWrapper
 from linux_arctis_manager.gui.main_app import QMainApp
 from linux_arctis_manager.gui.status_widget import QStatusWidget
-from linux_arctis_manager.gui.ui_utils import get_icon_pixmap
+from linux_arctis_manager.gui.theme import tray_icon
 from linux_arctis_manager.i18n import I18n
 
 
@@ -43,8 +43,7 @@ class QSystrayApp(QBaseDesktopApp):
         self.last_device_status = {}
         self._settings_config = {}
 
-        pixmap = get_icon_pixmap()
-        self.tray_icon = QSystemTrayIcon(QIcon(pixmap), parent=self.app)
+        self.tray_icon = QSystemTrayIcon(tray_icon(), parent=self.app)
         self.tray_icon.setToolTip('Arctis Manager')
 
         self.menu = QMenu()

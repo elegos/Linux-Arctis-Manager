@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from linux_arctis_manager.constants import DBUS_BUS_NAME, SYSTEMD_SERVICE_NAME
 from linux_arctis_manager.gui.main_app import QMainApp
 from linux_arctis_manager.gui.systray_app import QSystrayApp
+from linux_arctis_manager.gui.theme import follow_dark_scheme
 from linux_arctis_manager.i18n import I18n
 from linux_arctis_manager.systemd import ensure_systemd_unit
 
@@ -76,6 +77,7 @@ def main():
     app.setApplicationName('Arctis Manager')
     app.setApplicationDisplayName('Arctis Manager')
     app.setDesktopFileName('ArctisManager')
+    follow_dark_scheme(app)
 
     # Ensure the daemon is reachable before creating the app objects that
     # open D-Bus connections.  QMainApp.__init__ calls dbus_wrapper.start()

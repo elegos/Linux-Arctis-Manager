@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0-beta5]
+
+### Added
+
+- `make desktop-test` runs the launcher shortcut, the legacy tray icon, the Plasma widget, the GNOME extension and the main window on containerised Cinnamon, KDE Plasma and GNOME in light, dark and mixed themes, and opens a screenshot comparison report.
+
+### Fixed
+
+- Dark icons on dark themes across desktop environments, Cinnamon in particular:
+  - the tray icon is recoloured by the panel, so it stays visible on a dark panel even when applications use a light theme;
+  - the application launcher has its own coloured icon, readable on light and dark docks, panels and menus;
+  - the sidebar icons of the main window no longer disappear.
+- The main window follows GNOME's dark style.
+- The GNOME Shell extension declares support for GNOME 51.
+- The GUI no longer fails to start on Python 3.15 (for example on Fedora 45).
+
 ## [3.0.0-beta4]
 
 ### Added

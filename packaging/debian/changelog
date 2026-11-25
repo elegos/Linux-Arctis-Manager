@@ -1,4 +1,4 @@
-linux-arctis-manager (3.0.0~beta4-1) unstable; urgency=medium
+linux-arctis-manager (3.0.0~beta5-1) unstable; urgency=medium
 
   * Initial v3 release: Rust daemon + Python Qt6 GUI, lam-cli removed.
 

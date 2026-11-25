@@ -12,6 +12,7 @@
 
 ## Hacking on it
 
+- [Desktop environment testing](desktop-testing.md): screenshot tests on Cinnamon, KDE Plasma and GNOME
 Basic commands:
 
 - Run the daemon: `cargo run --release --manifest-path daemon/Cargo.toml --bin lam-daemon`

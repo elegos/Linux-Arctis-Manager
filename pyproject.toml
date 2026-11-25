@@ -1,6 +1,6 @@
 [project]
 name = "linux-arctis-manager"
-version = "3.0.0-beta4"
+version = "3.0.0-beta5"
 description = "A replacement for SteelSeries GG software, to manage your Arctis device on Linux!"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -35,6 +35,12 @@ dev = [
     "pytest-cov>=7.1.0",
     "ruff>=0.14.0",
 ]
+
+[tool.pytest.ini_options]
+# tests/desktop belongs to the desktop environment tests, which only run on
+# request, locally (see docs/desktop-testing.md): a plain `pytest`, CI included,
+# leaves it out. The first patterns are pytest's own defaults.
+norecursedirs = ["*.egg", ".*", "_darcs", "build", "CVS", "dist", "node_modules", "venv", "{arch}", "tests/desktop"]
 
 [tool.coverage.run]
 omit = [

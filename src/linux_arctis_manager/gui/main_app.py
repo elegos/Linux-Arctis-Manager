@@ -4,7 +4,7 @@ from collections.abc import Callable
 from typing import Literal
 
 from PySide6.QtCore import QSize, Qt, QTimer, Signal, Slot
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, QPalette
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -28,6 +28,7 @@ from linux_arctis_manager.gui.main_app_proto_widget import QMainAppProtoWidget
 from linux_arctis_manager.gui.mic_widget import QMicWidget
 from linux_arctis_manager.gui.settings_widget import QSettingsWidget
 from linux_arctis_manager.gui.status_widget import QStatusWidget
+from linux_arctis_manager.gui.theme import tint_monochrome
 from linux_arctis_manager.i18n import I18n
 from linux_arctis_manager.update_check import (
     RELEASES_PAGE_URL,
@@ -214,7 +215,7 @@ class QMainApp(QBaseDesktopApp):
                     background-color: palette(midlight);
                 }
             """)
-            btn.setIcon(_first_icon(icon_names))
+            btn.setIcon(tint_monochrome(_first_icon(icon_names), window.palette().color(QPalette.ColorRole.ButtonText)))
             btn.clicked.connect(_switch_panel_handler(key))
             btn_group.addButton(btn)
             side_layout.addWidget(btn)

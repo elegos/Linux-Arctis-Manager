@@ -13,11 +13,11 @@ VENVDIR             := $(LIBDIR)/linux-arctis-manager/venv
 DESKTOP_DIR         := $(DATADIR)/applications
 DESKTOP_FILES       := $(wildcard src/linux_arctis_manager/desktop/*.desktop)
 
-# Same mark (fill="currentColor") installed under two theme names: the plain
-# name for the app launcher/window icon, "-symbolic" for panel/tray contexts
-# (Plasma/Kirigami auto-recolor icons named "*-symbolic" to match the
-# panel's light/dark foreground; the plain name doesn't get that treatment).
+# Two icons of the same mark: a coloured one for the launcher and windows, which
+# nothing recolours, and a monochrome "-symbolic" one for panels and trays, which
+# the desktop recolours to match.
 ICON_SRC            := src/linux_arctis_manager/gui/images/app_icon.svg
+LAUNCHER_ICON_SRC   := src/linux_arctis_manager/gui/images/launcher_icon.svg
 ICON_DIR            := $(DATADIR)/icons/hicolor/scalable/apps
 
 # A standalone copy of the translation files, outside the venv's site-packages
@@ -130,6 +130,7 @@ DEVICE_YAMLS := $(wildcard daemon/device-configs/*.yaml)
         install install-core install-lang install-plasmoid install-gnome-extension install-python uninstall enable disable \
         container-build-rpm container-build-debian-deb container-build-ubuntu-deb container-build-pkg container-build-all \
         container-refresh-arch container-refresh-all \
+        desktop-test \
         help
 
 # ── Default target ─────────────────────────────────────────────────────────────
@@ -163,6 +164,7 @@ help:
 	@echo "  container-build-ubuntu-deb  Build .deb on Ubuntu (BASE_IMAGE=ubuntu:24.04) → dist/"
 	@echo "  container-build-pkg    Build .pkg.tar.zst inside Arch container → dist/"
 	@echo "  container-build-all    Build all three package formats"
+	@echo "  desktop-test           Screenshot tests on desktop environments (DE=, XEPHYR=1) → dist/desktop-tests/"
 	@echo "  container-refresh-arch   Force OS update in the Arch base image"
 	@echo ""
 	@echo "Container variables (defaults shown):"
@@ -325,7 +327,7 @@ install-core: build generate-services $(if $(SKIP_PYTHON),,install-python)
 	install -Dm644 $(DESKTOP_FILES) -t $(DESTDIR)$(DESKTOP_DIR)/
 	# hicolor icon theme entry (app launcher/window + Plasma panel/tray)
 	install -dm755 $(DESTDIR)$(ICON_DIR)
-	install -Dm644 $(ICON_SRC) $(DESTDIR)$(ICON_DIR)/arctis-manager.svg
+	install -Dm644 $(LAUNCHER_ICON_SRC) $(DESTDIR)$(ICON_DIR)/arctis-manager.svg
 	install -Dm644 $(ICON_SRC) $(DESTDIR)$(ICON_DIR)/arctis-manager-symbolic.svg
 	# Optional WirePlumber policy script for "hide_physical_sink"
 	install -Dm644 $(WIREPLUMBER_SCRIPT) $(DESTDIR)$(WIREPLUMBER_SCRIPTS_DIR)/sink-visibility.lua
@@ -372,6 +374,14 @@ enable:
 disable:
 	systemctl --user stop    lam-daemon.service lam-hidraw-helper.service
 	systemctl --user disable lam-daemon.service lam-hidraw-helper.service
+
+# ── Desktop environment tests (screenshots, see docs/desktop-testing.md) ───────
+#   make desktop-test                 every desktop
+#   make desktop-test DE=cinnamon     only one (cinnamon, gnome, kde)
+#   make desktop-test XEPHYR=1        watch the X11 desktops in a Xephyr window
+DE ?= all
+desktop-test:
+	CONTAINER_ENGINE=$(CONTAINER_ENGINE) tests/desktop/run.sh $(if $(XEPHYR),--xephyr) $(DE)
 
 # ── Container build (Docker / Podman) ─────────────────────────────────────────
 #
