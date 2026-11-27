@@ -424,6 +424,12 @@ pub struct DeviceSection {
     /// allowlist of pure-HID accessories (see its `build.rs`).
     #[serde(default)]
     pub companion: bool,
+    /// The HID control endpoint is a separate, HID-only USB device, with the
+    /// audio on a sibling device behind the same hub (Arctis Pro Wireless).
+    /// The variants' PIDs are compiled into `lam-hidraw-helper`'s allowlist of
+    /// pure-HID devices (see its `build.rs`).
+    #[serde(default)]
+    pub split_control: bool,
 }
 
 // ── Top-level config ──────────────────────────────────────────────────────────
@@ -2110,5 +2116,134 @@ mod nova_yaml_tests {
         }
         problems.sort();
         assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+
+    /// The engine tells a read reply apart from unsolicited reports by the
+    /// leading `incoming` constants. For every shipped config that must be the
+    /// echoed report id + command, except for the devices listed here, whose
+    /// replies don't echo the command.
+    #[test]
+    fn hid_io_reads_expect_the_echoed_command_unless_listed() {
+        use crate::api_executor::ApiExecutor;
+
+        const NO_ECHO: &[(&str, &str, &[u8])] = &[
+            ("arctis_9.yaml", "info_table", &[0x00]),
+            ("arctis_pro_wireless.yaml", "battery_status", &[]),
+            ("arctis_pro_wireless.yaml", "get_settings", &[0x00]),
+        ];
+
+        let mut checked = 0;
+        let mut problems = Vec::new();
+        for (name, cfg) in merged_device_configs() {
+            let exec = ApiExecutor::new(&cfg);
+            for (api, def) in cfg.apis.iter().flatten() {
+                if !def
+                    .read
+                    .as_ref()
+                    .is_some_and(|r| r.transport == Transport::HidIo)
+                {
+                    continue;
+                }
+                let op = exec.prepare_read(api).unwrap();
+                let header = op.response_header.as_slice();
+                let ok = match NO_ECHO.iter().find(|(n, a, _)| *n == name && a == api) {
+                    Some((_, _, expected)) => header == *expected,
+                    // Longer than two bytes when the reply also echoes a
+                    // selector, such as the Nova 7 Gen2 EQ preset slot.
+                    None => header.len() >= 2 && op.request_bytes.starts_with(header),
+                };
+                if !ok {
+                    problems.push(format!("{name}: {api}: header {header:02x?}"));
+                }
+                checked += 1;
+            }
+        }
+        problems.sort();
+        assert!(checked > NO_ECHO.len(), "no read APIs found");
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+
+    /// Every command byte sequence of the Arctis Pro Wireless, as declared by
+    /// the vendor spec (`arctis-pro-wireless.device` and the `siberia-840`
+    /// file it includes, whose definitions it may override).
+    #[test]
+    fn arctis_pro_wireless_commands_match_the_vendor_spec() {
+        use crate::api_executor::{ApiExecutor, WriteAction};
+        use crate::codec::FieldValue;
+
+        let Some(cfg) = load_tier2_device("arctis_pro_wireless.yaml") else {
+            return;
+        };
+        let api = ApiExecutor::new(&cfg);
+
+        for (name, command) in [
+            ("sidetone", 0x39),
+            ("oled_brightness", 0x85),
+            ("volume_limiter", 0x27),
+            ("off_time", 0x3C),
+            ("mute_mic_brightness", 0x3E),
+            ("bt_startup_mode", 0x62),
+            ("bt_gamemute_pref", 0x63),
+            ("screensaver_mode", 0x89),
+            ("display_timeout", 0x60),
+        ] {
+            let values = HashMap::from([("value".to_string(), FieldValue::U8(3))]);
+            let op = api.prepare_write(name, &values);
+            let Ok(op) = op else {
+                // Two-state settings reject 3.
+                let values = HashMap::from([("value".to_string(), FieldValue::U8(1))]);
+                let op = api.prepare_write(name, &values).unwrap();
+                let WriteAction::Send { payload, .. } = &op.actions[0] else {
+                    panic!("{name}: expected a Send action");
+                };
+                assert_eq!(&payload[..4], [0x00, command, 0xAA, 1], "{name}");
+                continue;
+            };
+            let WriteAction::Send { payload, .. } = &op.actions[0] else {
+                panic!("{name}: expected a Send action");
+            };
+            assert_eq!(&payload[..4], [0x00, command, 0xAA, 3], "{name}");
+        }
+
+        let values = HashMap::from([("state".to_string(), FieldValue::U8(1))]);
+        let op = api.prepare_write("surround", &values).unwrap();
+        let WriteAction::Send { payload, .. } = &op.actions[0] else {
+            panic!("expected a Send action");
+        };
+        assert_eq!(&payload[..4], [0x00, 0x55, 0xAA, 1]);
+
+        for (name, command) in [("get_settings", 0x12), ("battery_status", 0x40)] {
+            let op = api.prepare_read(name).unwrap();
+            assert_eq!(&op.request_bytes[..3], [0x00, command, 0xAA], "{name}");
+        }
+    }
+
+    /// The device file overrides siberia-840's `save_to_flash` (`0x05`).
+    #[test]
+    fn arctis_pro_wireless_save_to_flash_uses_the_overridden_command() {
+        use crate::api_executor::{ApiExecutor, WriteAction};
+
+        let Some(cfg) = load_tier2_device("arctis_pro_wireless.yaml") else {
+            return;
+        };
+        let op = ApiExecutor::new(&cfg)
+            .prepare_write("save_to_flash", &HashMap::new())
+            .unwrap();
+        let WriteAction::Send { payload, .. } = &op.actions[0] else {
+            panic!("expected a Send action");
+        };
+        assert_eq!(&payload[..3], [0x00, 0x09, 0xAA]);
+        assert!(payload[3..].iter().all(|&b| b == 0));
+        assert_eq!(payload.len(), 33);
+    }
+
+    #[test]
+    fn arctis_pro_wireless_control_device_is_split_control() {
+        let Some(cfg) = load_tier2_device("arctis_pro_wireless.yaml") else {
+            return;
+        };
+        let device = cfg.device.expect("device section");
+        assert!(device.split_control);
+        assert!(!device.companion, "it is the primary device");
     }
 }

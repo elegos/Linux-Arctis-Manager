@@ -163,6 +163,15 @@ pub async fn find_physical_sink() -> Option<String> {
 async fn try_find_physical_sink() -> Option<String> {
     let json = pactl(&["-f", "json", "list", "sinks"]).await.ok()?;
     let sinks: serde_json::Value = serde_json::from_str(&json).ok()?;
+    pick_physical_sink(&sinks)
+}
+
+/// Pick the physical Arctis sink from `pactl -f json list sinks` output.
+/// Some base stations (e.g. Arctis Pro Wireless) expose several outputs,
+/// such as a mono "chat" and a stereo "game" sink: prefer the one with the
+/// most channels, and on a tie keep the first, as before.
+fn pick_physical_sink(sinks: &serde_json::Value) -> Option<String> {
+    let mut best: Option<(usize, String)> = None;
     for sink in sinks.as_array()? {
         let name = sink["name"].as_str().unwrap_or("");
         if name == MEDIA_SINK || name == CHAT_SINK {
@@ -172,10 +181,15 @@ async fn try_find_physical_sink() -> Option<String> {
             .as_str()
             .unwrap_or("");
         if vid == STEELSERIES_VID {
-            return Some(name.to_owned());
+            let channels = sink["channel_map"]
+                .as_str()
+                .map_or(0, |m| m.split(',').filter(|c| !c.is_empty()).count());
+            if best.as_ref().is_none_or(|(c, _)| channels > *c) {
+                best = Some((channels, name.to_owned()));
+            }
         }
     }
-    None
+    best.map(|(_, name)| name)
 }
 
 /// Load a PulseAudio module and return its index, or None on failure.
@@ -800,6 +814,64 @@ mod tests {
             name: name.into(),
             binary: bin.map(Into::into),
         }
+    }
+
+    fn sink(name: &str, vid: &str, channel_map: &str) -> serde_json::Value {
+        serde_json::json!({
+            "name": name,
+            "channel_map": channel_map,
+            "properties": {"device.vendor.id": vid},
+        })
+    }
+
+    #[test]
+    fn pick_physical_sink_prefers_stereo_over_mono_chat() {
+        let sinks = serde_json::json!([
+            sink(
+                "alsa_output.pci.hdmi-stereo",
+                "0x10de",
+                "front-left,front-right"
+            ),
+            sink(MEDIA_SINK, "", "front-left,front-right"),
+            sink(
+                "alsa_output.usb-SteelSeries_Arctis_Pro_Wireless-00.mono-chat",
+                STEELSERIES_VID,
+                "mono"
+            ),
+            sink(
+                "alsa_output.usb-SteelSeries_Arctis_Pro_Wireless-00.stereo-game",
+                STEELSERIES_VID,
+                "front-left,front-right"
+            ),
+        ]);
+        assert_eq!(
+            pick_physical_sink(&sinks).as_deref(),
+            Some("alsa_output.usb-SteelSeries_Arctis_Pro_Wireless-00.stereo-game")
+        );
+    }
+
+    #[test]
+    fn pick_physical_sink_keeps_first_on_tie_and_ignores_others() {
+        let sinks = serde_json::json!([
+            sink(
+                "alsa_output.pci.analog-stereo",
+                "0x8086",
+                "front-left,front-right"
+            ),
+            sink("arctis_a", STEELSERIES_VID, "front-left,front-right"),
+            sink("arctis_b", STEELSERIES_VID, "front-left,front-right"),
+        ]);
+        assert_eq!(pick_physical_sink(&sinks).as_deref(), Some("arctis_a"));
+        assert_eq!(pick_physical_sink(&serde_json::json!([])), None);
+    }
+
+    #[test]
+    fn pick_physical_sink_accepts_a_single_sink_without_channel_map() {
+        let sinks = serde_json::json!([{
+            "name": "arctis_a",
+            "properties": {"device.vendor.id": STEELSERIES_VID},
+        }]);
+        assert_eq!(pick_physical_sink(&sinks).as_deref(), Some("arctis_a"));
     }
 
     #[test]

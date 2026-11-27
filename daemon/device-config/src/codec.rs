@@ -195,6 +195,19 @@ impl<'a> Codec<'a> {
         Ok(out)
     }
 
+    /// Bytes every response of this struct starts with: the encoded leading
+    /// constant fields of the incoming layout. Empty when the first field is
+    /// variable.
+    pub fn response_header(&self, struct_name: &str) -> Result<Vec<u8>, CodecError> {
+        let mut header = Vec::new();
+        self.encode_leading_constants(
+            self.layout_for_read(struct_name)?,
+            struct_name,
+            &mut header,
+        )?;
+        Ok(header)
+    }
+
     // ── Layout selection ──────────────────────────────────────────────────────
 
     fn layout_for_write(&self, struct_name: &str) -> Result<&[FieldOrRef], CodecError> {
@@ -238,6 +251,31 @@ impl<'a> Codec<'a> {
             }
         }
         Ok(())
+    }
+
+    /// Encodes constant fields into `buf` until the first variable one;
+    /// returns false once that has been reached.
+    fn encode_leading_constants(
+        &self,
+        fields: &[FieldOrRef],
+        struct_name: &str,
+        buf: &mut Vec<u8>,
+    ) -> Result<bool, CodecError> {
+        for item in fields {
+            match item {
+                FieldOrRef::Ref { struct_ref } => {
+                    let inner = self.layout_for_read(struct_ref)?;
+                    if !self.encode_leading_constants(inner, struct_ref, buf)? {
+                        return Ok(false);
+                    }
+                }
+                FieldOrRef::Field(def) if def.constant.is_some() => {
+                    self.encode_field(def, struct_name, &HashMap::new(), buf)?;
+                }
+                FieldOrRef::Field(_) => return Ok(false),
+            }
+        }
+        Ok(true)
     }
 
     fn encode_field(

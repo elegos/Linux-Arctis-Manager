@@ -86,6 +86,9 @@ structs:
 
 When `outgoing:` and `incoming:` are both present the struct is bidirectional: the engine serialises `outgoing` to send the request and deserialises `incoming` from the response.
 
+> [!IMPORTANT]
+> On `HID_IO`, the leading `constant` fields of `incoming:` are how the engine tells the reply apart from unsolicited reports: only a report starting with those bytes is decoded. Declare the echoed command byte whenever the device sends it. When it doesn't (Arctis Pro Wireless), declare only what is really there: with no leading constant, the next report is taken as the reply.
+
 ### Field types
 
 | Type | Size | Notes |
@@ -462,6 +465,10 @@ device:
     command_interface: {interface: 4, alternate: 0}
     # Interface on which the device pushes unsolicited events
     sync_interface: {interface: 4, usage_page: 0xFF00, usage: 0x0001}
+    # Optional (default false). The interface's descriptor has no Report ID:
+    # hidraw replies arrive without the leading report-id byte, so the engine
+    # adds a 0x00 back onto every read and structs keep `report_id` first.
+    unnumbered_reports: false
 
   firmware:
     tx_dsp: "0.3.82"
@@ -482,6 +489,12 @@ device:
   # allowlist of pure-HID accessories, so the device can be opened without a
   # USB audio interface.
   companion: false
+
+  # Optional (default false). The HID control endpoint is a separate, HID-only
+  # USB device whose audio is on a sibling device behind the same hub (Arctis
+  # Pro Wireless). Like companion devices, the variants' product_id are compiled
+  # into lam-hidraw-helper's allowlist.
+  split_control: false
 
   capabilities:
     - mic_volume

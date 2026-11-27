@@ -14,8 +14,9 @@ fn main() {
     write_accessory_pids();
 }
 
-/// Compiles the PIDs of every `companion` device config (pure-HID accessories
-/// of an audio product, such as the GameBuds charging case) into
+/// Compiles the PIDs of every `companion` (pure-HID accessories of an audio
+/// product, such as the GameBuds charging case) and `split_control` (HID
+/// control device whose audio is on a sibling USB device) device config into
 /// `AUDIO_ACCESSORY_PIDS`. The privileged helper does not read configs at
 /// runtime: the allowlist is fixed at build time from the shipped configs, so
 /// it cannot drift from them.
@@ -40,7 +41,7 @@ fn write_accessory_pids() {
         println!("cargo:rerun-if-changed={}", path.display());
         let cfg = device_config::load(&path, &[dir.as_path()])
             .unwrap_or_else(|e| panic!("{} failed to parse: {e}", path.display()));
-        let Some(device) = cfg.device.filter(|d| d.companion) else {
+        let Some(device) = cfg.device.filter(|d| d.companion || d.split_control) else {
             continue;
         };
         pids.extend(device.variants.iter().flatten().map(|v| v.product_id));
