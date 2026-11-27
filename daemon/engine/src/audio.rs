@@ -866,6 +866,15 @@ mod tests {
     }
 
     #[test]
+    fn pick_physical_sink_accepts_a_single_sink_without_channel_map() {
+        let sinks = serde_json::json!([{
+            "name": "arctis_a",
+            "properties": {"device.vendor.id": STEELSERIES_VID},
+        }]);
+        assert_eq!(pick_physical_sink(&sinks).as_deref(), Some("arctis_a"));
+    }
+
+    #[test]
     fn parse_sink_input_owners_json_skips_streams_without_module() {
         let json = r#"[
             {"index": 7, "owner_module": 536870917},

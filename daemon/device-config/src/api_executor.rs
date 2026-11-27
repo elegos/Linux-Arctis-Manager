@@ -80,6 +80,9 @@ pub struct WriteOp {
 #[derive(Debug)]
 pub struct ReadOp {
     pub request_bytes: Vec<u8>,
+    /// Leading bytes identifying the reply among unsolicited reports (HID_IO):
+    /// the incoming layout's leading constants. May be empty.
+    pub response_header: Vec<u8>,
     pub transport: Transport,
     /// Maximum response size; allocate at least this many bytes before reading.
     pub chunk_size: usize,
@@ -185,6 +188,7 @@ impl<'a> ApiExecutor<'a> {
         pad(&mut bytes, op.chunk_size as usize);
         Ok(ReadOp {
             request_bytes: bytes,
+            response_header: self.codec.response_header(api_name)?,
             transport: op.transport.clone(),
             chunk_size: op.chunk_size as usize,
         })
@@ -482,6 +486,53 @@ apis:
         assert_eq!(&op.request_bytes[..2], [0x06, 0xB7]);
         assert_eq!(op.transport, Transport::HidIo);
         assert_eq!(op.chunk_size, 4);
+    }
+
+    fn response_header_of(incoming: &str) -> Vec<u8> {
+        let c = cfg(&format!(
+            r#"
+structs:
+  s:
+    outgoing:
+      - {{name: report_id, type: uint8, constant: 0x06}}
+      - {{name: command,   type: uint8, constant: 0xB7}}
+    incoming:
+{incoming}
+apis:
+  s:
+    read: {{transport: HID_IO, chunk_size: 8}}
+"#
+        ));
+        ApiExecutor::new(&c)
+            .prepare_read("s")
+            .unwrap()
+            .response_header
+    }
+
+    #[test]
+    fn response_header_is_the_leading_incoming_constants() {
+        let header = response_header_of(
+            "      - {name: report_id, type: uint8, constant: 0x06}
+      - {name: command,   type: uint8, constant: 0xB7}
+      - {name: level,     type: uint8}
+      - {name: trailer,   type: uint8, constant: 0xFF}",
+        );
+        assert_eq!(header, [0x06, 0xB7], "stops at the first variable field");
+    }
+
+    #[test]
+    fn response_header_encodes_multi_byte_constants() {
+        let header = response_header_of(
+            "      - {name: magic, type: uint16, constant: 0x06B7}
+      - {name: level, type: uint8}",
+        );
+        assert_eq!(header, [0x06, 0xB7]);
+    }
+
+    #[test]
+    fn response_header_is_empty_without_leading_constants() {
+        let header = response_header_of("      - {name: level, type: uint8}");
+        assert!(header.is_empty());
     }
 
     #[test]

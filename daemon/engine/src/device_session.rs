@@ -351,17 +351,9 @@ impl DeviceSession {
                 // unsolicited device notifications.  Some devices (e.g. the
                 // Nova Pro Omni) put both on the same report ID, so matching
                 // on the ID alone can't tell a notification from the real
-                // reply — match on the ID *and* the echoed command byte
-                // (the first two bytes of the request we just sent) before
-                // returning the real response.
-                let no_echo = self
-                    .config
-                    .device
-                    .as_ref()
-                    .and_then(|d| d.hid.as_ref())
-                    .is_some_and(|h| h.no_command_echo);
-                let header_len = if no_echo { 1 } else { 2 };
-                let expected_header = &op.request_bytes[..op.request_bytes.len().min(header_len)];
+                // reply: match every leading constant the incoming struct
+                // declares (report ID and, where the device echoes it, the
+                // command byte).
                 let mut stray_events = Vec::new();
                 for _ in 0..8u8 {
                     let response = self
@@ -375,9 +367,7 @@ impl DeviceSession {
                                 "sync read timed out",
                             )),
                         })?;
-                    if expected_header.is_empty()
-                        || response.get(..expected_header.len()) == Some(expected_header)
-                    {
+                    if response.starts_with(&op.response_header) {
                         return Ok((response, stray_events));
                     }
                     // Wrong report ID/command — async notification buffered
@@ -580,6 +570,7 @@ fn u8_fields(pairs: &[(&str, u8)]) -> HashMap<String, FieldValue> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use device_config::sync_dispatcher::EventValue;
     use nix::sys::socket::{socketpair, AddressFamily, SockFlag, SockType};
 
     fn make_pair() -> (OwnedFd, OwnedFd) {
@@ -856,54 +847,66 @@ sync_read:
         assert_eq!(events[0].signal, "mic_volume_changed");
     }
 
-    /// Arctis Pro Wireless: on top of the missing report_id, the reply never
-    /// echoes the command byte (`0x12` -> `06 01 0c ...`, settings only).
-    /// With `no_command_echo: true` the reply is matched on the report-id
-    /// byte alone instead of being drained as a stray event.
+    /// Arctis Pro Wireless, shipped config and replies as framed on hardware:
+    /// no report_id and no echoed command byte (`0x12` -> `06 01 0c ...`),
+    /// and a battery level of 0-4 in the first byte of the `0x40` reply.
     #[tokio::test]
-    async fn run_sync_read_with_no_command_echo_accepts_reply_without_echo() {
-        let (engine_fd, peer_fd) = make_pair();
-        let config = cfg(r#"
-device:
-  hid:
-    unnumbered_reports: true
-    no_command_echo: true
-structs:
-  get_settings:
-    outgoing:
-      - {name: report_id,   type: uint8, constant: 0x00}
-      - {name: command,     type: uint8, constant: 0x12}
-      - {name: error_check, type: uint8, constant: 0xAA}
-    incoming:
-      - {name: report_id, type: uint8, constant: 0x00}
-      - {name: sidetone,  type: uint8}
-apis:
-  get_settings:
-    read: {transport: HID_IO, chunk_size: 8}
-sync_read:
-  - struct: get_settings
-    maps:
-      - {emit: sidetone_changed, field: sidetone}
-"#);
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        let task = tokio::spawn(async move {
-            let mut s = DeviceSession::new(config, engine_fd).expect("from_fd");
-            let _ = tx.send(s.run_sync_read().await);
-        });
+    async fn arctis_pro_wireless_sync_read_decodes_hardware_replies() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../device-configs");
+        let config =
+            device_config::load(&dir.join("arctis_pro_wireless.yaml"), &[dir.as_path()]).unwrap();
 
-        let mut peer = HidTransport::from_fd(peer_fd).expect("from_fd");
-        peer.read_interrupt(Duration::from_millis(500))
-            .await
-            .expect("engine should send read request");
-        // Real framing: no report_id, no echoed 0x12, sidetone first.
-        peer.write_interrupt(&[0x06u8, 0x01, 0x0c, 0, 0, 0, 0])
-            .await
-            .unwrap();
+        for (raw_level, percent) in [(0u8, 0u8), (1, 25), (2, 50), (3, 75), (4, 100)] {
+            let (engine_fd, peer_fd) = make_pair();
+            let session_config = config.clone();
+            let task = tokio::spawn(async move {
+                let mut s = DeviceSession::new(session_config, engine_fd).expect("from_fd");
+                s.run_sync_read().await
+            });
+            let mut peer = HidTransport::from_fd(peer_fd).expect("from_fd");
 
-        task.await.unwrap();
-        let events = rx.await.unwrap().unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].signal, "sidetone_changed");
+            let request = peer
+                .read_interrupt(Duration::from_millis(500))
+                .await
+                .expect("settings request");
+            assert_eq!(&request[..3], [0x00, 0x12, 0xAA]);
+            let mut settings = [0u8; 32];
+            settings[..20]
+                .copy_from_slice(&[6, 1, 12, 0, 2, 1, 10, 0, 0, 0, 0, 3, 1, 0, 0, 6, 6, 6, 6, 6]);
+            peer.write_interrupt(&settings).await.unwrap();
+
+            let request = peer
+                .read_interrupt(Duration::from_millis(500))
+                .await
+                .expect("battery request");
+            assert_eq!(&request[..3], [0x00, 0x40, 0xAA]);
+            let mut battery = [0u8; 32];
+            battery[0] = raw_level;
+            peer.write_interrupt(&battery).await.unwrap();
+
+            let events = task.await.unwrap().unwrap();
+            let value = |signal: &str, field: &str| {
+                events
+                    .iter()
+                    .find(|e| e.signal == signal)
+                    .unwrap_or_else(|| panic!("{signal} not emitted"))
+                    .fields[field]
+                    .clone()
+            };
+            let u8_value = |v| EventValue::Field(FieldValue::U8(v));
+            assert_eq!(value("sidetone_changed", "sidetone"), u8_value(6));
+            assert_eq!(value("off_time_changed", "off_time"), u8_value(12));
+            assert_eq!(
+                value("display_timeout_changed", "display_timeout"),
+                u8_value(3)
+            );
+            assert_eq!(value("custom_eq_changed", "band_8000"), u8_value(6));
+            assert_eq!(
+                value("battery_changed", "battery_level"),
+                u8_value(percent),
+                "raw level {raw_level}"
+            );
+        }
     }
 
     /// Regression test for the Nova Pro Omni init hang: a device that shares

@@ -1,3 +1,9 @@
+transforms:
+  battery_level_to_percent:
+    type: case_int_to_int
+    default: 0
+    values: {0: 0, 1: 25, 2: 50, 3: 75, 4: 100}
+
 structs:
   # Every struct here is `report_id=0x00` + a one-byte command + a constant
   # 0xAA "error-check" byte — this device's whole command shape, confirmed
@@ -101,24 +107,24 @@ structs:
 
   # From siberia-840 (shared base every Siberia 840-derived headset uses),
   # not redefined by this device — battery level as reported by the base
-  # station. No range given in the raw spec; assumed 0-100 percentage like
-  # every other battery reading in this project, not confirmed.
+  # station. The spec's `selector` is the leading report-id byte of its
+  # Windows framing (synthesized here by `unnumbered_reports`), so
+  # `battery_level` is the reply's first byte on the wire: 0-4, no range given
+  # in the raw spec (scale as read by HeadsetControl).
   battery_status:
     outgoing:
       - {name: report_id,   type: uint8, constant: 0x00}
       - {name: command,     type: uint8, constant: 0x40}
       - {name: error_check, type: uint8, constant: 0xAA}
     incoming:
-      - {name: report_id,     type: uint8, constant: 0x00}
       - {name: selector,      type: uint8}
-      - {name: battery_level, type: uint8, range: [0, 100]}
+      - {name: battery_level, type: uint8}
 
-  # Also from siberia-840, unmodified.
+  # `arctis-pro-wireless.device` overrides siberia-840's definition (0x05).
   save_to_flash:
-    - {name: report_id, type: uint8, constant: 0x00}
-    - {name: command,   type: uint8, constant: 0x05}
+    - {name: report_id,   type: uint8, constant: 0x00}
+    - {name: command,     type: uint8, constant: 0x09}
     - {name: error_check, type: uint8, constant: 0xAA}
-    - {name: profile,   type: uint8, constant: 0x00}
 
   # Combined settings snapshot, read once on connect. The raw spec's own
   # `translate_sync_data` also treats this exact shape as a live/pushed
@@ -206,7 +212,7 @@ sync_read:
         fields: [band_100, band_300, band_900, band_2500, band_8000]
   - struct: battery_status
     maps:
-      - {emit: battery_changed, field: battery_level, display_type: percentage, role: battery_headset}
+      - {emit: battery_changed, field: battery_level, transform: battery_level_to_percent, display_type: percentage, role: battery_headset}
 
 lifecycle:
   init:

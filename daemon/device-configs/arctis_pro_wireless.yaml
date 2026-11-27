@@ -3,6 +3,9 @@ extends: base_arctis_pro_wireless
 device:
   name: "SteelSeries Arctis Pro Wireless"
   vendor_id: 0x1038
+  # The base station enumerates as two USB devices behind an internal hub:
+  # 1290 (HID only, driven here) and 1294 (USB audio).
+  split_control: true
 
   variants:
     - product_id: 0x1290
@@ -14,10 +17,9 @@ device:
   hid:
     usage_page: 0xff00
     usage: 0x0001
-    # Verified on hardware: replies carry no report-id byte and do not echo
-    # the command (0x12 -> `06 01 0c 00 02 01 0a ...`, 0x40 -> `01 00 ...`).
+    # Verified on hardware: replies carry no report-id byte (nor do they echo
+    # the command): 0x12 -> `06 01 0c 00 02 01 0a ...`, 0x40 -> `01 00 ...`.
     unnumbered_reports: true
-    no_command_echo: true
     command_interface:
       interface: 0
     sync_interface:

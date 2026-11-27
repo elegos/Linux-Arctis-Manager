@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Arctis Pro Wireless now connects: the HID access helper accepts its HID-only control device (1038:1290, whose audio is on the sibling device 1038:1294), the daemon reads its settings and battery, and audio goes to the stereo game output instead of the mono chat one.
+- Arctis Pro Wireless now connects: the HID access helper accepts its HID-only control device (1038:1290, whose audio is on the sibling device 1038:1294), the daemon reads its settings and battery and saves settings to the base station on shutdown, and audio goes to the stereo game output instead of the mono chat one.
 
 ## [3.0.0-beta5]
 
