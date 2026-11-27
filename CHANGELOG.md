@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `make desktop-test` runs the launcher shortcut, the legacy tray icon, the Plasma widget, the GNOME extension and the main window on containerised Cinnamon, KDE Plasma and GNOME in light, dark and mixed themes, and opens a screenshot comparison report.
 
+### Added
+
+- `scripts/doctor.sh`: a read-only health check that tells you why your headset isn't working (not installed, helper missing its capability, services down, missing ChatMix sinks, leftovers from v1/v2, unsupported device) and prints the fix for each problem.
+- `AGENTS.md`: a guide for coding agents (Claude Code, Codex, ...) helping someone set up their headset or contributing to the project.
+
 ### Fixed
 
 - Dark icons on dark themes across desktop environments, Cinnamon in particular:
