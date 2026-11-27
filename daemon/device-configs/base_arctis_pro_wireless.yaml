@@ -132,9 +132,9 @@ structs:
   # resending unchanged values — but never states which report/command ID
   # identifies that pushed message (unlike every `sync_events:`-keyed
   # device this project already ships), so that live-push path isn't
-  # wired here. Settings only refresh at connect time via `sync_read:`
-  # below; a change made from the base station's own OLED menu won't
-  # reach this daemon until the next reconnect. Documented gap, not a
+  # wired here. Settings refresh at connect time and then with the engine's
+  # periodic `sync_read:` poll (every 10 s), so a change made from the base
+  # station's own OLED menu shows up with that delay. Documented gap, not a
   # silent omission.
   get_settings:
     outgoing:
