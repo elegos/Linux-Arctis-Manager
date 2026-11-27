@@ -400,6 +400,11 @@ pub struct HidConfig {
     /// [[project-v3-device-import]] (Nova 7 Gen2) for how this was found.
     #[serde(default)]
     pub unnumbered_reports: bool,
+    /// Replies to HID_IO reads do not echo the request's command byte (e.g.
+    /// Arctis Pro Wireless: `0x12` -> `06 01 0c ...`, raw settings only).
+    /// Response matching then checks the report-id byte alone.
+    #[serde(default)]
+    pub no_command_echo: bool,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]

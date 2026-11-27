@@ -462,6 +462,14 @@ device:
     command_interface: {interface: 4, alternate: 0}
     # Interface on which the device pushes unsolicited events
     sync_interface: {interface: 4, usage_page: 0xFF00, usage: 0x0001}
+    # Optional (default false). The interface's descriptor has no Report ID:
+    # hidraw replies arrive without the leading report-id byte, so the engine
+    # adds a 0x00 back onto every read and structs keep `report_id` first.
+    unnumbered_reports: false
+    # Optional (default false). Replies to HID_IO reads do not echo the
+    # request's command byte (Arctis Pro Wireless). Responses are then matched
+    # on the report-id byte alone instead of report id + command.
+    no_command_echo: false
 
   firmware:
     tx_dsp: "0.3.82"

@@ -209,8 +209,13 @@ pub fn is_audio_accessory(hid_dev: &Path) -> std::io::Result<bool> {
     let raw = std::fs::read_to_string(usb_dev.join("idProduct"))?;
     let pid = u16::from_str_radix(raw.trim().trim_start_matches("0x"), 16)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    Ok(AUDIO_ACCESSORY_PIDS.contains(&pid))
+    Ok(AUDIO_ACCESSORY_PIDS.contains(&pid) || SPLIT_CONTROL_PIDS.contains(&pid))
 }
+
+// Headsets whose base station exposes its HID control endpoint as a separate,
+// HID-only USB device next to the audio device behind an internal hub, e.g.
+// Arctis Pro Wireless: 1038:1290 (HID control) + 1038:1294 (USB audio).
+const SPLIT_CONTROL_PIDS: &[u16] = &[0x1290];
 
 fn open_hidraw(path: &Path) -> std::io::Result<std::fs::File> {
     std::fs::OpenOptions::new()
@@ -397,6 +402,17 @@ mod tests {
     #[test]
     fn accessory_pids_come_from_companion_configs() {
         assert_eq!(AUDIO_ACCESSORY_PIDS, &[0x230C, 0x231A]);
+    }
+
+    #[test]
+    fn arctis_pro_wireless_control_device_is_an_audio_accessory() {
+        // 1038:1290 is HID-only; its audio is on the sibling USB device 1294.
+        let dir = TempDir::new().unwrap();
+        fake_sysfs_keyboard(&dir, "hidraw0", 0x1038);
+        std::fs::write(dir.path().join("usb_dev/idProduct"), "1290\n").unwrap();
+        let hid_fn = dir.path().join("usb_dev/hid_iface/hid_fn");
+        assert!(!has_audio_interface(&hid_fn).unwrap());
+        assert!(is_audio_accessory(&hid_fn).unwrap());
     }
 
     #[test]

@@ -354,7 +354,14 @@ impl DeviceSession {
                 // reply — match on the ID *and* the echoed command byte
                 // (the first two bytes of the request we just sent) before
                 // returning the real response.
-                let expected_header = &op.request_bytes[..op.request_bytes.len().min(2)];
+                let no_echo = self
+                    .config
+                    .device
+                    .as_ref()
+                    .and_then(|d| d.hid.as_ref())
+                    .is_some_and(|h| h.no_command_echo);
+                let header_len = if no_echo { 1 } else { 2 };
+                let expected_header = &op.request_bytes[..op.request_bytes.len().min(header_len)];
                 let mut stray_events = Vec::new();
                 for _ in 0..8u8 {
                     let response = self
@@ -847,6 +854,56 @@ sync_read:
         let events = rx.await.unwrap().unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].signal, "mic_volume_changed");
+    }
+
+    /// Arctis Pro Wireless: on top of the missing report_id, the reply never
+    /// echoes the command byte (`0x12` -> `06 01 0c ...`, settings only).
+    /// With `no_command_echo: true` the reply is matched on the report-id
+    /// byte alone instead of being drained as a stray event.
+    #[tokio::test]
+    async fn run_sync_read_with_no_command_echo_accepts_reply_without_echo() {
+        let (engine_fd, peer_fd) = make_pair();
+        let config = cfg(r#"
+device:
+  hid:
+    unnumbered_reports: true
+    no_command_echo: true
+structs:
+  get_settings:
+    outgoing:
+      - {name: report_id,   type: uint8, constant: 0x00}
+      - {name: command,     type: uint8, constant: 0x12}
+      - {name: error_check, type: uint8, constant: 0xAA}
+    incoming:
+      - {name: report_id, type: uint8, constant: 0x00}
+      - {name: sidetone,  type: uint8}
+apis:
+  get_settings:
+    read: {transport: HID_IO, chunk_size: 8}
+sync_read:
+  - struct: get_settings
+    maps:
+      - {emit: sidetone_changed, field: sidetone}
+"#);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let mut s = DeviceSession::new(config, engine_fd).expect("from_fd");
+            let _ = tx.send(s.run_sync_read().await);
+        });
+
+        let mut peer = HidTransport::from_fd(peer_fd).expect("from_fd");
+        peer.read_interrupt(Duration::from_millis(500))
+            .await
+            .expect("engine should send read request");
+        // Real framing: no report_id, no echoed 0x12, sidetone first.
+        peer.write_interrupt(&[0x06u8, 0x01, 0x0c, 0, 0, 0, 0])
+            .await
+            .unwrap();
+
+        task.await.unwrap();
+        let events = rx.await.unwrap().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].signal, "sidetone_changed");
     }
 
     /// Regression test for the Nova Pro Omni init hang: a device that shares

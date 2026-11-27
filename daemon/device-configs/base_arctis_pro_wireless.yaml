@@ -109,6 +109,7 @@ structs:
       - {name: command,     type: uint8, constant: 0x40}
       - {name: error_check, type: uint8, constant: 0xAA}
     incoming:
+      - {name: report_id,     type: uint8, constant: 0x00}
       - {name: selector,      type: uint8}
       - {name: battery_level, type: uint8, range: [0, 100]}
 
